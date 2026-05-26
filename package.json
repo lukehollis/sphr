@@ -29,6 +29,7 @@
     "three-custom-shader-material": "^5.4.0",
     "three-good-godrays": "^0.168.0",
     "webpack-merge": "^5.7.3"
+    "postprocessing": "^6.33.4"
   },
   "browserslist": {
     "production": [
