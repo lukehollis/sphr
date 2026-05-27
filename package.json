@@ -4,7 +4,7 @@
   "repository": "ss",
   "license": "MIT",
   "scripts": {
-    "build": "webpack --config ./webpack/webpack.prod.js",
+    "build": "npm install --legacy-peer-deps && webpack --config ./webpack/webpack.prod.js",
     "start": "webpack serve --config ./webpack/webpack.dev.js"
   },
   "dependencies": {
