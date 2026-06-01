@@ -1,6 +1,6 @@
-import Photograph from '../photograph';
+import Photograph from '../Photograph';
 import EarthTiles from '../EarthTiles';
-import Birds from '../birds';
+import Birds from '../Birds';
 import TourSceneCustom from './TourSceneCustom';
 // global state
 import Store from '../../Store';
