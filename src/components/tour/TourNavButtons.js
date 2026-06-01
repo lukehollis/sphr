@@ -1,6 +1,5 @@
-import * as THREE from 'three';
-
 import Photograph from '../Photograph';
+import Birds from '../Birds';
 import EarthTiles from '../EarthTiles';
 import Birds from '../Birds';
 import TourSceneCustom from './TourSceneCustom';
