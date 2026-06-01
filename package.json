@@ -43,7 +43,7 @@
       "last 1 safari version"
     ]
   },
-  "devDependencies": {
+ "devDependencies": {
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "@tailwindcss/forms": "^0.5.3",
     "@tailwindcss/line-clamp": "^0.4.4",
@@ -59,8 +59,8 @@
     "webpack-bundle-tracker": "^3.0.1",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^4.15.1"
-  }
-"overrides": {
+  },
+  "overrides": {
     "three": "^0.155.0",
     "postprocessing": {
       "three": "^0.155.0"
@@ -73,4 +73,5 @@
         "three": "^0.155.0"
       }
     }
-  } }
+  }
+}
