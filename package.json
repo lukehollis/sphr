@@ -4,7 +4,7 @@
   "repository": "ss",
   "license": "MIT",
   "scripts": {
-    "build": "npm install --legacy-peer-deps && webpack --config ./webpack/webpack.prod.js",
+    "build": "webpack --config ./webpack/webpack.prod.js",
     "start": "webpack serve --config ./webpack/webpack.dev.js"
   },
   "dependencies": {
@@ -28,7 +28,7 @@
     "three": "^0.168.0",
     "three-custom-shader-material": "^5.4.0",
     "three-good-godrays": "^0.11.2",
-    "webpack-merge": "^5.7.3"
+    "webpack-merge": "^5.7.3",
     "postprocessing": "^6.33.4"
   },
   "browserslist": {
@@ -43,7 +43,7 @@
       "last 1 safari version"
     ]
   },
- "devDependencies": {
+  "devDependencies": {
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "@tailwindcss/forms": "^0.5.3",
     "@tailwindcss/line-clamp": "^0.4.4",
@@ -61,16 +61,16 @@
     "webpack-dev-server": "^4.15.1"
   },
   "overrides": {
-    "three": "^0.155.0",
+    "three": "^0.168.0",
     "postprocessing": {
-      "three": "^0.155.0"
+      "three": "^0.168.0"
     }
   },
   "pnpm": {
     "overrides": {
-      "three": "^0.155.0",
+      "three": "^0.168.0",
       "postprocessing": {
-        "three": "^0.155.0"
+        "three": "^0.168.0"
       }
     }
   }
