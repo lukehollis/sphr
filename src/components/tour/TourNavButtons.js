@@ -1,6 +1,4 @@
-// import Photograph from '../photograph';  // Comentado porque no existe
-// import EarthTiles from '../EarthTiles';
-// import Birds from '../birds';            // Comentado porque no existe
+
 import TourSceneCustom from './TourSceneCustom';
 
 // global state
