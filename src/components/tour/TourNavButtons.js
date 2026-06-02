@@ -1,6 +1,5 @@
-import Photograph from '../photograph.jsx';
-import Birds from '../birds.jsx';
-import Birds from '../birds';
+import Photograph from '../Photograph';
+import Birds from '../Birds';
 import TourSceneCustom from './TourSceneCustom';
 // global state
 import Store from '../../Store';
