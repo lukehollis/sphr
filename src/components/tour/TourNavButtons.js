@@ -264,7 +264,7 @@ export default class TourNavButtons {
     }
   
     /**
-     *  photographs 
+   /  *  photographs 
      */
 
     // handle the photographs/medi
@@ -279,7 +279,7 @@ export default class TourNavButtons {
 
     /**
      *  Update annotation overlays for tour points
-     */
+     *//
 
     // Assuming outgoingTourPoint.annotations and newTourPoint.annotations are arrays of annotation IDs
     const outgoingAnnotations = outgoingTourPoint.annotations || [];
