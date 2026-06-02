@@ -1,5 +1,5 @@
-import Photograph from '../photograph';
-import EarthTiles from '../EarthTiles';
+import Photograph from '../photograph.jsx';
+import Birds from '../birds.jsx';
 import Birds from '../birds';
 import TourSceneCustom from './TourSceneCustom';
 // global state
