@@ -1,0 +1,211 @@
+{
+  "settings": {
+    "slug": "learning-about-gausssian-splats",
+    "title": "Learning about Gaussian Splats | Garden Scene",
+    "language": "en",
+    "loadingImage": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+    "signup_message": "",
+    "background_video": null,
+    "last_button_link": "",
+    "last_button_text": "",
+    "enter_button_text": "Enter",
+    "intro_background_video": "",
+    "signup_email_placeholder": "",
+    "intro_background_video_poster": ""
+  },
+  "tourmodels": [
+    {
+      "id": "garden",
+      "slug": "garden",
+      "title": "Garden Scene",
+      "thumbnail": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+      "tourpoints": [
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "It's still hard to capture and display full real-world environments in a web browser. ",
+          "secondaryText": "",
+          "position": {
+            "x": 4,
+            "y": 1.5,
+            "z": 4
+          },
+          "rotation": {
+            "azimuth": 32.3,
+            "polar": -9.94
+          },
+          "zoom": 0,
+          "textPosition": "center"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "Previously, you needed to display a 360 image or 3d model and background environment art. \nThese methods limited movement or required large filesizes.",
+          "secondaryText": "",
+          "position": {
+            "x": 2.3,
+            "y": 1.4,
+            "z": 2.4
+          },
+          "rotation": {
+            "azimuth": 33.03,
+            "polar": -6.89
+          },
+          "zoom": 0,
+          "textPosition": "right"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "In recent years, researchers have made advances rendering full scenes with radiance fields, but these were still slow to use in your browser. ",
+          "secondaryText": "",
+          "position": {
+            "x": -2.567,
+            "y": 1.5,
+            "z": 2.63
+          },
+          "rotation": {
+            "azimuth": -53.8,
+            "polar": -12.76
+          },
+          "zoom": 0,
+          "textPosition": "right"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "A new method called 3D Gaussian Splatting uses a strategy of rendering points as <a class='underline hover:no-underline' href='https://en.wikipedia.org/wiki/Gaussian_function#Two-dimensional_Gaussian_function'>3D gaussians</a> to reach realtime display rates of full scenes like this one. ",
+          "secondaryText": "Created by Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. <br> <a href='https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/' class='underline hover:no-underline pointer-events-auto'>Research Paper</a> <a href='https://github.com/graphdeco-inria/gaussian-splatting'  class='underline hover:no-underline pointer-events-auto'>Code</a>",
+          "position": {
+            "x": -2.61,
+            "y": 1.5, 
+            "z": -1.2
+          },
+          "rotation": {
+            "azimuth": 270,
+            "polar": 0
+          },
+          "zoom": 0,
+          "textPosition": "left"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "First the scene is represented in points using structure-from-motion from input images. Then, each point is represented as 3d Gaussians.\n Imagine you had clay in your hand and squished it so that it bluged up in the top and bottom. That's a little like a Gaussian function represented in 3d.",
+          "secondaryText": "",
+          "position": {
+            "x": -0.81,
+            "y": 1.5, 
+            "z": -2.4
+          },
+          "rotation": {
+            "azimuth": -154.74,
+            "polar": -10.6
+          },
+          "zoom": 0,
+          "textPosition": "left",
+          "extra": "shrinkToPoints"
+
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "Now imagine that you took a 2d slice of our ball of clay, right in the middle of it where it was the thickest. These slices are called 'splats'.\n The 3d Gaussians are projected to 2D splats that form the full scene together that you see here.\n ",
+          "secondaryText": "",
+          "position": {
+            "x": -0.81,
+            "y": 1.5, 
+            "z": -2.4
+          },
+          "rotation": {
+            "azimuth": -154.74,
+            "polar": -10.6
+          },
+          "zoom": 0,
+          "textPosition": "left",
+          "extra": "projectToSplats"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "This garden, for instance, has been re-used in many studies and was captured in <a class='underline hover:no-underline' href='https://jonbarron.info/mipnerf360/'>mipnerf360</a> with 185 photos. \nThe plants are just beginning to sprout. Try touching the grass.",
+          "secondaryText": "",
+          "position": {
+            "x": 2.37,
+            "y": 1.5, 
+            "z": -6.18
+          },
+          "rotation": {
+            "azimuth": 170.7,
+            "polar": -8.6
+          },
+          "zoom": 0,
+          "textPosition": "left"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "The spaces that are rendered in this method can be changed in realtime to add interactivity and other effects. ",
+          "secondaryText": "",
+          "position": {
+            "x": 3.96,
+            "y": 1.5, 
+            "z": -4.63
+          },
+          "rotation": {
+            "azimuth": 146.26,
+            "polar": -2.62
+          },
+          "zoom": 0,
+          "textPosition": "left",
+          "extra": "nightMode"
+        },
+        {
+          "viewMode": "FPV",
+          "files": [],
+          "overlays": [],
+          "targetType": "FREE",
+          "models": [],
+          "text": "Researchers are continuing to explore how to use these methods and improve them. Check out these projects to learn more:\nUnity: <a href='https://github.com/aras-p/UnityGaussianSplatting' class='underline hover:no-underline pointer-events-auto'>aras-p/UnityGaussianSplatting</a><br> Unreal: <a href='https://github.com/Akiya-Research-Institute/3dGaussiansPlugin-Manual' class='underline hover:no-underline pointer-events-auto'>Akiya-Research-Institute/3dGaussiansPlugin-Manual</a><br> WebGL: <a href='https://github.com/antimatter15/splat' class='underline hover:no-underline pointer-events-auto'>antimatter/splat</a><br> WebGPU: <a href='https://github.com/cvlab-epfl/gaussian-splatting-web' class='underline hover:no-underline pointer-events-auto'>cvlab-epfl/gaussian-splatting-web</a><br> Threejs: <a href='https://github.com/mkkellogg/GaussianSplats3D' class='underline hover:no-underline pointer-events-auto'>mkkellogg/GaussianSplats3D</a>",
+          "secondaryText": "Many thanks to <a href='https://github.com/mkkellogg' class='underline hover:no-underline pointer-events-auto'>@mkkellogg</a> and <a href='https://github.com/bastianlstrube' class='underline hover:no-underline pointer-events-auto'>@bastianlstrube</a>, whose implementations I used to build this tour.",
+          "position": {
+            "x": 5.35,
+            "y": 1.5, 
+            "z": -2.19
+          },
+          "rotation": {
+            "azimuth": 120,
+            "polar": 0
+          },
+          "zoom": 0,
+          "textPosition": "left"
+
+        } 
+      ]
+    }
+  ]
+}

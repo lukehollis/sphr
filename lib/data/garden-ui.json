@@ -1,0 +1,12 @@
+{
+    "titlePart1": "Learn about",
+    "titlePart2": "3D Gaussian Splatting",
+    "subtitle": "Explore a new method of visualizing spaces and objects with real-time radiance field rendering",
+    "loadingImage": "/demo/garden_scene_splats_tour.jpg",
+    "enterButtonText": "Start",
+    "exploreButtonText": "Free Explore",
+    "loadingText": "Loading", 
+    "nextButtonText": "Next",
+    "previousButtonText": "Previous",
+    "continueExploringButtonText": "Continue Exploring"
+}

@@ -1,0 +1,54 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(sphr-project)",
+      "Skill(sphr-3dgs)",
+      "Skill(sphr-360)",
+      "Skill(sphr-iiif)",
+      "Skill(sphr-tour)",
+      "Skill(sphr-vfx)",
+      "Skill(sphr-verify)",
+      "Skill(sphr-matterport)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(du:*)",
+      "Bash(wc:*)",
+      "Bash(unzip:*)",
+      "Bash(node .claude/scripts/**:*)",
+      "Bash(node .claude/scripts/matterport/**:*)",
+      "Bash(python3 ../data/pipelines/matterport_e57_to_sphr.py:*)",
+      "Bash(python3 -m pip install pye57 open3d trimesh numpy:*)",
+      "Bash(node scripts/convert-legacy-splat.mjs:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run build:*)",
+      "Bash(lsof:*)",
+      "Bash(mkdir:*)",
+      "Bash(cd:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-check.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/input-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

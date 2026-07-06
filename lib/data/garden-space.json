@@ -1,0 +1,77 @@
+{
+  "title": "Example Garden Scene",
+  "dollhouse": "https://static.mused.org/gardenvase_small5.glb",
+  "loadingImage": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+  "loadingTotal": 1,
+  "initialNavPoint": null,
+  "initialPosition": {
+    "x": 4,
+    "y": 1.5,
+    "z": 4
+  },
+  "initialRotation": {
+    "azimuth": 0,
+    "polar": 90
+  },
+  "noPanos": true,
+  "clickNavigation": {
+    "enabled": true,
+    "type": "mesh-floor",
+    "yOffset": 1.8,
+    "maxHitY": 0
+  },
+  "skybox": {
+    "id": "garden-skybox",
+    "type": "equirectangular",
+    "day": "/demo/skybox/resting_place_2k.jpg",
+    "night": "/demo/skybox/kloppenheim_02_2k.jpg",
+    "radius": 500,
+    "tint": [0.5, 0.5, 0.5],
+    "backgroundColor": "#222222",
+    "opacity": 1,
+    "initialOpacity": 0,
+    "fadeInMs": 600,
+    "fadeOutMs": 600,
+    "dayRotation": [0, 1.5707963267948966, 0],
+    "nightRotation": [0, 0, 0]
+  },
+  "sceneSettings": {
+    "offsetPosition": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "offsetRotation": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "model": {
+      "scale": 4,
+      "offsetPosition": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "offsetRotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    "navPoints": {
+      "scale": 1,
+      "offsetPosition": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "offsetRotation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    }
+  },
+  "navPoints": []
+}
