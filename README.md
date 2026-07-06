@@ -12,6 +12,12 @@ SPHR is a hackable web runtime for spatial tours, digital twins, and browser-nat
 
 This branch is the Next.js + Three.js migration. It removes the old separate backend requirement and ships as a client-rendered viewer that can load a default demo, a remote JSON config, or embedded bootstrap data from a host page.
 
+
+
+https://github.com/user-attachments/assets/169c7729-e4d7-4889-99d2-42d81e33a6d8
+
+
+
 ## 3D Gaussian Splatting  
 
 The reworked SPHR is centered on 3D Gaussian Splatting. The runtime can load splat assets or 360 images, etc directly in the browser, place them in a Three.js scene, animate camera movement through the capture, and layer guided tour text, UI controls, skyboxes, annotations, models, and effects over the scene.
