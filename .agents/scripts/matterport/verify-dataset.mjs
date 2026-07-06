@@ -178,7 +178,7 @@ async function validateCubePoleSeams(nodes, failures) {
 }
 
 function validateCubePoleSeamsWithPython(firstNode, failures, importError) {
-  const script = path.join(root, ".claude", "scripts", "matterport", "verify-cube-seams.py");
+  const script = path.join(root, ".agents", "scripts", "matterport", "verify-cube-seams.py");
   const repoVenvPython = path.join(root, "..", ".venv-matterport", "bin", "python");
   const python = process.env.SPHR_MATTERPORT_PYTHON || (existsSync(repoVenvPython) ? repoVenvPython : "python3");
   const result = spawnSync(python, [script, ...firstNode.faces.map((face) => publicFile(face))], {
@@ -230,6 +230,17 @@ async function validatePackage(configPath) {
   if (manifest.nodeCount !== nodes.length) failures.push(`Manifest nodeCount ${manifest.nodeCount} does not match bootstrap nodes ${nodes.length}`);
   if (tourpoints.length < nodes.length) failures.push(`Expected at least one tourpoint per node, got ${tourpoints.length} for ${nodes.length} nodes`);
   if (!meshModel) failures.push("Missing model entry in tour.tour_data.sceneGraph");
+  if (meshModel) {
+    if (meshModel.transitionMesh !== true) failures.push("Matterport mesh must be marked transitionMesh=true");
+    if (meshModel.transitionTexture !== "cube-render-target") failures.push('Matterport mesh transitionTexture must be "cube-render-target"');
+    if (meshModel.fpvOpacity !== 0) failures.push(`Matterport mesh fpvOpacity must be 0 at rest, got ${meshModel.fpvOpacity}`);
+    if (meshModel.raycast !== true) failures.push("Matterport mesh must be raycast=true for cursor/floor QA");
+  }
+  const transitionConfig = bootstrap.space?.space_data?.navigationTransition;
+  if (transitionConfig?.enabled !== true) failures.push("Missing enabled space_data.navigationTransition");
+  if (!transitionConfig?.meshIds?.includes?.("matterport-mesh")) {
+    failures.push('space_data.navigationTransition.meshIds must include "matterport-mesh"');
+  }
 
   let faceCount = 0;
   for (const node of nodes) {
@@ -386,6 +397,26 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
           .map((entry) => entry.name)
       );
       await page.mouse.click(resolvedMarkerClick.x, resolvedMarkerClick.y);
+      let transitionSnapshot = null;
+      try {
+        await page.waitForFunction(
+          () => {
+            const snapshot = window.__SPHR_RUNTIME__?.getDebugSnapshot?.();
+            return (
+              snapshot?.navigationTransition?.isNavigating === true &&
+              snapshot?.navigationTransition?.hasCubeCamera === true &&
+              snapshot?.navigationTransition?.cubeRenderTargetSize > 0 &&
+              (snapshot?.sceneGraph?.transition?.activeIds || []).includes("matterport-mesh") &&
+              snapshot?.sceneGraph?.transition?.opacity > 0
+            );
+          },
+          null,
+          { timeout: 5000 }
+        );
+        transitionSnapshot = await page.evaluate(() => window.__SPHR_RUNTIME__?.getDebugSnapshot?.()?.navigationTransition);
+      } catch (error) {
+        overlayFailures.push(`Marker click did not enter cube-render-target mesh transition: ${error.message}`);
+      }
       await page.waitForFunction(
         (before) => {
           const previousResources = new Set(before);
@@ -394,6 +425,17 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
             .some((entry) => /scan-(?!000)\d+\/face[0-5]\.jpg/i.test(entry.name) && !previousResources.has(entry.name));
         },
         beforeMarkerClick,
+        { timeout: 120000 }
+      );
+      await page.waitForFunction(
+        () => {
+          const snapshot = window.__SPHR_RUNTIME__?.getDebugSnapshot?.();
+          return (
+            snapshot?.navigationTransition?.isNavigating === false &&
+            (snapshot?.sceneGraph?.transition?.activeIds || []).length === 0
+          );
+        },
+        null,
         { timeout: 120000 }
       );
       await page.waitForTimeout(1000);
@@ -406,6 +448,7 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
       );
       markerClickResult = {
         click: resolvedMarkerClick,
+        transition: transitionSnapshot,
         newFaceResources: afterMarkerClick.filter((entry) => !beforeMarkerClick.includes(entry)),
       };
 

@@ -2,7 +2,7 @@
 name: sphr-matterport
 description: Convert and verify Matterport E57 exports for SPHR, including aligned 360 cube-face scan nodes, reduced 50k GLB meshes, data-only bootstrap/manifest packages, and browser navigation checks. Use when working with Matterport E57 or zip exports, Matterport scan alignment, SPHR Matterport data packages, mesh repair, or Matterport-like click/next panorama navigation.
 argument-hint: [e57 path/slug/title or dataset slug]
-allowed-tools: Read Write Glob Bash(ls *) Bash(find *) Bash(rg *) Bash(unzip *) Bash(du *) Bash(wc *) Bash(python3 ../data/pipelines/matterport_e57_to_sphr.py *) Bash(node .claude/scripts/matterport/e57-to-sphr.mjs *) Bash(node .claude/scripts/matterport/verify-dataset.mjs *) Bash(node .claude/scripts/project/validate-bootstrap.mjs *) Bash(node .claude/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(find *) Bash(rg *) Bash(unzip *) Bash(du *) Bash(wc *) Bash(python3 ../data/pipelines/matterport_e57_to_sphr.py *) Bash(node .agents/scripts/matterport/e57-to-sphr.mjs *) Bash(node .agents/scripts/matterport/verify-dataset.mjs *) Bash(node .agents/scripts/project/validate-bootstrap.mjs *) Bash(node .agents/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
 agent: sphr-matterport
 ---
 
@@ -53,7 +53,7 @@ If using an existing Python environment, set `SPHR_MATTERPORT_PYTHON=/path/to/py
 Run the reusable pipeline through the wrapper from `sphr-next`. Paths passed to the wrapper are resolved from the repo root:
 
 ```bash
-node .claude/scripts/matterport/e57-to-sphr.mjs \
+node .agents/scripts/matterport/e57-to-sphr.mjs \
   --e57 data/processed/<slug>/source/<slug>.e57 \
   --slug <slug> \
   --title "<Title>" \
@@ -77,14 +77,14 @@ The converter writes node rotations for the production SPHR `EnvCube` convention
 After conversion, run:
 
 ```bash
-node .claude/scripts/project/validate-bootstrap.mjs public/datasets/matterport/<slug>/bootstrap.json
-node .claude/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --screenshots
+node .agents/scripts/project/validate-bootstrap.mjs public/datasets/matterport/<slug>/bootstrap.json
+node .agents/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --screenshots
 ```
 
 When a visible floor marker is available, also run marker-click QA. Prefer automatic marker projection; use manual coordinates only if auto projection cannot find a visible non-active marker:
 
 ```bash
-node .claude/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --screenshots --marker-click auto
+node .agents/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --screenshots --marker-click auto
 ```
 
 Expected package properties:
@@ -93,11 +93,13 @@ Expected package properties:
 - Face count equals `nodeCount * 6`.
 - Matterport skybox face `0` maps to SPHR top face `0`, and Matterport skybox face `5` maps to SPHR bottom face `5`.
 - Matterport top face `0` must be rotated 90 degrees counter-clockwise for SPHR, and Matterport bottom face `5` must be rotated 270 degrees counter-clockwise. The manifest must include `imageManifest.faceTransforms`.
-- Pole seams must pass `.claude/scripts/matterport/verify-dataset.mjs`; do not accept screenshots alone for top/bottom cube-face orientation.
+- Pole seams must pass `.agents/scripts/matterport/verify-dataset.mjs`; do not accept screenshots alone for top/bottom cube-face orientation.
 - Runtime rotation reconstructs the E57 scan orientation after `three = [e57.x, e57.z, -e57.y]` and the production cube basis.
 - `space.type` is `spaces`.
 - Each node has six cube faces, a 3D position, a floor marker position, and Matterport source metadata.
 - `tour.tour_data.sceneGraph` includes the reduced GLB model.
+- The reduced GLB is hidden in FPV at rest with `fpvOpacity: 0`, remains raycastable, and is marked `transitionMesh: true` with `transitionTexture: "cube-render-target"`.
+- `space_data.navigationTransition.meshIds` includes the reduced GLB so node-to-node navigation can capture the outgoing panorama with `CubeCamera`, map it onto the mesh, fade it, and restore default materials.
 - Mesh manifest reports about 50k triangles.
 
 ## Browser Quality Gate
@@ -108,7 +110,7 @@ A Matterport import is not done until browser verification shows:
 - Starting renders the panorama and GLB without failed resources.
 - Tour controls are visible and do not overlap.
 - Node-to-node navigation works by moving from the first tourpoint to the next and loading the next scan faces.
-- In-scene marker clicking works when `--marker-click` is supplied and loads a non-initial scan's cube faces.
+- In-scene marker clicking works when `--marker-click` is supplied, loads a non-initial scan's cube faces, and enters the cube-render-target mesh transition state.
 - Screenshots exist for initial and post-navigation states when `--screenshots` is requested.
 
 Final response should report source export, dataset URL, node/face counts, mesh triangle count, and the browser URL.

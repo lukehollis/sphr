@@ -19,7 +19,7 @@ if (!existsSync(pipeline)) {
 const args = process.argv.slice(2);
 if (!args.length || args.includes("--help") || args.includes("-h")) {
   console.log(`Usage:
-  node .claude/scripts/matterport/e57-to-sphr.mjs --e57 data/processed/<slug>/source/<slug>.e57 --slug <slug> --title "<Title>" [pipeline args]
+  node .agents/scripts/matterport/e57-to-sphr.mjs --e57 data/processed/<slug>/source/<slug>.e57 --slug <slug> --title "<Title>" [pipeline args]
 
 Notes:
   - Run this from sphr-next.
@@ -51,7 +51,7 @@ Install them in an isolated environment, then rerun:
   ../.venv-matterport/bin/python -m pip install -r ../data/pipelines/requirements-matterport.txt
 
 Or point the wrapper at an existing environment:
-  SPHR_MATTERPORT_PYTHON=/path/to/python node .claude/scripts/matterport/e57-to-sphr.mjs ...
+  SPHR_MATTERPORT_PYTHON=/path/to/python node .agents/scripts/matterport/e57-to-sphr.mjs ...
 
 ${details}`);
   process.exit(1);

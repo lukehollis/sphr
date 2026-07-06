@@ -53,6 +53,14 @@ export function defaultBootstrap(): SphrBootstrap {
             reveal: true
           }
         ],
+        navigationTransition: {
+          enabled: true,
+          meshIds: ["garden-dollhouse"],
+          opacity: 0.2,
+          meshFadeMs: 900,
+          navigationMs: 1100,
+          cubeRenderTargetSize: 2048
+        },
         sceneGraph: [
           ...(gardenSpace.sceneGraph ?? []),
           {
@@ -72,6 +80,10 @@ export function defaultBootstrap(): SphrBootstrap {
             fpvOpacity: 0,
             orbitOpacity: 1,
             debugOpacity: 0.28,
+            transitionMesh: true,
+            transitionOpacity: 0.2,
+            transitionFadeMs: 900,
+            transitionTexture: "cube-render-target",
             wireframeInDebug: true
           }
         ]

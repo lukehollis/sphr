@@ -7,6 +7,7 @@ import type {
   NodeData,
   RuntimeCallbacks,
   RuntimeState,
+  SceneGraphNode,
   SphrBootstrap,
   SplatConfig,
   TourPoint
@@ -228,7 +229,6 @@ export class SphrRuntime {
       ? this.beginNavigationTransition(outgoingNode)
       : null;
 
-    const node = this.resolveNode(point.nodeUUID);
     if (node) {
       this.currentNode = node;
       this.panorama?.navigate(node);
@@ -449,10 +449,13 @@ export class SphrRuntime {
     this.raycaster.setFromCamera(pointer, this.camera);
     const node = this.nav?.getIntersectedNode(this.raycaster);
     if (node && node.uuid !== this.currentNode?.uuid) {
-      this.currentNode = node;
-      this.panorama?.navigate(node);
-      this.nav?.setActive(node.uuid);
-      this.flyTo(this.poseForNode(node, this.state.viewMode));
+      this.navigateToNode(node);
+      return;
+    }
+
+    const directionalNode = this.findDirectionalNavigationNode();
+    if (directionalNode) {
+      this.navigateToNode(directionalNode);
       return;
     }
 
@@ -462,6 +465,59 @@ export class SphrRuntime {
   private handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "\\") this.toggleDebug();
   };
+
+  private navigateToNode(node: NodeData) {
+    if (this.isNavigating) return;
+    const tourPoint = this.findTourPointForNode(node.uuid);
+    if (tourPoint) {
+      this.goTo(tourPoint.spaceIndex, tourPoint.pointIndex);
+      return;
+    }
+
+    const outgoingNode = this.currentNode;
+    const transition = node.uuid !== outgoingNode?.uuid && this.state.viewMode === "FPV"
+      ? this.beginNavigationTransition(outgoingNode)
+      : null;
+    this.currentNode = node;
+    this.panorama?.navigate(node);
+    this.nav?.setActive(node.uuid);
+    this.flyTo(this.poseForNode(node, this.state.viewMode));
+    if (transition) this.scheduleNavigationTransitionEnd(transition.navigationMs);
+    this.emitState();
+  }
+
+  private findTourPointForNode(nodeUUID: string) {
+    for (let spaceIndex = 0; spaceIndex < this.tour.spaces.length; spaceIndex += 1) {
+      const space = this.tour.spaces[spaceIndex];
+      const pointIndex = space.tourpoints.findIndex((point) => point.nodeUUID === nodeUUID);
+      if (pointIndex >= 0) return { spaceIndex, pointIndex };
+    }
+    return null;
+  }
+
+  private findDirectionalNavigationNode() {
+    if (this.state.viewMode !== "FPV" || !this.currentNode) return null;
+
+    const clickDirection = this.raycaster.ray.direction.clone().normalize();
+    let nearestNode: NodeData | null = null;
+    let smallestAngle = Number.POSITIVE_INFINITY;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const node of this.getNodes()) {
+      if (node.uuid === this.currentNode.uuid) continue;
+      const nodePosition = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
+      const directionToNode = nodePosition.clone().sub(this.camera.position).normalize();
+      const angle = clickDirection.angleTo(directionToNode);
+      const distance = this.camera.position.distanceTo(nodePosition);
+      if (angle < Math.PI / 8 && angle < smallestAngle && distance < nearestDistance) {
+        nearestNode = node;
+        smallestAngle = angle;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearestNode;
+  }
 
   private startAnimationLoop() {
     if (this.animationStarted) return;
@@ -557,6 +613,73 @@ export class SphrRuntime {
     this.controls.maxDistance = orbit ? 150 : 0.1;
   }
 
+  private beginNavigationTransition(outgoingNode: NodeData | null) {
+    const config = this.bootstrap.space.space_data.navigationTransition;
+    if (config?.enabled === false || !outgoingNode || !this.panorama || !this.sceneGraph) return null;
+    if (!this.cubeRenderTarget || !this.cubeCamera || !this.cubeScene) return null;
+
+    this.navigationReleaseTween?.cancel();
+    this.navigationReleaseTween = null;
+    this.transitionMeshTween?.cancel();
+    this.transitionMeshTween = null;
+
+    this.isNavigating = true;
+    this.state.navigating = true;
+    this.panorama.prepareTransitionCapture(this.cubeScene, outgoingNode, this.camera.position);
+    this.updateNavigationTransitionCapture();
+
+    const meshState = this.sceneGraph.showNavigationTransition(this.cubeRenderTarget.texture, {
+      meshIds: config?.meshIds,
+      opacity: config?.opacity,
+      fadeMs: config?.meshFadeMs
+    });
+    if (!meshState) {
+      this.endNavigationTransition();
+      return null;
+    }
+
+    this.transitionMeshTween = createTween({
+      duration: meshState.fadeMs,
+      easing: (value) => value,
+      onUpdate: (value) => {
+        this.sceneGraph?.setNavigationTransitionOpacity(meshState.initialOpacity * (1 - value));
+      },
+      onComplete: () => {
+        this.sceneGraph?.restoreNavigationTransition();
+      }
+    });
+
+    this.emitState();
+    return {
+      navigationMs: Math.max(config?.navigationMs ?? 1100, meshState.fadeMs)
+    };
+  }
+
+  private scheduleNavigationTransitionEnd(duration: number) {
+    this.navigationReleaseTween?.cancel();
+    this.navigationReleaseTween = createTween({
+      duration,
+      easing: (value) => value,
+      onUpdate: () => {},
+      onComplete: () => this.endNavigationTransition()
+    });
+  }
+
+  private endNavigationTransition() {
+    this.sceneGraph?.restoreNavigationTransition();
+    this.panorama?.clearTransitionCapture();
+    this.isNavigating = false;
+    this.state.navigating = false;
+    this.emitState();
+  }
+
+  private updateNavigationTransitionCapture() {
+    if (!this.isNavigating || !this.cubeCamera || !this.cubeScene || !this.panorama) return;
+    this.cubeCamera.position.copy(this.camera.position);
+    this.panorama.updateTransitionCapture(this.camera.position);
+    this.cubeCamera.update(this.renderer, this.cubeScene);
+  }
+
   private handleMeshFloorNavigation() {
     const config = this.bootstrap.space.space_data.clickNavigation;
     if (config?.enabled === false || (config?.type ?? "mesh-floor") !== "mesh-floor") return;
@@ -620,6 +743,23 @@ export class SphrRuntime {
       return [{ id: "space-iiif", url: this.bootstrap.space.src, position: [0, 2, -4] }];
     }
     return [];
+  }
+
+  private hasTransitionMeshConfig(nodes: SceneGraphNode[]): boolean {
+    return nodes.some((node) => {
+      if (
+        node.transitionMesh === true ||
+        typeof node.transitionOpacity === "number" ||
+        node.transitionTexture === "cube-render-target"
+      ) {
+        return true;
+      }
+      return this.hasTransitionMeshConfig(node.children ?? []);
+    });
+  }
+
+  private previousPowerOfTwo(value: number) {
+    return 2 ** Math.floor(Math.log2(Math.max(1, value)));
   }
 
   private applyAtmosphere(extra?: string) {

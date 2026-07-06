@@ -20,7 +20,8 @@ const initialRuntimeState: RuntimeState = {
   guided: true,
   muted: false,
   showText: true,
-  debug: false
+  debug: false,
+  navigating: false
 };
 
 export default function SphrApp() {
