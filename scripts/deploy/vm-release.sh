@@ -2,7 +2,10 @@
 # Run from a clean checkout on the Debian x86_64 app VM.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+exec 9>"/tmp/sphr-deploy-$(id -u).lock"
+flock -n 9 || { echo 'Another SPHR deployment is already running.' >&2; exit 1; }
 test -z "$(git status --porcelain --untracked-files=no)" || { echo 'Commit tracked changes before deploying.' >&2; exit 1; }
+trap 'git restore --worktree next-env.d.ts tsconfig.json' EXIT
 test "$(uname -m)" = x86_64 || { echo 'This runtime package requires an x86_64 VM.' >&2; exit 1; }
 
 node_version="${SPHR_NODE_VERSION:-24.21.0}"
@@ -53,8 +56,6 @@ sudo systemctl restart sphr.service
 for attempt in {1..30}; do
   if curl --fail --silent --max-time 2 'http://127.0.0.1:3035/?demo=garden' -o /dev/null; then
     echo "SPHR deployed: $revision ($destination)"
-    # Next regenerates this declaration while building; keep future deploys clean.
-    git restore next-env.d.ts
     exit 0
   fi
   sleep 1
