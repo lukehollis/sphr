@@ -57,6 +57,15 @@ by Certbot using `/var/www/sphr-acme` for HTTP validation. Its renewal hook relo
 Nginx after a successful renewal. The three bucket domains use the Google-managed
 certificate `mused-com-assets-20260916` on their existing GCP load balancers.
 
+The renewal hook is tracked in `scripts/deploy/sphr-reload-nginx.sh` and installed
+at `/etc/letsencrypt/renewal-hooks/deploy/sphr-reload-nginx.sh` with mode `755`.
+It checks the renewed certificate's path before reloading Nginx. The existing
+`snap.certbot.renew.timer` performs scheduled renewals. To verify the app renewal:
+
+```sh
+sudo certbot renew --cert-name app.mused.com --dry-run
+```
+
 ```sh
 sudo systemctl status sphr
 sudo journalctl -u sphr -n 50 --no-pager
