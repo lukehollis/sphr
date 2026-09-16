@@ -15,8 +15,8 @@
       "Bash(du:*)",
       "Bash(wc:*)",
       "Bash(unzip:*)",
-      "Bash(node .claude/scripts/**:*)",
-      "Bash(node .claude/scripts/matterport/**:*)",
+      "Bash(node .agents/scripts/**:*)",
+      "Bash(node .agents/scripts/matterport/**:*)",
       "Bash(python3 ../data/pipelines/matterport_e57_to_sphr.py:*)",
       "Bash(python3 -m pip install pye57 open3d trimesh numpy:*)",
       "Bash(node scripts/convert-legacy-splat.mjs:*)",
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-check.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agents/hooks/setup-check.sh"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/input-check.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agents/hooks/input-check.sh"
           }
         ]
       }

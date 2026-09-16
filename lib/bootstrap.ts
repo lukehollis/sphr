@@ -121,11 +121,11 @@ async function fetchBootstrapFromUrl(url: string): Promise<SphrBootstrap> {
   return (await response.json()) as SphrBootstrap;
 }
 
-export async function loadBootstrapData(): Promise<SphrBootstrap> {
+export async function loadBootstrapData(explicitConfigUrl?: string): Promise<SphrBootstrap> {
   if (typeof window === "undefined") return defaultBootstrap();
 
   const params = new URLSearchParams(window.location.search);
-  const configUrl = params.get("config");
+  const configUrl = explicitConfigUrl ?? params.get("config");
   if (configUrl) {
     return coerceBootstrap(await fetchBootstrapFromUrl(configUrl));
   }
@@ -147,13 +147,23 @@ export async function loadBootstrapData(): Promise<SphrBootstrap> {
     });
   }
 
+  if (!params.has("demo")) {
+    try {
+      const response = await fetch("/datasets/matterport/index.json");
+      if (response.ok) {
+        const index = await response.json();
+        const latest = index.spaces?.[0];
+        if (latest?.bootstrapUrl) return coerceBootstrap(await fetchBootstrapFromUrl(latest.bootstrapUrl));
+      }
+    } catch { /* Fall back to the bundled demo when no imports are available. */ }
+  }
   return defaultBootstrap();
 }
 
 export function coerceBootstrap(input: SphrBootstrap): SphrBootstrap {
   const fallback = defaultBootstrap();
   const space = normalizeSpace(input.space ?? fallback.space);
-  const tour = input.tour ? normalizeTourShell(input.tour) : fallback.tour;
+  const tour = input.tour ? normalizeTourShell(input.tour) : null;
   const orderedSpaces = input.orderedSpaces?.map(normalizeSpace);
 
   if (tour && orderedSpaces?.length && tour.tour_data?.spaces?.length) {
@@ -164,7 +174,7 @@ export function coerceBootstrap(input: SphrBootstrap): SphrBootstrap {
         space: firstSpace,
         tour,
         orderedSpaces,
-        ui: input.ui ?? fallback.ui
+        ui: input.ui ?? {}
       };
     }
   }
@@ -173,7 +183,7 @@ export function coerceBootstrap(input: SphrBootstrap): SphrBootstrap {
     space,
     tour,
     orderedSpaces,
-    ui: input.ui ?? fallback.ui
+    ui: input.ui ?? {}
   };
 }
 
@@ -262,6 +272,8 @@ function normalizeTourData(data: TourData): TourData {
 
 export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
   const tourData = normalizeTourData(bootstrap.tour?.tour_data ?? {});
+  const spaces = tourData.spaces?.filter((space) => space.tourpoints.length > 0) ?? [];
+  const hasGuidedTour = tourData.mode !== "explore" && spaces.length > 0;
   const firstSpaceFallback: TourSpace = {
     id: bootstrap.space.id ?? "default",
     title: bootstrap.space.title,
@@ -270,7 +282,8 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
       {
         id: "default",
         viewMode: "FPV",
-        targetType: "FREE",
+        targetType: bootstrap.space.space_data.nodes?.length ? "NODE" : "FREE",
+        nodeUUID: bootstrap.space.space_data.initialNode ?? bootstrap.space.space_data.nodes?.[0]?.uuid,
         text: bootstrap.space.title,
         position: bootstrap.space.space_data.initialPosition ?? { x: 0, y: 1.5, z: 4 },
         rotation: bootstrap.space.space_data.initialRotation ?? { azimuth: 0, polar: 0 },
@@ -284,11 +297,12 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
   };
 
   return {
+    hasGuidedTour,
     title: bootstrap.tour?.title ?? bootstrap.space.title,
-    spaces: tourData.spaces?.length ? tourData.spaces : [firstSpaceFallback],
+    spaces: spaces.length ? spaces : [firstSpaceFallback],
     audio: tourData.audio ?? {},
-    autoplay: Boolean(tourData.autoplay),
-    defaultShowText: tourData.defaultShowText !== false,
+    autoplay: hasGuidedTour && Boolean(tourData.autoplay),
+    defaultShowText: hasGuidedTour && tourData.defaultShowText !== false,
     sceneGraph: tourData.sceneGraph ?? bootstrap.space.space_data.sceneGraph ?? [],
     annotationGraph: tourData.annotationGraph ?? bootstrap.space.space_data.annotationGraph ?? []
   };

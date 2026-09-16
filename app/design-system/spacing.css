@@ -1,0 +1,27 @@
+:root {
+  /* 8px unit grid */
+  --unit: 8px;
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-9: 72px;
+  --space-12: 96px;
+  --page-margin: 72px;
+
+  /* geometry: print-born system — square corners, no rounding */
+  --radius: 0px;
+
+  /* rules */
+  --rule-strong: 3px solid var(--rule-strong-color);
+  --rule-section: 1px solid var(--rule-strong-color);
+  --rule-hair: 1px solid var(--rule-hair-color);
+
+  /* elevation: paper, not glass */
+  --shadow-paper: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --shadow-desk: 0 0 40px rgba(0, 0, 0, 0.12);
+
+  --focus-ring: 2px solid var(--ink);
+}

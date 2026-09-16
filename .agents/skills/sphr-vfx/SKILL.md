@@ -2,7 +2,7 @@
 name: sphr-vfx
 description: Add or fix SPHR visual effects, transitions, scene graph visibility, annotation effects, Spark recoloring, atmosphere changes, and interaction polish.
 argument-hint: [effect/transition/interaction request]
-allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .claude/scripts/project/validate-bootstrap.mjs *) Bash(node .claude/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .agents/scripts/project/validate-bootstrap.mjs *) Bash(node .agents/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
 agent: sphr-vfx
 ---
 
@@ -38,7 +38,7 @@ Use this for SPHR VFX and interaction polish.
 ```bash
 npm run typecheck
 npm run build
-node .claude/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
+node .agents/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
 ```
 
 Final response should report the exact runtime layer changed, the user-facing effect, and verification outcome.

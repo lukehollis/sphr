@@ -19,7 +19,8 @@ npm install
 npm run dev
 ```
 
-Open the printed localhost URL. The default scene is the Garden Gaussian Splat demo from `garden_splats`, loaded through Spark (`@sparkjsdev/spark`).
+Open the printed localhost URL for the searchable collection and permanent scene links. Use `/?demo=garden` for the
+Garden Gaussian Splat demo loaded through Spark (`@sparkjsdev/spark`).
 
 Production checks:
 
@@ -40,6 +41,9 @@ npm run build
 - `scripts/convert-legacy-splat.mjs` converts older GaussianSplats3D compressed `.splat`/`.ksplat` containers into Spark-readable standard `.splat` rows.
 - `.agents/` contains SPHR-specific agent, skill, hook, rule, and helper-script workflows for 3DGS, 360 images, IIIF, animated tours, VFX, and verification.
 
+See `AGENTS.md` for the current entrypoint and `.agents/skills/sphr-matterport/SKILL.md`
+for the comprehensive import workflow, references, roles, and runnable examples.
+
 ## Agent Workflow
 
 The `.agents` setup mirrors the product workflow:
@@ -59,7 +63,7 @@ Useful helpers:
 node .agents/scripts/project/sphr-state.mjs
 node .agents/scripts/project/asset-inventory.mjs
 node .agents/scripts/project/validate-bootstrap.mjs
-node .agents/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
+node .agents/scripts/project/verify-app.mjs --url 'http://localhost:3000/?demo=garden' --screenshots
 node .agents/scripts/matterport/e57-to-sphr.mjs --e57 data/processed/<slug>/source/<slug>.e57 --slug <slug> --title "<Title>"
 node .agents/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --screenshots
 ```
@@ -91,21 +95,18 @@ Use this bootstrap shape for new workflows:
 
 For 360 tours, set `space.type` to `spaces` and provide `space_data.nodes`. Nodes can use `image` for an equirectangular 360 image, explicit `faces`/`cubeFaces`, or a `textureTemplate` with `{uuid}`, `{face}`, and `{resolution}`.
 
-For Matterport imports, use the reusable pipeline in `../data/pipelines/matterport_e57_to_sphr.py` through `.agents/scripts/matterport/e57-to-sphr.mjs`. The generated package lives at `public/datasets/matterport/<slug>` and is loaded with `?config=/datasets/matterport/<slug>/bootstrap.json`.
+For Matterport imports, use `npm run import:matterport -- --e57 /path/to/export.zip`.
+The tracked pipeline lives at `scripts/matterport`; see `docs/matterport.md` for setup,
+calibrated camera geometry, TSDF reconstruction, photo-textured mesh output, and verification.
 
-The Matterport converter is a Python pipeline, not a Django dependency. Install its isolated dependencies with `python3 -m venv ../.venv-matterport` and `../.venv-matterport/bin/python -m pip install -r ../data/pipelines/requirements-matterport.txt`, or set `SPHR_MATTERPORT_PYTHON=/path/to/python` before running `.agents/scripts/matterport/e57-to-sphr.mjs`.
+New Matterport nodes use direct quaternions and camera-pose-derived cube faces. The
+legacy fixed face permutation produced a 180-degree yaw mismatch relative to geometry.
+Do not restore that permutation or validate only cube seams: check source camera rays
+and point/photo registration for every scan. Floor heights must come from measured planes.
 
-Matterport node rotations are generated for the production SPHR cube-pano convention used by `ss`/`sphr-backend`: the runtime applies `(x, -y, z)` and a fixed 180 degree Z cube basis. If orientation looks wrong, fix the E57 converter and regenerate the package instead of adding a scene-specific runtime workaround.
-
-Matterport cube faces must be emitted in SPHR-ready orientation. The verified transform is: skybox `0` to SPHR top face `0` rotated 90 degrees counter-clockwise, skybox `4` to front, skybox `1` to left, skybox `2` to back, skybox `3` to right, and skybox `5` to bottom face `5` rotated 270 degrees counter-clockwise. The manifest records this as `imageManifest.faceTransforms`.
-
-Matterport reduced meshes are transition meshes, not normal visible FPV geometry. The generated scene graph must mark the 50k GLB with `fpvOpacity: 0`, `raycast: true`, `transitionMesh: true`, and `transitionTexture: "cube-render-target"`. Node-to-node navigation must capture the outgoing 360 node with a `CubeCamera` and fade that cube render target across the mesh before restoring default materials.
-
-Matterport QA must include the pole seam check and browser marker navigation:
-
-```bash
-node .agents/scripts/matterport/verify-dataset.mjs --slug <slug> --url http://localhost:3000 --marker-click auto
-```
+The reduced mesh is hidden in FPV at rest, raycastable, and visible in overview. During
+movement, capture the outgoing panorama once and project it onto the mesh from its fixed
+camera origin. Never use a reflective environment-map material as a projection substitute.
 
 For IIIF image scenes, set `space.type` to `iiif` with `space.src`, or provide `space_data.iiif`.
 

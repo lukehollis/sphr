@@ -1,14 +1,19 @@
 # SPHR Matterport Imports
 
-- Keep Matterport exports as data packages under `public/datasets/matterport/<slug>`.
-- Keep raw E57/zips and processing scratch files outside `sphr-next/public`, normally in `../data` or `data/processed`.
-- Use `../data/pipelines/matterport_e57_to_sphr.py` through `.agents/scripts/matterport/e57-to-sphr.mjs`; do not create one-off conversion scripts in the Next app.
-- Install converter dependencies from `../data/pipelines/requirements-matterport.txt` in an isolated Python environment, or set `SPHR_MATTERPORT_PYTHON` to an environment that imports `numpy`, `pye57`, `open3d`, and `trimesh`.
-- Each Matterport package must include `bootstrap.json`, `manifest.json`, six cube faces per scan node, and a reduced GLB mesh near 50k triangles.
-- The reduced GLB is a transition/raycast mesh. It must be hidden in FPV at rest with `fpvOpacity: 0`, shown in orbit/debug, and marked `transitionMesh: true` with `transitionTexture: "cube-render-target"`.
-- Node-to-node browser navigation must use the SPHR cube render target transition: capture the outgoing 360 node with `CubeCamera`, apply that cube texture to the reduced mesh, fade the mesh, then restore default materials.
-- `manifest.json` must record `imageManifest.faceTransforms`; Matterport skybox face `0` rotates 90 degrees counter-clockwise into SPHR top face `0`, and skybox face `5` rotates 270 degrees counter-clockwise into SPHR bottom face `5`.
-- `bootstrap.json` must remain compatible with the generic `spaces` panorama runtime and `sceneGraph` model loader.
-- Node rotations must target the production SPHR EnvCube convention: runtime applies `(x, -y, z)` plus a fixed 180 degree Z cube basis.
-- Matterport validation must include cube pole seam checks and transition-mesh/cube-camera browser checks, not just screenshots, so rotated top/bottom faces or missing movement effects fail automatically.
-- Matterport work is complete only after package validation plus browser verification of Start, tour navigation, and visible in-scene marker navigation when a marker is available.
+- Use the tracked importer in `scripts/matterport` via `npm run import:matterport`.
+- Read `docs/matterport.md` for the complete geometry and validation contract.
+- Keep raw sources outside public assets and generated packages under `public/datasets/matterport/<slug>`.
+- Derive image face order and rotations from image poses and intrinsics, associated by data3D GUID.
+- New nodes use a direct quaternion. Never reintroduce the old fixed face permutation or Euler correction: its panoramas could have seamless edges while being rotated 180 degrees relative to geometry.
+- Preserve metric coordinates using `[x,z,-y]` for points, cameras, meshes, and floors.
+- Fuse measured depth, reduce the mesh to at most the configured 50k triangles, and bake a photo texture atlas from calibrated cameras.
+- Infer floors from measured planes and neighbors from unobstructed sightlines. Do not use a fixed camera-height offset or force through-wall connections.
+- Publish only after all image/camera, seam, scale, floor, hash, and actual GLB checks pass.
+- Measure original-image seam baselines before re-encoding. Report inherited edge differences;
+  reject added conversion damage. Do not loosen a global threshold to bless a failed capture.
+- Default imports to `tour_data.mode: "explore"`. Only an authored tour enables guided UI.
+- Keep the title-only header; dollhouse double-click enters a scan. Do not restore removed controls.
+- In FPV, keep the reduced mesh hidden at rest and raycastable. Capture the outgoing panorama once and project it onto the mesh from the fixed scan origin during navigation.
+- Await incoming textures, preserve the current panorama on failure, and bound unpinned texture memory.
+- Keep scene-specific information in the data package. No bespoke runtime code for individual Matterport exports.
+- Verify actual browser navigation, transitions, overview, poles, stairs, dark scans, mobile controls, and the existing 3DGS demo in addition to automated checks.

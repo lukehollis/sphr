@@ -113,6 +113,8 @@ export type TourSpace = {
 };
 
 export type TourData = {
+  /** Generated scan waypoints can support navigation without offering a guided tour. */
+  mode?: "guided" | "explore";
   audio?: Record<string, AudioConfig>;
   autoplay?: boolean;
   defaultShowText?: boolean;
@@ -143,6 +145,9 @@ export type NodeData = {
   position: Vector3Like;
   floorPosition?: Vector3Like;
   rotation?: EulerLike;
+  quaternion?: [number, number, number, number];
+  neighbors?: string[];
+  label?: string;
   resolution?: string;
   isActive?: boolean;
 };
@@ -179,6 +184,7 @@ export type NavigationConfig = {
   maxVisible?: number;
   minVisible?: number;
   hideActive?: boolean;
+  markerRadius?: number;
 };
 
 export type NavigationTransitionConfig = {
@@ -245,6 +251,7 @@ export type SceneGraphNode = TransformConfig & {
   transitionFadeMs?: number;
   transitionTexture?: "cube-render-target" | "none" | string;
   wireframeInDebug?: boolean;
+  unlit?: boolean;
   showOnStep?: number;
   color?: number | string;
   intensity?: number;
@@ -291,6 +298,7 @@ export type SphrBootstrap = {
 };
 
 export type NormalizedTour = {
+  hasGuidedTour: boolean;
   title: string;
   spaces: TourSpace[];
   audio: Record<string, AudioConfig>;
@@ -317,6 +325,8 @@ export type RuntimeState = {
   showText: boolean;
   debug: boolean;
   navigating: boolean;
+  activeNodeId?: string;
+  navigationError?: string;
 };
 
 export type RuntimeCallbacks = {

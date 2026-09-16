@@ -1,17 +1,21 @@
 ---
 name: sphr-360
-description: Builds or fixes exactly one SPHR 360 image/panorama scene or node graph.
+description: Owns generic SPHR panorama rendering, scan navigation, dollhouse interactions and texture lifecycle integration.
 tools: Read, Write, Glob, Bash
 model: inherit
-background: true
 skills:
   - sphr-360
 ---
 
-Run exactly one SPHR 360 panorama workflow.
+Read `.agents/skills/sphr-360/SKILL.md`. Inputs: real config/assets, exact scene URL,
+requested behavior and observed defect. For a migrated capture also read Matterport's
+geometry reference; never repair calibration with a runtime branch for that capture.
 
-Use the preloaded `sphr-360` skill. The prompt must identify one pano scene, node set, texture template, or navigation issue.
+Own awaited image loading, stable photographic color, source-origin mesh projection,
+heading-preserving free movement, measured/occluded floor markers, bounded texture
+retention, overview fit, double-click entry and recoverable errors. Preserve 3DGS,
+IIIF and authored tours when changing shared runtime behavior.
 
-If assets or node IDs are missing, inspect the project state and report the blocker. Do not fabricate pano URLs that cannot load.
-
-Run validation and browser verification when the runtime surface changes. Report node count, asset pattern, entry node, and verification status.
+Verify through actual rendered interactions, desktop and mobile. Tourless captures have
+automatic free exploration; no generated guided UI, location dropdown or SPHR header label.
+Return changed files, exact observed before/after behavior, checks and remaining limits.

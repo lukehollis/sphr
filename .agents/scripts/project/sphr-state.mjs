@@ -33,8 +33,8 @@ async function main() {
   const pkg = await readJson("package.json");
   const dataFiles = await listFiles("lib/data");
   const demoAssets = await listFiles("public/demo");
-  const claudeSkills = existsSync(path.join(root, ".claude/skills"))
-    ? (await readdir(path.join(root, ".claude/skills"), { withFileTypes: true }))
+  const agentSkills = existsSync(path.join(root, ".agents/skills"))
+    ? (await readdir(path.join(root, ".agents/skills"), { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .sort()
@@ -57,7 +57,7 @@ async function main() {
     },
     dataFiles,
     demoAssets,
-    claudeSkills
+    agentSkills
   };
 
   if (asJson) {
@@ -72,7 +72,7 @@ async function main() {
   console.log(`Demo assets: ${demoAssets.length}`);
   for (const asset of demoAssets) console.log(`  ${asset.path} (${asset.bytes} bytes)`);
   console.log(`Data files: ${dataFiles.map((file) => file.path).join(", ") || "none"}`);
-  console.log(`Claude skills: ${claudeSkills.join(", ") || "none"}`);
+  console.log(`Agent skills: ${agentSkills.join(", ") || "none"}`);
 }
 
 main().catch((error) => {

@@ -17,6 +17,7 @@ type SceneGraphRecord = {
 };
 
 export type NavigationTransitionMaterialOptions = {
+  origin?: THREE.Vector3;
   meshIds?: string[];
   opacity?: number;
   fadeMs?: number;
@@ -38,6 +39,7 @@ export class SceneGraphLayer {
   private transitionActiveIds = new Set<string>();
   private viewMode: "FPV" | "ORBIT" = "FPV";
   private debug = false;
+  private overviewReturnBlend: number | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -72,8 +74,20 @@ export class SceneGraphLayer {
     this.applyVisibility();
   }
 
+  setOverviewReturnBlend(blend: number | null) {
+    this.overviewReturnBlend = blend;
+    this.applyVisibility();
+  }
+
   getObject(id: string) {
     return this.lookup.get(id) ?? null;
+  }
+
+  getBounds() {
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    for (const object of this.raycastObjects) box.expandByObject(object);
+    return box;
   }
 
   getRaycastObjects() {
@@ -102,13 +116,24 @@ export class SceneGraphLayer {
       const fadeMs = record.node.transitionFadeMs ?? options.fadeMs ?? 400;
       const material = new THREE.MeshBasicMaterial({
         color: 0xffffff,
-        envMap,
         transparent: true,
         opacity,
-        side: THREE.FrontSide,
-        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        fog: false,
+        depthWrite: true,
         depthTest: true
       });
+      const origin = options.origin?.clone() ?? new THREE.Vector3();
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.panoramaMap = { value: envMap };
+        shader.uniforms.captureOrigin = { value: origin };
+        shader.vertexShader = "varying vec3 vCaptureWorld;\n" + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvCaptureWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+        shader.fragmentShader = "uniform samplerCube panoramaMap;\nuniform vec3 captureOrigin;\nvarying vec3 vCaptureWorld;\n" + shader.fragmentShader;
+        shader.fragmentShader = shader.fragmentShader.replace("#include <map_fragment>", "diffuseColor *= textureCube(panoramaMap, normalize(vCaptureWorld - captureOrigin));");
+      };
+      material.customProgramCacheKey = () => "sphr-camera-projection-v1";
       material.needsUpdate = true;
 
       record.transitionMaterial = material;
@@ -260,7 +285,9 @@ export class SceneGraphLayer {
       if (!mesh.isMesh || !mesh.material) return;
 
       const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const clonedMaterials = sourceMaterials.map((material) => material.clone());
+      const clonedMaterials = sourceMaterials.map((material) => node.unlit
+        ? new THREE.MeshBasicMaterial({ map: (material as THREE.MeshStandardMaterial).map, vertexColors: Boolean(mesh.geometry.attributes.color), side: THREE.FrontSide, toneMapped: false, fog: false })
+        : material.clone());
       const clonedMaterial = Array.isArray(mesh.material) ? clonedMaterials : clonedMaterials[0];
       mesh.material = clonedMaterial;
       meshes.push(mesh);
@@ -305,6 +332,8 @@ export class SceneGraphLayer {
     const opacity =
       this.debug && typeof node.debugOpacity === "number"
         ? node.debugOpacity
+        : this.overviewReturnBlend !== null
+          ? THREE.MathUtils.lerp(node.orbitOpacity ?? 1, node.fpvOpacity ?? 1, this.overviewReturnBlend)
         : this.viewMode === "ORBIT"
           ? node.orbitOpacity ?? 1
           : node.fpvOpacity ?? 1;
@@ -317,9 +346,9 @@ export class SceneGraphLayer {
       const originalTransparent = record.originalTransparent.get(material) ?? material.transparent;
       material.opacity = baseOpacity * effectiveOpacity;
       material.transparent = originalTransparent || effectiveOpacity < 1;
-      if (node.raycast) material.side = THREE.DoubleSide;
+      if (node.raycast) material.side = node.unlit && (this.viewMode === "ORBIT" || this.overviewReturnBlend !== null) ? THREE.FrontSide : THREE.DoubleSide;
       material.depthWrite = effectiveOpacity >= 1;
-      material.depthTest = effectiveOpacity >= 1;
+      material.depthTest = effectiveOpacity >= 1 || this.overviewReturnBlend !== null;
       if ("wireframe" in material) {
         (material as THREE.MeshBasicMaterial).wireframe = Boolean(this.debug && node.wireframeInDebug);
       }

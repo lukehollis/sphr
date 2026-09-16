@@ -1,0 +1,23 @@
+:root {
+  --font-sans: Helvetica, "Helvetica Neue", Arimo, Arial, sans-serif;
+
+  /* scale */
+  --size-display: 96px;   /* chapter numerals, specimen displays */
+  --size-hero: 56px;      /* page titles */
+  --size-h2: 28px;        /* section headlines */
+  --size-body: 15px;
+  --size-caption: 13px;   /* running headers, contents */
+  --size-label: 11px;     /* technical labels, annotations */
+  --size-annotation: 9px; /* leader-line callouts, form micro-text, dimension ticks */
+
+  --weight-regular: 400;
+  --weight-bold: 700;
+
+  --leading-display: 0.8;
+  --leading-tight: 1.1;
+  --leading-heading: 1.2;
+  --leading-body: 1.55;
+
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+}

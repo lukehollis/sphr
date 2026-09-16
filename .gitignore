@@ -46,3 +46,8 @@ pnpm-debug.log*
 
 # generated verification artifacts
 /tmp/
+
+# Python importer environments and caches
+/.venv-matterport/
+__pycache__/
+*.pyc

@@ -6,6 +6,32 @@ export class NavigationLayer {
   readonly group = new THREE.Group();
   private readonly markers = new Map<string, THREE.Object3D>();
   private activeNodeId: string | null = null;
+  private occluders: THREE.Object3D[] = [];
+  private orbit = false;
+  private readonly occlusionRay = new THREE.Raycaster();
+
+  setOccluders(objects: THREE.Object3D[]) {
+    this.occluders = objects;
+    this.scene.updateMatrixWorld(true);
+    this.setActive(this.activeNodeId);
+  }
+
+  setOrbit(orbit: boolean) { this.orbit = orbit; this.setActive(this.activeNodeId); }
+
+  getNavigableNodes() {
+    return this.nodes.filter((node) => this.markers.get(node.uuid)?.visible && node.uuid !== this.activeNodeId);
+  }
+
+  getDebugSnapshot() { return { activeNodeId: this.activeNodeId, visibleNodes: this.getNavigableNodes().map((node) => node.uuid) }; }
+
+  private unobstructed(from: THREE.Vector3, to: THREE.Vector3) {
+    const direction = to.clone().sub(from);
+    const distance = direction.length();
+    this.occlusionRay.set(from, direction.normalize());
+    this.occlusionRay.near = 0.15;
+    this.occlusionRay.far = Math.max(0.15, distance - 0.15);
+    return !this.occlusionRay.intersectObjects(this.occluders, true).length;
+  }
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -52,7 +78,11 @@ export class NavigationLayer {
     const activeNode = this.nodes.find((node) => node.uuid === this.activeNodeId) ?? null;
     const visibleNeighborIds = this.visibleNeighborIds(activeNode);
     this.markers.forEach((marker, id) => {
-      marker.visible = visibleNeighborIds ? visibleNeighborIds.has(id) : true;
+      marker.visible = this.orbit ? id !== this.activeNodeId : visibleNeighborIds ? visibleNeighborIds.has(id) : id !== this.activeNodeId;
+      if (marker.visible && !this.orbit && activeNode && this.occluders.length) {
+        const targetNode = marker.userData.node as NodeData;
+        marker.visible = this.unobstructed(this.getWorldPosition(activeNode), this.getWorldPosition(targetNode));
+      }
       marker.traverse((child) => {
         const mesh = child as THREE.Mesh;
         const material = mesh.material as THREE.MeshBasicMaterial | undefined;
@@ -82,8 +112,12 @@ export class NavigationLayer {
     return worldFromGroupedPoint(node.position, sceneGroupSettings("nodes", this.data));
   }
 
+  getWorldFloorPosition(node: NodeData) {
+    return worldFromGroupedPoint(node.floorPosition ?? node.position, sceneGroupSettings("nodes", this.data));
+  }
+
   getIntersectedNode(raycaster: THREE.Raycaster) {
-    const hits = raycaster.intersectObjects([...this.markers.values()], true);
+    const hits = raycaster.intersectObjects([...this.markers.values()].filter((marker) => marker.visible), true);
     const hit = hits.find((item) => item.object.userData.node || item.object.parent?.userData.node);
     return (hit?.object.userData.node ?? hit?.object.parent?.userData.node ?? null) as NodeData | null;
   }
@@ -114,19 +148,30 @@ export class NavigationLayer {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.42, 48), ringMaterial);
+    const radius = this.data.navigation?.markerRadius ?? 0.15;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.78, radius, 48), ringMaterial);
     ring.rotation.x = -Math.PI / 2;
     ring.userData.node = node;
     group.add(ring);
 
     const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(0.08, 24),
+      new THREE.CircleGeometry(radius * 0.23, 24),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
     );
     dot.rotation.x = -Math.PI / 2;
     dot.position.y = 0.006;
     dot.userData.node = node;
     group.add(dot);
+
+    // Raycast the entire marker, including the empty space inside its ring.
+    // Invisible hit geometry slightly enlarges the target without changing the photo.
+    const hitArea = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * 1.3, 24),
+      new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
+    );
+    hitArea.rotation.x = -Math.PI / 2;
+    hitArea.userData.node = node;
+    group.add(hitArea);
 
     return group;
   }
@@ -140,6 +185,7 @@ export class NavigationLayer {
     const maxDistance = config.maxDistance ?? Number.POSITIVE_INFINITY;
     const activePosition = vectorFromLike(activeNode.floorPosition ?? activeNode.position);
     const distances = this.nodes
+      .filter((node) => !activeNode.neighbors || activeNode.neighbors.includes(node.uuid))
       .filter((node) => !(config.hideActive ?? true) || node.uuid !== activeNode.uuid)
       .map((node) => ({
         node,

@@ -26,7 +26,7 @@ lib/three/renderers/
 lib/three/layers/
 public/demo/
 scripts/convert-legacy-splat.mjs
-.claude/
+.agents/
 ```
 
 `lib/bootstrap.ts` accepts bundled defaults, `?config=/path.json`, embedded Django-style script tags, and `window.__SPHR_BOOTSTRAP__`.
@@ -70,7 +70,7 @@ Use this envelope for new workflows:
 
 For 360 tours, set `space.type` to `spaces` and provide `space_data.nodes`. Nodes can use `image`, `faces`/`cubeFaces`, or `textureTemplate`.
 
-For Matterport E57 imports, keep conversion logic in `../data/pipelines/matterport_e57_to_sphr.py` and outputs under `public/datasets/matterport/<slug>`. Do not add one-off runtime branches for a single Matterport export.
+For Matterport E57 imports, keep conversion logic in tracked `scripts/matterport/` and invoke `npm run import:matterport` and outputs under `public/datasets/matterport/<slug>`. Do not add one-off runtime branches for a single Matterport export.
 
 For IIIF scenes, set `space.type` to `iiif` with `space.src`, or use `space_data.iiif`.
 
@@ -84,7 +84,7 @@ node scripts/convert-legacy-splat.mjs <legacy.splat> public/demo/<scene>.spark.s
 ```
 
 - Omit `--max-splats` only for high-resolution deployment assets. The default demo should load fast enough for browser verification.
-- Use `node .claude/scripts/media/inspect-splat.mjs <asset>` after conversion to catch invalid sizes and absurd ranges.
+- Use `node .agents/scripts/media/inspect-splat.mjs <asset>` after conversion to catch invalid sizes and absurd ranges.
 
 ## Verification
 
@@ -93,13 +93,13 @@ Smoke tests are not enough for scene work. After runtime, renderer, tour, or CSS
 ```bash
 npm run typecheck
 npm run build
-node .claude/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
+node .agents/scripts/project/verify-app.mjs --url 'http://localhost:3000/?demo=garden' --screenshots
 ```
 
 Browser verification should confirm:
 
-- The default scene reaches an enabled Start button.
-- Starting the tour mounts HUD/tour controls.
+- The scene automatically opens free exploration or its authored tour; no intro screen or start button.
+- HUD icon controls mount after loading; authored tours also show guide/text and Previous/Next controls.
 - The 3DGS/pano/IIIF content visibly renders in screenshots.
 - Desktop and mobile controls do not overlap.
 - No failed resource requests.
@@ -116,3 +116,12 @@ Use the focused SPHR agents/skills instead of hand-waving broad scene work:
 - `sphr-vfx` for transitions, annotations, scene graph, shaders/modifiers, and interaction polish.
 - `sphr-verify` for final browser/type/build verification.
 - `sphr-matterport` for Matterport E57 extraction, aligned cube-face nodes, 50k GLB generation/repair, and browser navigation QA.
+
+## Interface design
+
+Use the NASA 1975 Reversed dark theme documented in `docs/design-system.md`.
+Shared tokens are in `app/design-system/`; the collection has no H1 or hero.
+Preserve the icon controls, square opaque panels, Helvetica typography,
+ruled sections and the `#0098db` blue accent. Keep Next white with black text. On mobile guided tours, use a full-width 72px Next
+button at the bottom with small Previous above; keep mode/settings controls in the
+top header. Dollhouse stays at the bottom only in free exploration.

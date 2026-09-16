@@ -8,7 +8,12 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "convert:legacy-splat": "node scripts/convert-legacy-splat.mjs"
+    "convert:legacy-splat": "node scripts/convert-legacy-splat.mjs",
+    "import:matterport": "node scripts/matterport/import.mjs",
+    "test:matterport": "node scripts/matterport/test.mjs",
+    "scenes:index": "python3 scripts/matterport/catalog.py",
+    "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-audio-autoplay.mjs",
+    "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.1.0",

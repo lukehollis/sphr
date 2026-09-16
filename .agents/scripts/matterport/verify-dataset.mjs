@@ -259,7 +259,13 @@ async function validatePackage(configPath) {
     failures.push(`Manifest images2D ${manifest.imageManifest?.images2D} does not match face files ${faceCount}`);
   }
 
-  if (JSON.stringify(manifest.imageManifest?.faceTransforms) !== JSON.stringify(expectedMatterportFaceTransforms)) {
+  let calibratedReport = null;
+  if (manifest.schema === "sphr-matterport-e57-v2") {
+    const python = process.env.SPHR_MATTERPORT_PYTHON || [path.join(root, ".venv-matterport/bin/python"), path.join(root, "../.venv-matterport/bin/python")].find(existsSync) || "python3";
+    const result = spawnSync(python, [path.join(root, "scripts/matterport/validate.py"), datasetDir], { encoding: "utf8" });
+    if (result.status !== 0) failures.push(`Calibrated package validation failed: ${result.stderr}`);
+    else calibratedReport = JSON.parse(result.stdout);
+  } else if (JSON.stringify(manifest.imageManifest?.faceTransforms) !== JSON.stringify(expectedMatterportFaceTransforms)) {
     failures.push("Manifest imageManifest.faceTransforms does not match the verified Matterport-to-SPHR cube-face transform");
   }
 
@@ -274,11 +280,13 @@ async function validatePackage(configPath) {
   }
 
   const triangles = manifest.mesh?.triangles;
-  if (typeof triangles !== "number" || triangles < 45000 || triangles > 55000) {
-    failures.push(`Expected roughly 50k mesh triangles, got ${triangles}`);
+  if (typeof triangles !== "number" || triangles < 1 || triangles > (manifest.mesh?.targetTriangles ?? 50000)) {
+    failures.push(`Expected a nonempty mesh within the target triangle budget, got ${triangles}`);
   }
 
-  const cubeSeams = await validateCubePoleSeams(nodes, failures);
+  const cubeSeams = calibratedReport
+    ? { scansChecked: calibratedReport.nodeCount, seamMax: calibratedReport.seamMax, warnings: calibratedReport.warnings ?? [] }
+    : await validateCubePoleSeams(nodes, failures);
 
   if (failures.length) {
     throw new Error(`Matterport package validation failed:\n${failures.map((item) => `  - ${item}`).join("\n")}`);
@@ -292,13 +300,14 @@ async function validatePackage(configPath) {
     nodeCount: nodes.length,
     faceCount,
     tourpointCount: tourpoints.length,
+    hasGuidedTour: bootstrap.tour?.tour_data?.mode !== "explore" && tourpoints.length > 0,
     meshFile,
     meshTriangles: triangles,
     cubeSeams,
   };
 }
 
-async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
+async function verifyBrowser(appUrl, slug, screenshots, markerClick, hasGuidedTour) {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 980 }, deviceScaleFactor: 1 });
   const consoleErrors = [];
@@ -315,29 +324,16 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
 
   try {
     await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 120000 });
-    await page.waitForFunction(() => {
-      const button = Array.from(document.querySelectorAll("button")).find((item) => /^start$/i.test(item.textContent?.trim() || ""));
-      return button && !button.disabled;
-    }, null, { timeout: 120000 });
-
-    const overlayState = await page.evaluate(() => {
-      const visible = (element) => {
-        if (!element) return false;
-        const style = window.getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
-      };
-      return {
-        actionsVisible: visible(document.querySelector(".loading-actions")),
-        progressVisible: visible(document.querySelector(".loading-progress")),
-      };
-    });
-    if (overlayState.actionsVisible && overlayState.progressVisible) {
-      overlayFailures.push("Loading progress is visible at the same time as Start/Free Explore controls");
+    await page.waitForSelector(".viewer-header", { timeout: 120000 });
+    await page.waitForFunction(() => !document.querySelector(".scene-load-status"), null, { timeout: 120000 });
+    const entryState = await page.evaluate(() => ({
+      state: JSON.parse(document.querySelector("canvas")?.dataset.sphrState || "null")?.state,
+      introActions: Boolean(document.querySelector(".loading-actions"))
+    }));
+    if (entryState.introActions || entryState.state?.guided !== hasGuidedTour) {
+      overlayFailures.push("Scene did not automatically enter its tour/exploration mode");
     }
 
-    await page.getByRole("button", { name: /^start$/i }).click({ timeout: 10000 });
-    await page.waitForSelector(".hud-left", { timeout: 30000 });
     await page.waitForFunction(() => performance.getEntriesByType("resource").some((entry) => /\.glb($|\?)/i.test(entry.name)), null, {
       timeout: 120000,
     });
@@ -355,6 +351,9 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
 
     let markerClickResult = null;
     if (markerClick) {
+      if (!await page.evaluate(() => Boolean(window.__SPHR_RUNTIME__))) {
+        throw new Error("--marker-click requires a development server (npm run dev). Use host browser tools for production spatial verification.");
+      }
       const resolvedMarkerClick =
         markerClick === "auto"
           ? await page.evaluate(() => {
@@ -362,7 +361,7 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
               const navGroup = runtime?.nav?.group;
               const camera = runtime?.camera;
               const renderer = runtime?.renderer;
-              const activeNode = runtime?.getActivePoint?.()?.nodeUUID;
+              const activeNode = runtime?.getState?.()?.activeNodeId;
               if (!navGroup || !camera || !renderer) return null;
 
               const rect = renderer.domElement.getBoundingClientRect();
@@ -417,16 +416,8 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
       } catch (error) {
         overlayFailures.push(`Marker click did not enter cube-render-target mesh transition: ${error.message}`);
       }
-      await page.waitForFunction(
-        (before) => {
-          const previousResources = new Set(before);
-          return performance
-            .getEntriesByType("resource")
-            .some((entry) => /scan-(?!000)\d+\/face[0-5]\.jpg/i.test(entry.name) && !previousResources.has(entry.name));
-        },
-        beforeMarkerClick,
-        { timeout: 120000 }
-      );
+      await page.waitForFunction((uuid) => window.__SPHR_RUNTIME__?.getState().activeNodeId === uuid,
+        resolvedMarkerClick.nodeUUID, { timeout: 120000 });
       await page.waitForFunction(
         () => {
           const snapshot = window.__SPHR_RUNTIME__?.getDebugSnapshot?.();
@@ -460,15 +451,19 @@ async function verifyBrowser(appUrl, slug, screenshots, markerClick) {
       }
     }
 
-    const nextButton = page.getByRole("button", { name: /^next$/i });
-    await nextButton.click({ timeout: 10000 });
-    await page.waitForFunction(() => performance.getEntriesByType("resource").some((entry) => /scan-001\/face[0-5]\.jpg/i.test(entry.name)), null, {
-      timeout: 120000,
-    });
-    await page.waitForTimeout(1000);
+    if (hasGuidedTour) {
+      const before = await page.evaluate(() => JSON.parse(document.querySelector("canvas").dataset.sphrState).state.activePointIndex);
+      await page.getByRole("button", { name: /^next$/i }).click({ timeout: 10000 });
+      await page.waitForFunction((previous) => {
+        const state = JSON.parse(document.querySelector("canvas").dataset.sphrState).state;
+        return state.activePointIndex !== previous && !state.navigating;
+      }, before, { timeout: 120000 });
+    } else if (await page.getByRole("button", { name: /guided tour|^next$|^previous$/i }).count()) {
+      overlayFailures.push("Guided tour controls are visible for a free-exploration import");
+    }
 
     if (screenshots) {
-      const screenshot = path.join(artifactDir, `matterport-${slug}-after-next.png`);
+      const screenshot = path.join(artifactDir, `matterport-${slug}-navigation.png`);
       await page.screenshot({ path: screenshot, fullPage: false, timeout: 120000 });
       screenshotPaths.push(screenshot);
     }
@@ -519,7 +514,11 @@ async function main() {
   target.searchParams.set("config", configPath);
 
   const packageSummary = await validatePackage(configPath);
-  const browserSummary = await verifyBrowser(target.toString(), packageSummary.slug, screenshots, markerClick);
+  if (process.argv.includes("--data-only")) {
+    console.log(JSON.stringify({ package: packageSummary, browser: "not run (--data-only)" }, null, 2));
+    return;
+  }
+  const browserSummary = await verifyBrowser(target.toString(), packageSummary.slug, screenshots, markerClick, packageSummary.hasGuidedTour);
 
   console.log(
     JSON.stringify(

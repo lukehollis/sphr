@@ -34,17 +34,20 @@ if [ -d public/datasets/matterport ]; then
   [ -n "$MATTERPORT" ] && echo "Matterport packages: $MATTERPORT"
 fi
 
-if [ -f ../data/pipelines/requirements-matterport.txt ]; then
+if [ -f scripts/matterport/requirements.txt ]; then
   MATTERPORT_PY="${SPHR_MATTERPORT_PYTHON:-}"
+  if [ -z "$MATTERPORT_PY" ] && [ -x .venv-matterport/bin/python ]; then
+    MATTERPORT_PY=".venv-matterport/bin/python"
+  fi
   if [ -z "$MATTERPORT_PY" ] && [ -x ../.venv-matterport/bin/python ]; then
     MATTERPORT_PY="../.venv-matterport/bin/python"
   fi
   MATTERPORT_PY="${MATTERPORT_PY:-python3}"
   if ! "$MATTERPORT_PY" - <<'PY' >/dev/null 2>&1
-import numpy, pye57, open3d, trimesh
+import numpy, PIL, pye57, open3d, trimesh, scipy, xatlas
 PY
   then
-    echo "Matterport converter Python deps missing for ${MATTERPORT_PY}. Install ../data/pipelines/requirements-matterport.txt or set SPHR_MATTERPORT_PYTHON."
+    echo "Matterport converter Python deps missing for ${MATTERPORT_PY}. Install scripts/matterport/requirements.txt or set SPHR_MATTERPORT_PYTHON."
   else
     echo "Matterport converter Python deps available via ${MATTERPORT_PY}."
   fi

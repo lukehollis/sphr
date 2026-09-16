@@ -2,7 +2,7 @@
 name: sphr-3dgs
 description: Integrate Spark-rendered 3D Gaussian splats into SPHR Next, including legacy conversion, file inspection, config wiring, transforms, loading behavior, and verification.
 argument-hint: [splat path or config] [optional transform/quality instructions]
-allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .claude/scripts/media/inspect-splat.mjs *) Bash(node .claude/scripts/media/convert-legacy-splat.mjs *) Bash(node scripts/convert-legacy-splat.mjs *) Bash(node .claude/scripts/project/validate-bootstrap.mjs *) Bash(node .claude/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .agents/scripts/media/inspect-splat.mjs *) Bash(node .agents/scripts/media/convert-legacy-splat.mjs *) Bash(node scripts/convert-legacy-splat.mjs *) Bash(node .agents/scripts/project/validate-bootstrap.mjs *) Bash(node .agents/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
 agent: sphr-3dgs
 ---
 
@@ -15,13 +15,13 @@ Spark can load standard `.splat`, `.spz`, `.ply`, `.ksplat`, `.sog`, and `.rad` 
 Older SPHR/GaussianSplats3D compressed files may look like `.splat` but are not standard Spark `.splat` rows. Inspect first:
 
 ```bash
-node .claude/scripts/media/inspect-splat.mjs <asset>
+node .agents/scripts/media/inspect-splat.mjs <asset>
 ```
 
 If the file is legacy compressed, convert it:
 
 ```bash
-node .claude/scripts/media/convert-legacy-splat.mjs <legacy.splat> public/demo/<scene>.spark.splat --max-splats=750000 --min-alpha=16
+node .agents/scripts/media/convert-legacy-splat.mjs <legacy.splat> public/demo/<scene>.spark.splat --max-splats=750000 --min-alpha=16
 ```
 
 Use a capped default for interactive web demos. Omit `--max-splats` only for high-resolution deployment assets and verify the browser can initialize it.
@@ -67,10 +67,10 @@ For porting old scenes, preserve old transform values first, then adjust by scre
 After changes:
 
 ```bash
-node .claude/scripts/project/validate-bootstrap.mjs <config-if-any>
+node .agents/scripts/project/validate-bootstrap.mjs <config-if-any>
 npm run typecheck
 npm run build
-node .claude/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
+node .agents/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
 ```
 
 Final response should include asset path, conversion command if used, splat count/size from inspection, config path, and verification outcome.

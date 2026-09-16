@@ -11,9 +11,11 @@ export class CursorLayer {
   private lastHitTime = 0;
 
   constructor() {
-    const geometry = new THREE.RingGeometry(0.2, 0.25, 64);
+    const geometry = new THREE.RingGeometry(0.065, 0.08, 48);
     const material = new THREE.MeshBasicMaterial({
       color: 0xffffff,
+      toneMapped: false,
+      fog: false,
       side: THREE.DoubleSide,
       transparent: true,
       depthTest: false,
@@ -28,7 +30,7 @@ export class CursorLayer {
     this.overlayScene.add(this.mesh);
   }
 
-  updateFromRaycaster(raycaster: THREE.Raycaster, targets: THREE.Object3D[]) {
+  updateFromRaycaster(raycaster: THREE.Raycaster, targets: THREE.Object3D[], floorOnly = false) {
     if (!targets.length) {
       this.hide();
       return;
@@ -45,6 +47,8 @@ export class CursorLayer {
     this.normalMatrix.getNormalMatrix(hit.object.matrixWorld);
     this.normal.applyMatrix3(this.normalMatrix).normalize();
 
+    if (floorOnly && Math.abs(this.normal.y) < 0.7) { this.hide(); return; }
+    this.mesh.scale.setScalar(THREE.MathUtils.clamp(hit.distance * 0.35, 0.4, 1));
     this.targetQuaternion.setFromUnitVectors(this.cursorUp, this.normal).multiply(this.additionalRotation);
     this.mesh.position.copy(hit.point).addScaledVector(this.normal, 0.01);
     this.mesh.quaternion.copy(this.targetQuaternion);
@@ -56,8 +60,8 @@ export class CursorLayer {
   update(now: number) {
     if (!this.mesh.visible) return;
     const elapsed = now - this.lastHitTime;
-    if (elapsed <= 2000) return;
-    const fade = Math.max(0, 1 - (elapsed - 2000) / 200);
+    if (elapsed <= 500) return;
+    const fade = Math.max(0, 1 - (elapsed - 500) / 200);
     this.mesh.material.opacity = fade;
     if (fade <= 0) this.mesh.visible = false;
   }
@@ -87,7 +91,7 @@ export class CursorLayer {
     };
   }
 
-  private hide() {
+  hide() {
     this.lastHitTime = 0;
     this.mesh.material.opacity = 0;
     this.mesh.visible = false;

@@ -22,6 +22,7 @@ import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { PanoramaLayer } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
+import { selectNavigationTarget } from "@/lib/three/navigation";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 
@@ -41,6 +42,8 @@ export class SphrRuntime {
   private readonly textureCache: TextureCache;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerDown = new THREE.Vector2();
+  private activePointerId: number | null = null;
+  private pointerMoved = false;
   private controls: OrbitControls;
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
@@ -95,7 +98,7 @@ export class SphrRuntime {
       activeSpaceIndex: 0,
       activePointIndex: 0,
       viewMode: "FPV",
-      guided: true,
+      guided: this.tour.hasGuidedTour,
       muted: false,
       showText: this.tour.defaultShowText,
       debug: false,
@@ -124,7 +127,7 @@ export class SphrRuntime {
 
     if (!this.bootstrap.space.space_data.noPanos && nodes.length) {
       this.panorama = new PanoramaLayer(this.scene, this.textureCache, this.bootstrap.space.version);
-      this.panorama.loadInitial(this.currentNode);
+
     }
 
     if (this.bootstrap.space.space_data.skybox) {
@@ -149,25 +152,34 @@ export class SphrRuntime {
     this.annotations = new AnnotationLayer(this.scene, this.textureCache, this.tour.annotationGraph);
 
     await Promise.all([
+      this.panorama?.loadInitial(this.currentNode),
       this.skybox?.init(),
       this.splats?.init(),
       this.iiif?.init(),
       this.sceneGraph.init()
     ]);
+    if (this.disposed) { this.sceneGraph.dispose(); return; }
     this.annotations.init();
+    this.nav?.setOccluders(this.sceneGraph.getRaycastObjects());
 
-    this.goTo(0, 0, true);
+    await this.goTo(0, 0, true);
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
   }
 
   start(guided: boolean) {
+    guided = guided && this.tour.hasGuidedTour;
     this.state.guided = guided;
     this.state.showText = guided ? this.tour.defaultShowText : false;
     const point = this.getActivePoint();
-    if (guided) this.audio.updateForPoint(point);
+    if (guided) {
+      this.audio.updateForPoint(point);
+      this.annotations?.show(point.annotations ?? point.overlays ?? []);
+      this.sceneGraph?.showOnly(point.models ?? []);
+    }
     if (!guided) {
+      this.audio.updateForPoint();
       this.annotations?.hideAll();
       this.sceneGraph?.hideAll();
     }
@@ -175,6 +187,7 @@ export class SphrRuntime {
   }
 
   next() {
+    if (!this.tour.hasGuidedTour) return;
     const space = this.tour.spaces[this.state.activeSpaceIndex];
     const isLastPoint = this.state.activePointIndex >= space.tourpoints.length - 1;
     const isLastSpace = this.state.activeSpaceIndex >= this.tour.spaces.length - 1;
@@ -192,6 +205,7 @@ export class SphrRuntime {
   }
 
   previous() {
+    if (!this.tour.hasGuidedTour) return;
     if (this.state.activePointIndex > 0) {
       this.goTo(this.state.activeSpaceIndex, this.state.activePointIndex - 1);
       return;
@@ -202,21 +216,39 @@ export class SphrRuntime {
     }
   }
 
-  goTo(spaceIndex: number, pointIndex: number, instant = false) {
+  async goTo(spaceIndex: number, pointIndex: number, instant = false, preserveHeading = false, forceFirstPerson = false) {
     const outgoingPoint = this.getActivePoint();
     const point = activeTourPoint(this.tour, spaceIndex, pointIndex);
     if (!point) return;
     if (this.isNavigating && !instant) return;
 
+    const fromOverview = this.state.viewMode === "ORBIT";
     const outgoingNode = this.currentNode;
     const node = this.resolveNode(point.nodeUUID);
     const nodeChanged = Boolean(node && node.uuid !== outgoingNode?.uuid);
-    const nextViewMode = point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
+    const heading = this.camera.getWorldDirection(new THREE.Vector3());
+    if (nodeChanged || (fromOverview && !instant)) {
+      this.isNavigating = true;
+      this.state.navigating = true;
+      this.controls.enabled = false;
+      this.state.navigationError = undefined;
+      this.emitState();
+      try { if (nodeChanged) await this.panorama?.prepare(node!); }
+      catch (error) {
+        this.endNavigationTransition();
+        this.state.navigationError = error instanceof Error ? error.message : "Unable to load this location";
+        this.emitState();
+        return;
+      }
+      if (this.disposed) return;
+    }
+    const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
 
     this.state.activeSpaceIndex = spaceIndex;
     this.state.activePointIndex = pointIndex;
     this.state.viewMode = nextViewMode;
     this.updateControlsForViewMode();
+    this.nav?.setOrbit(nextViewMode === "ORBIT");
 
     this.splats?.setStudyMode(point.extra);
     this.applySkyboxMode(point.extra);
@@ -225,32 +257,54 @@ export class SphrRuntime {
     this.sceneGraph?.showOnly(point.models ?? []);
     this.sceneGraph?.setViewMode(this.state.viewMode, this.state.debug);
 
-    const navigationTransition = nodeChanged && !instant && this.state.viewMode === "FPV"
+    const returningFromOverview = fromOverview && nextViewMode === "FPV" && !instant;
+    const teleport = nodeChanged && !fromOverview && Boolean(outgoingNode?.neighbors && !outgoingNode.neighbors.includes(node!.uuid));
+    const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV"
       ? this.beginNavigationTransition(outgoingNode)
       : null;
 
     if (node) {
       this.currentNode = node;
-      this.panorama?.navigate(node);
+      this.panorama?.navigate(node, this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 700, returningFromOverview || Boolean(navigationTransition));
       this.nav?.setActive(node.uuid);
     }
 
     this.audio.play("navigate");
-    this.audio.updateForPoint(point, outgoingPoint);
+    this.audio.updateForPoint(this.state.guided ? point : undefined, outgoingPoint);
 
-    this.flyTo(this.poseForPoint(point, this.state.viewMode), instant);
-    if (navigationTransition) this.scheduleNavigationTransitionEnd(navigationTransition.navigationMs);
+    this.panorama?.setVisible(this.state.viewMode === "FPV");
+    const pose = this.poseForPoint(point, this.state.viewMode);
+    if (preserveHeading && this.state.viewMode === "FPV") {
+      pose.target.copy(pose.position).addScaledVector(heading, 0.1);
+      pose.fov = this.camera.fov;
+    }
+    if (returningFromOverview) this.flyFromOverview(pose);
+    else {
+      this.flyTo(pose, instant || teleport);
+      if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationTransition?.navigationMs ?? (teleport ? 700 : 1100));
+      else if (this.isNavigating) this.endNavigationTransition();
+    }
+    if (node) this.prefetchNeighbors(node);
     this.emitState();
   }
 
   toggleViewMode() {
+    if (this.isNavigating) return;
     const newMode = this.state.viewMode === "FPV" ? "ORBIT" : "FPV";
     this.state.viewMode = newMode;
     this.updateControlsForViewMode();
     const point = this.getActivePoint();
-    this.flyTo(this.poseForPoint(point, newMode));
+    const pose = this.currentNode ? this.poseForNode(this.currentNode, newMode, point) : this.poseForPoint(point, newMode);
+    this.nav?.setOrbit(newMode === "ORBIT");
     this.panorama?.setVisible(newMode === "FPV");
     this.sceneGraph?.setViewMode(newMode, this.state.debug);
+    if (newMode === "FPV") this.flyFromOverview(pose);
+    else {
+      this.isNavigating = true;
+      this.state.navigating = true;
+      this.controls.enabled = false;
+      this.flyTo(pose, false, () => this.endNavigationTransition());
+    }
     this.emitState();
   }
 
@@ -281,13 +335,16 @@ export class SphrRuntime {
   }
 
   getState() {
-    return { ...this.state, loading: { ...this.state.loading } };
+    return { ...this.state, activeNodeId: this.currentNode?.uuid, loading: { ...this.state.loading } };
   }
 
   getDebugSnapshot() {
     return {
       state: this.getState(),
       raycastTargets: this.sceneGraph?.getRaycastObjects().length ?? 0,
+      panorama: this.panorama?.getDebugSnapshot(),
+      textures: this.textureCache.getStats(),
+      navigation: this.nav?.getDebugSnapshot(),
       cursor: this.cursor?.getDebugState() ?? null,
       sceneGraph: this.sceneGraph?.getDebugSnapshot() ?? null,
       navigationTransition: {
@@ -343,7 +400,7 @@ export class SphrRuntime {
   }
 
   private setupScene() {
-    this.scene.fog = new THREE.FogExp2(0x090b12, 0.008);
+    this.scene.fog = this.getNodes().length ? null : new THREE.FogExp2(0x090b12, 0.008);
     const ambient = new THREE.AmbientLight(0xf3efe6, 1.7);
     this.scene.add(ambient);
 
@@ -356,16 +413,17 @@ export class SphrRuntime {
     const config = this.bootstrap.space.space_data.navigationTransition;
     if (config?.enabled === false || !this.hasTransitionMeshConfig(this.tour.sceneGraph)) return;
 
-    const requestedSize = config?.cubeRenderTargetSize ?? 2048;
+    const requestedSize = Math.min(config?.cubeRenderTargetSize ?? 1024, window.innerWidth < 768 ? 1024 : 2048);
     const maxSize = this.renderer.capabilities.maxCubemapSize || requestedSize;
     const size = Math.min(maxSize, this.previousPowerOfTwo(Math.max(256, requestedSize)));
     this.cubeRenderTarget = new THREE.WebGLCubeRenderTarget(size, {
       generateMipmaps: true,
       minFilter: THREE.LinearMipmapLinearFilter,
-      magFilter: THREE.NearestFilter,
+      magFilter: THREE.LinearFilter,
       wrapS: THREE.ClampToEdgeWrapping,
       wrapT: THREE.ClampToEdgeWrapping,
-      mapping: THREE.CubeRefractionMapping
+      mapping: THREE.CubeReflectionMapping,
+      type: THREE.HalfFloatType
     });
     this.cubeCamera = new THREE.CubeCamera(0.1, 1000, this.cubeRenderTarget);
     this.cubeScene = new THREE.Scene();
@@ -401,13 +459,16 @@ export class SphrRuntime {
     resize();
     this.resizeObserver = new ResizeObserver(resize);
     this.resizeObserver.observe(this.canvas);
-    window.addEventListener("resize", resize);
+
   }
 
   private attachEvents() {
     this.canvas.addEventListener("pointerdown", this.handlePointerDown);
     this.canvas.addEventListener("pointermove", this.handlePointerMove);
     this.canvas.addEventListener("pointerup", this.handlePointerUp);
+    this.canvas.addEventListener("pointercancel", this.handlePointerCancel);
+    this.canvas.addEventListener("dblclick", this.handleDoubleClick);
+    this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
     window.addEventListener("keydown", this.handleKeyDown);
   }
 
@@ -415,14 +476,23 @@ export class SphrRuntime {
     this.canvas.removeEventListener("pointerdown", this.handlePointerDown);
     this.canvas.removeEventListener("pointermove", this.handlePointerMove);
     this.canvas.removeEventListener("pointerup", this.handlePointerUp);
+    this.canvas.removeEventListener("pointercancel", this.handlePointerCancel);
+    this.canvas.removeEventListener("dblclick", this.handleDoubleClick);
+    this.canvas.removeEventListener("wheel", this.handleWheel);
     window.removeEventListener("keydown", this.handleKeyDown);
   }
 
   private handlePointerDown = (event: PointerEvent) => {
+    if (!event.isPrimary || this.activePointerId !== null) { this.pointerMoved = true; return; }
+    this.activePointerId = event.pointerId;
+    this.pointerMoved = this.isNavigating || !this.state.loading.ready;
     this.pointerDown.set(event.clientX, event.clientY);
+    this.cursor?.hide();
   };
 
   private handlePointerMove = (event: PointerEvent) => {
+    if (this.activePointerId === event.pointerId && Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y) > 5) this.pointerMoved = true;
+    if (event.buttons || this.isNavigating) { this.cursor?.hide(); return; }
     const targets = this.sceneGraph?.getRaycastObjects() ?? [];
     if (!targets.length) return;
 
@@ -432,14 +502,25 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
-    this.cursor?.updateFromRaycaster(this.raycaster, targets);
+    const canNavigate = Boolean(this.nav?.getIntersectedNode(this.raycaster) || this.findPanoramaNavigationNode());
+    this.canvas.style.cursor = canNavigate ? "pointer" : "grab";
+    if (!this.panorama || canNavigate) this.cursor?.updateFromRaycaster(this.raycaster, targets, Boolean(this.panorama));
+    else this.cursor?.hide();
+  };
+
+  private handlePointerCancel = () => {
+    this.activePointerId = null;
+    this.pointerMoved = true;
   };
 
   private handlePointerUp = (event: PointerEvent) => {
+    if (event.pointerId !== this.activePointerId) return;
+    this.activePointerId = null;
     const dx = event.clientX - this.pointerDown.x;
     const dy = event.clientY - this.pointerDown.y;
-    if (Math.hypot(dx, dy) > 5) return;
-    if (this.state.guided && this.state.viewMode === "ORBIT") return;
+    if (this.pointerMoved || Math.hypot(dx, dy) > 5 || this.isNavigating || event.button !== 0) return;
+    // A single click in dollhouse must not consume the first half of a double click.
+    if (this.state.viewMode === "ORBIT") return;
 
     const rect = this.canvas.getBoundingClientRect();
     const pointer = new THREE.Vector2(
@@ -453,7 +534,7 @@ export class SphrRuntime {
       return;
     }
 
-    const directionalNode = this.findDirectionalNavigationNode();
+    const directionalNode = this.findPanoramaNavigationNode();
     if (directionalNode) {
       this.navigateToNode(directionalNode);
       return;
@@ -462,28 +543,96 @@ export class SphrRuntime {
     this.handleMeshFloorNavigation();
   };
 
+  private handleDoubleClick = (event: MouseEvent) => {
+    if (event.button !== 0 || this.state.viewMode !== "ORBIT" || this.isNavigating) return;
+    if (this.pointerMoved || Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y) > 5) return;
+    event.preventDefault();
+
+    const rect = this.canvas.getBoundingClientRect();
+    this.raycaster.setFromCamera(new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    ), this.camera);
+    const hit = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+    let node = this.nav?.getIntersectedNode(this.raycaster) ?? null;
+    // Markers behind the visible surface must not select a different room or floor.
+    if (node && hit && this.nav && this.camera.position.distanceTo(this.nav.getWorldFloorPosition(node)) > hit.distance + 0.2) node = null;
+    if (!node && hit && this.nav) {
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const candidate of this.getNodes()) {
+        const distance = this.nav.getWorldFloorPosition(candidate).distanceToSquared(hit.point);
+        if (distance < nearestDistance) { nearestDistance = distance; node = candidate; }
+      }
+    }
+    // Empty background returns to the current scan; surfaces enter the nearest scan.
+    node ??= this.currentNode;
+    if (node) void this.navigateToNode(node);
+    else this.toggleViewMode();
+  };
+
+  private handleWheel = (event: WheelEvent) => {
+    if (this.state.viewMode !== "FPV" || this.isNavigating) return;
+    event.preventDefault();
+    this.camera.fov = THREE.MathUtils.clamp(this.camera.fov + event.deltaY * 0.025, 30, 95);
+    this.camera.updateProjectionMatrix();
+  };
+
   private handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "\\") this.toggleDebug();
   };
 
-  private navigateToNode(node: NodeData) {
+  navigateNode(uuid: string) {
+    const node = this.resolveNode(uuid);
+    if (node) void this.navigateToNode(node);
+  }
+
+  private async navigateToNode(node: NodeData) {
     if (this.isNavigating) return;
+    const fromOverview = this.state.viewMode === "ORBIT";
     const tourPoint = this.findTourPointForNode(node.uuid);
     if (tourPoint) {
-      this.goTo(tourPoint.spaceIndex, tourPoint.pointIndex);
+      await this.goTo(tourPoint.spaceIndex, tourPoint.pointIndex, false, !fromOverview, fromOverview);
       return;
     }
-
-    const outgoingNode = this.currentNode;
-    const transition = node.uuid !== outgoingNode?.uuid && this.state.viewMode === "FPV"
-      ? this.beginNavigationTransition(outgoingNode)
-      : null;
-    this.currentNode = node;
-    this.panorama?.navigate(node);
-    this.nav?.setActive(node.uuid);
-    this.flyTo(this.poseForNode(node, this.state.viewMode));
-    if (transition) this.scheduleNavigationTransitionEnd(transition.navigationMs);
+    this.isNavigating = true;
+    this.state.navigating = true;
+    this.state.navigationError = undefined;
+    this.controls.enabled = false;
     this.emitState();
+    try { await this.panorama?.prepare(node); }
+    catch (error) {
+      this.endNavigationTransition();
+      this.state.navigationError = String(error);
+      this.emitState();
+      return;
+    }
+    if (this.disposed) return;
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    const transition = fromOverview ? null : this.beginNavigationTransition(this.currentNode);
+    this.currentNode = node;
+    this.panorama?.navigate(node, 700, fromOverview || Boolean(transition));
+    this.panorama?.setVisible(true);
+    this.state.viewMode = "FPV";
+    this.updateControlsForViewMode();
+    this.sceneGraph?.setViewMode("FPV", this.state.debug);
+    this.nav?.setOrbit(false);
+    this.nav?.setActive(node.uuid);
+    const pose = this.poseForNode(node, "FPV");
+    if (!fromOverview) pose.target.copy(pose.position).addScaledVector(direction, 0.1);
+    if (fromOverview) this.flyFromOverview(pose);
+    else {
+      this.flyTo(pose);
+      this.scheduleNavigationTransitionEnd(transition?.navigationMs ?? 1100);
+    }
+    this.emitState();
+    this.prefetchNeighbors(node);
+  }
+
+  private prefetchNeighbors(node: NodeData) {
+    const neighbors = this.nav?.getNavigableNodes() ?? [];
+    for (const neighbor of neighbors.filter((item) => item.uuid !== node.uuid).slice(0, 2)) {
+      void this.panorama?.prepare(neighbor).then(() => this.textureCache.trim()).catch(() => {});
+    }
   }
 
   private findTourPointForNode(nodeUUID: string) {
@@ -495,28 +644,20 @@ export class SphrRuntime {
     return null;
   }
 
-  private findDirectionalNavigationNode() {
-    if (this.state.viewMode !== "FPV" || !this.currentNode) return null;
-
-    const clickDirection = this.raycaster.ray.direction.clone().normalize();
-    let nearestNode: NodeData | null = null;
-    let smallestAngle = Number.POSITIVE_INFINITY;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    for (const node of this.getNodes()) {
-      if (node.uuid === this.currentNode.uuid) continue;
-      const nodePosition = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
-      const directionToNode = nodePosition.clone().sub(this.camera.position).normalize();
-      const angle = clickDirection.angleTo(directionToNode);
-      const distance = this.camera.position.distanceTo(nodePosition);
-      if (angle < Math.PI / 8 && angle < smallestAngle && distance < nearestDistance) {
-        nearestNode = node;
-        smallestAngle = angle;
-        nearestDistance = distance;
-      }
+  private findPanoramaNavigationNode() {
+    if (this.state.viewMode !== "FPV" || !this.currentNode || !this.nav) return null;
+    const hit = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+    let floorHit: THREE.Vector3 | null = null;
+    if (hit?.face) {
+      const normal = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+      if (Math.abs(normal.y) >= 0.7) floorHit = hit.point;
     }
-
-    return nearestNode;
+    return selectNavigationTarget(
+      this.raycaster.ray,
+      this.nav.getNavigableNodes().map((node) => ({ value: node, floor: this.nav!.getWorldFloorPosition(node) })),
+      this.nav.getWorldFloorPosition(this.currentNode),
+      floorHit
+    );
   }
 
   private startAnimationLoop() {
@@ -529,18 +670,40 @@ export class SphrRuntime {
       if (this.cameraTween && !this.cameraTween.update(now)) this.cameraTween = null;
       if (this.transitionMeshTween && !this.transitionMeshTween.update(now)) this.transitionMeshTween = null;
       if (this.navigationReleaseTween && !this.navigationReleaseTween.update(now)) this.navigationReleaseTween = null;
-      this.controls.update();
+      // OrbitControls clamps FPV distance to 0.1m. It must not rewrite an in-flight pose.
+      if (!this.cameraTween) this.controls.update();
       this.skybox?.update(this.camera);
       this.panorama?.update(this.camera);
-      this.updateNavigationTransitionCapture();
       this.cursor?.update(now);
       this.renderer.render(this.scene, this.camera);
       this.cursor?.render(this.renderer, this.camera);
     });
   }
 
-  private flyTo(pose: CameraPose, instant = false, onComplete?: () => void) {
+  private flyFromOverview(pose: CameraPose) {
+    this.isNavigating = true;
+    this.state.navigating = true;
+    this.controls.enabled = false;
+    this.nav?.setVisible(false);
+    this.panorama?.setVisible(true);
+    this.panorama?.setPresentationOpacity(0);
+    this.sceneGraph?.setOverviewReturnBlend(0);
+    this.flyTo(pose, false, () => {
+      this.panorama?.setPresentationOpacity(1);
+      this.sceneGraph?.setOverviewReturnBlend(null);
+      this.endNavigationTransition();
+    }, (progress) => {
+      // Retain spatial depth during the flight; reveal the photo only near its capture origin.
+      const blend = THREE.MathUtils.smoothstep(progress, 0.85, 1);
+      this.panorama?.setPresentationOpacity(blend);
+      this.sceneGraph?.setOverviewReturnBlend(blend);
+    });
+  }
+
+  private flyTo(pose: CameraPose, instant = false, onComplete?: () => void, onUpdate?: (progress: number) => void) {
     if (instant) {
+      this.cameraTween?.cancel();
+      this.cameraTween = null;
       this.setCameraPose(pose, true);
       onComplete?.();
       return;
@@ -551,12 +714,14 @@ export class SphrRuntime {
     const fromFov = this.camera.fov;
     this.cameraTween?.cancel();
     this.cameraTween = createTween({
-      duration: 1100,
+      duration: this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100,
       onUpdate: (value) => {
         this.camera.position.lerpVectors(fromPosition, pose.position, value);
         this.controls.target.lerpVectors(fromTarget, pose.target, value);
         this.camera.fov = fromFov + (pose.fov - fromFov) * value;
         this.camera.updateProjectionMatrix();
+        this.camera.lookAt(this.controls.target);
+        onUpdate?.(value);
       },
       onComplete
     });
@@ -581,6 +746,16 @@ export class SphrRuntime {
   }
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {
+    if (mode === "ORBIT") {
+      const bounds = this.sceneGraph?.getBounds();
+      if (bounds && !bounds.isEmpty()) {
+        const center = bounds.getCenter(new THREE.Vector3());
+        const radius = bounds.getSize(new THREE.Vector3()).length() * 0.5;
+        const fov = 50;
+        const fit = radius / Math.sin(THREE.MathUtils.degToRad(fov * 0.5)) / Math.min(1, this.camera.aspect);
+        return { position: center.clone().add(new THREE.Vector3(0.7, 1, 0.85).normalize().multiplyScalar(fit)), target: center, fov };
+      }
+    }
     const target = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
     return this.poseForTarget(target, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode);
   }
@@ -625,10 +800,13 @@ export class SphrRuntime {
 
     this.isNavigating = true;
     this.state.navigating = true;
-    this.panorama.prepareTransitionCapture(this.cubeScene, outgoingNode, this.camera.position);
-    this.updateNavigationTransitionCapture();
+    const origin = this.nav?.getWorldPosition(outgoingNode) ?? vectorFromLike(outgoingNode.position);
+    this.panorama.prepareTransitionCapture(this.cubeScene, outgoingNode, origin);
+    this.cubeCamera.position.copy(origin);
+    this.cubeCamera.update(this.renderer, this.cubeScene);
 
     const meshState = this.sceneGraph.showNavigationTransition(this.cubeRenderTarget.texture, {
+      origin,
       meshIds: config?.meshIds,
       opacity: config?.opacity,
       fadeMs: config?.meshFadeMs
@@ -638,11 +816,15 @@ export class SphrRuntime {
       return null;
     }
 
+    const navigationMs = config?.navigationMs ?? 1100;
+    const fadeMs = Math.min(meshState.fadeMs, navigationMs * 0.4);
+    this.nav?.setVisible(false);
     this.transitionMeshTween = createTween({
-      duration: meshState.fadeMs,
+      duration: navigationMs,
       easing: (value) => value,
       onUpdate: (value) => {
-        this.sceneGraph?.setNavigationTransitionOpacity(meshState.initialOpacity * (1 - value));
+        const fade = Math.max(0, (value * navigationMs - (navigationMs - fadeMs)) / fadeMs);
+        this.sceneGraph?.setNavigationTransitionOpacity(meshState.initialOpacity * (1 - fade));
       },
       onComplete: () => {
         this.sceneGraph?.restoreNavigationTransition();
@@ -651,7 +833,7 @@ export class SphrRuntime {
 
     this.emitState();
     return {
-      navigationMs: Math.max(config?.navigationMs ?? 1100, meshState.fadeMs)
+      navigationMs
     };
   }
 
@@ -667,17 +849,12 @@ export class SphrRuntime {
 
   private endNavigationTransition() {
     this.sceneGraph?.restoreNavigationTransition();
+    this.nav?.setVisible(true);
     this.panorama?.clearTransitionCapture();
     this.isNavigating = false;
     this.state.navigating = false;
+    this.controls.enabled = true;
     this.emitState();
-  }
-
-  private updateNavigationTransitionCapture() {
-    if (!this.isNavigating || !this.cubeCamera || !this.cubeScene || !this.panorama) return;
-    this.cubeCamera.position.copy(this.camera.position);
-    this.panorama.updateTransitionCapture(this.camera.position);
-    this.cubeCamera.update(this.renderer, this.cubeScene);
   }
 
   private handleMeshFloorNavigation() {
@@ -768,7 +945,7 @@ export class SphrRuntime {
       this.scene.fog = new THREE.FogExp2(0x050711, 0.014);
     } else {
       this.renderer.toneMappingExposure = 1.15;
-      this.scene.fog = new THREE.FogExp2(0x090b12, 0.008);
+      this.scene.fog = this.getNodes().length ? null : new THREE.FogExp2(0x090b12, 0.008);
     }
   }
 
@@ -795,6 +972,7 @@ export class SphrRuntime {
   }
 
   private emitState() {
+    this.canvas.dataset.sphrState = JSON.stringify(this.getDebugSnapshot());
     this.callbacks.onState?.(this.getState());
   }
 }

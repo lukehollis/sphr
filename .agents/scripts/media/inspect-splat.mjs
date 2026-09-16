@@ -7,7 +7,7 @@ const root = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const target = process.argv[2];
 
 if (!target) {
-  console.error("Usage: node .claude/scripts/media/inspect-splat.mjs <asset.splat|asset.ksplat>");
+  console.error("Usage: node .agents/scripts/media/inspect-splat.mjs <asset.splat|asset.ksplat>");
   process.exit(1);
 }
 

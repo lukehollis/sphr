@@ -18,6 +18,24 @@ https://github.com/user-attachments/assets/169c7729-e4d7-4889-99d2-42d81e33a6d8
 
 
 
+## Matterport E57 migration
+
+Import a Matterport export ZIP or E57 into a complete local tour:
+
+```sh
+python3 -m venv .venv-matterport
+.venv-matterport/bin/pip install -r scripts/matterport/requirements.txt
+npm run import:matterport -- --e57 /path/to/export.zip
+npm run dev
+```
+
+Open `/` to browse thumbnails, search, sort and copy permanent scene links. `/library`
+redirects to this collection. See [collection and hosting](docs/scene-library.md).
+The importer derives image orientation from camera
+poses, preserves meters, fuses measured depth into a mesh of at most 50,000 triangles,
+and validates every scan before publishing. See [the migration guide](docs/matterport.md)
+for configuration, geometry conventions, quality checks, and output files.
+
 ## 3D Gaussian Splatting  
 
 The reworked SPHR is centered on 3D Gaussian Splatting. The runtime can load splat assets or 360 images, etc directly in the browser, place them in a Three.js scene, animate camera movement through the capture, and layer guided tour text, UI controls, skyboxes, annotations, models, and effects over the scene.
@@ -133,14 +151,17 @@ Open my local 3DGS capture in SPHR. Inspect the asset format, serve it from an i
 
 ## Loading Your Own Scene
 
-The app starts in `components/SphrApp.tsx` and calls `loadBootstrapData()` from `lib/bootstrap.ts`.
+The homepage lists imported scenes. A `/s/<sceneId>/<title-slug>` route selects a package
+by its saved ID and passes its config to `components/SphrApp.tsx`. Older title slugs
+redirect to the current title. Existing query-based scene URLs remain supported.
 
-Bootstrap data can come from four places, in this order:
+Inside the viewer, `loadBootstrapData()` from `lib/bootstrap.ts` resolves data in this order:
 
-1. `?config=/path/to/bootstrap.json`
-2. `window.__SPHR_BOOTSTRAP__`
-3. embedded script tags with IDs `space_data`, `tour_data`, `ordered_spaces_data`, and `ui_data`
-4. the built-in garden demo
+1. the explicit config selected by the scene route
+2. `?config=/path/to/bootstrap.json`
+3. `window.__SPHR_BOOTSTRAP__`
+4. embedded script tags with IDs `space_data`, `tour_data`, `ordered_spaces_data`, and `ui_data`
+5. fallback local/demo data (`?demo=garden` opens the bundled demo)
 
 The recommended integration path is a single bootstrap JSON file:
 

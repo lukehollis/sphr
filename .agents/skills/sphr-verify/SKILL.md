@@ -1,58 +1,49 @@
 ---
 name: sphr-verify
-description: Run complete SPHR Next verification for renderer, tour, layout, asset, and production-build changes.
-argument-hint: [optional --url URL]
-allowed-tools: Read Glob Bash(ls *) Bash(node .claude/scripts/project/sphr-state.mjs *) Bash(node .claude/scripts/project/asset-inventory.mjs *) Bash(node .claude/scripts/project/validate-bootstrap.mjs *) Bash(node .claude/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *) Bash(lsof *)
-agent: sphr-verify
+description: Verify actual SPHR scene rendering, package integrity, navigation, tour availability, mobile layout and production builds after implementation.
 ---
 
-Use this after SPHR implementation work. Do not reduce it to a smoke test when rendering or tour UI changed.
+# SPHR verification
 
-## Verification Steps
+Read the requested change and target config. Inspect project state if paths/assets are
+unclear; do not substitute the default demo for a requested capture. Use host browser
+tools when supplied, and follow their interaction policy.
 
-1. Inspect project state:
-
-```bash
-node .claude/scripts/project/sphr-state.mjs
-node .claude/scripts/project/asset-inventory.mjs
-node .claude/scripts/project/validate-bootstrap.mjs
-```
-
-2. Ensure a dev server is running for browser verification:
-
-```bash
-lsof -i :3000 -sTCP:LISTEN -n -P
-npm run dev -- --port 3000
-```
-
-3. Run code checks:
-
-```bash
+```sh
+node .agents/scripts/project/sphr-state.mjs
+node .agents/scripts/project/validate-bootstrap.mjs public/datasets/matterport/my-space/bootstrap.json
 npm run typecheck
 npm run build
 ```
 
-4. Run browser checks:
+For Matterport packages run `npm run test:matterport -- <dataset>` and use
+[the full checklist](../sphr-matterport/references/verification.md). Source/camera/image
+validation is separate from observing a usable viewer.
 
-```bash
-node .claude/scripts/project/verify-app.mjs --url http://localhost:3000 --screenshots
+Where standalone browser execution is permitted, the runnable helper is:
+
+```sh
+node .agents/scripts/project/verify-app.mjs --url 'http://localhost:3002/?config=/datasets/matterport/my-space/bootstrap.json' --screenshots
 ```
 
-For a config-specific scene:
+It waits for automatic scene entry, checks HUD/layout/render diagnostics and
+exercises overview/double-click return on desktop/mobile. Screenshots and numeric checks
+still need interpretation; they are not automatic proof of photographic alignment.
 
-```bash
-node .claude/scripts/project/verify-app.mjs --url "http://localhost:3000/?config=/configs/<scene>.json" --screenshots
-```
+## Accept only observed behavior
 
-## Pass Criteria
+- Scene opens without any start click or intro screen. Tourless imports enter free
+  exploration; authored tours start guided with working icon controls and navigation.
+- Real 3DGS/panorama/IIIF content renders; assets return successfully; errors are understood.
+- Real single clicks on a marker and on floor between markers change active node/camera
+  and settle. Drags stay at the current scan. Prefetch is not navigation.
+- Dollhouse works and double-click returns to eye-level first person.
+- Desktop/mobile title and HUD do not overlap; removed branding/dropdown stay removed.
+- On mobile guided tours, Next is full-width at the bottom with small Previous above,
+  settings/guide toggle are in the header, and dollhouse appears only after switching
+  to free exploration. Mute exists only with audio; debug markers never appear as a button.
+- Runtime changes retain relevant 3DGS, tour, annotation/audio and image behavior.
+- Machine receipts match the actual assets; unsupported source layouts fail explicitly.
 
-- No type/build failures.
-- Bootstrap assets exist.
-- No failed resource requests.
-- Start button becomes enabled.
-- Starting the scene mounts HUD/tour controls.
-- Desktop and mobile screenshots are produced.
-- Mobile lower HUD controls do not overlap tour navigation.
-- Any remaining console warnings are understood and reported.
-
-Final response should list the exact commands run, pass/fail status, screenshot paths when generated, and any residual warnings.
+Record exact commands and inspected scenarios/locations, screenshots when saved, and
+remaining source limits. A smoke test alone is insufficient for a changed rendering path.

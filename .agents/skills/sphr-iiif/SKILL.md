@@ -2,7 +2,7 @@
 name: sphr-iiif
 description: Build and verify SPHR IIIF image server scenes and inspectable image planes.
 argument-hint: [IIIF image/canvas/service URL or config]
-allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .claude/scripts/project/validate-bootstrap.mjs *) Bash(node .claude/scripts/tour/create-bootstrap.mjs *) Bash(node .claude/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
+allowed-tools: Read Write Glob Bash(ls *) Bash(rg *) Bash(node .agents/scripts/project/validate-bootstrap.mjs *) Bash(node .agents/scripts/tour/create-bootstrap.mjs *) Bash(node .agents/scripts/project/verify-app.mjs *) Bash(npm run typecheck *) Bash(npm run build *)
 agent: sphr-iiif
 ---
 
@@ -44,10 +44,10 @@ Set `space.type` to `iiif`. Use either `space.src` or `space.space_data.iiif`.
 ## Verification
 
 ```bash
-node .claude/scripts/project/validate-bootstrap.mjs <config>
+node .agents/scripts/project/validate-bootstrap.mjs <config>
 npm run typecheck
 npm run build
-node .claude/scripts/project/verify-app.mjs --url "http://localhost:3000/?config=/configs/<config>.json" --screenshots
+node .agents/scripts/project/verify-app.mjs --url "http://localhost:3000/?config=/configs/<config>.json" --screenshots
 ```
 
 Final response should report IIIF source URL, info URL/aspect behavior, config path, and verification outcome.

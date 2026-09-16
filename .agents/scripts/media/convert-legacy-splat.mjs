@@ -7,7 +7,7 @@ const root = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const converter = path.join(root, "scripts", "convert-legacy-splat.mjs");
 
 if (process.argv.length < 4) {
-  console.error("Usage: node .claude/scripts/media/convert-legacy-splat.mjs <legacy.splat> <output.splat> [--max-splats=N] [--min-alpha=N]");
+  console.error("Usage: node .agents/scripts/media/convert-legacy-splat.mjs <legacy.splat> <output.splat> [--max-splats=N] [--min-alpha=N]");
   process.exit(1);
 }
 

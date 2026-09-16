@@ -1,0 +1,82 @@
+:root {
+  color-scheme: light;
+  /* base */
+  --ink: #111111;             /* process black */
+  --ink-soft: #222222;
+  --gray-cool: #97999b;       /* PMS Cool Gray 7 */
+  --gray-warm: #7d7e72;       /* NASA warm gray */
+  --gray-mid: #555555;
+  --gray-label: #888888;
+  --hairline: #dddddd;
+  --hairline-soft: #eeeeee;
+  --paper: #ffffff;
+  --paper-tint: #f1f0ee;
+  --paper-cream: #f2efe6;     /* manual page stock */
+  --desk: #e6e4df;            /* page surround */
+
+  /* theme-invariant (physical artifacts: signs, reversed panels, on-accent text) */
+  --always-ink: #111111;
+  --always-paper: #ffffff;
+
+  /* graph-paper grid (logotype grid drawings, big-type displays) */
+  --grid-line: rgba(17, 17, 17, 0.12);
+  --bg-graph-paper: repeating-linear-gradient(to right, var(--grid-line) 0 1px, transparent 1px 26px), repeating-linear-gradient(to bottom, var(--grid-line) 0 1px, transparent 1px 26px);
+
+  /* semantic */
+  --accent: #0098db;
+  --accent-press: #0086c2;
+  --text-on-accent: #ffffff;
+  --text-heading: var(--ink);
+  --text-body: var(--ink-soft);
+  --text-muted: var(--gray-mid);
+  --text-label: var(--gray-label);
+  --surface-page: var(--paper);
+  --surface-desk: var(--desk);
+  --surface-card: var(--paper);
+  --rule-strong-color: var(--ink);
+  --rule-hair-color: var(--hairline);
+}
+
+/* Dark theme — the manual's reversed pages: near-black stock, warm off-white ink,
+   SPHR blue accent. Set data-theme="dark" on <html> or any wrapper element. */
+[data-theme="dark"],
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent-press: #29ace6;  /* lighten on press against dark stock */
+  --ink: #f2f1ed;
+  --ink-soft: #d8d6d0;
+  --gray-warm: #8a8b7f;
+  --gray-mid: #a5a39c;
+  --gray-label: #8f8d86;
+  --hairline: #333333;
+  --hairline-soft: #262626;
+  --paper: #111111;
+  --paper-tint: #1c1b19;
+  --paper-cream: #1a1915;
+  --desk: #050505;
+  --grid-line: rgba(242, 241, 237, 0.14);
+  --shadow-paper: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --shadow-desk: 0 0 40px rgba(0, 0, 0, 0.7);
+}
+
+/* Follow the OS unless the page explicitly opts into light */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --accent-press: #29ace6;
+    --ink: #f2f1ed;
+    --ink-soft: #d8d6d0;
+    --gray-warm: #8a8b7f;
+    --gray-mid: #a5a39c;
+    --gray-label: #8f8d86;
+    --hairline: #333333;
+    --hairline-soft: #262626;
+    --paper: #111111;
+    --paper-tint: #1c1b19;
+    --paper-cream: #1a1915;
+    --desk: #050505;
+    --grid-line: rgba(242, 241, 237, 0.14);
+    --shadow-paper: 0 2px 12px rgba(0, 0, 0, 0.5);
+    --shadow-desk: 0 0 40px rgba(0, 0, 0, 0.7);
+  }
+}

@@ -1,0 +1,7 @@
+numpy>=1.26
+Pillow>=10
+pye57
+open3d
+trimesh
+scipy>=1.11
+xatlas==0.0.11
