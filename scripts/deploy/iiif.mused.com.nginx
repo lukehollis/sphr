@@ -1,0 +1,71 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name iiif.mused.com iiif.mused.org;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/iiif-acme;
+        default_type text/plain;
+    }
+    location / {
+        add_header Access-Control-Allow-Origin "*" always;
+        return 301 https://iiif.mused.com$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name iiif.mused.com;
+    ssl_certificate /etc/letsencrypt/live/iiif.mused.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/iiif.mused.com/privkey.pem;
+    # Match the VM's existing working TLS policy (including its default vhost).
+    ssl_protocols TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers EECDH+AESGCM:EDH+AESGCM;
+    ssl_ecdh_curve secp384r1;
+    ssl_session_timeout 10m;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/iiif-acme;
+        default_type text/plain;
+    }
+    location / {
+        # No URI suffix: preserve escaped slashes in IIIF identifiers.
+        proxy_pass http://127.0.0.1:8888;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_read_timeout 180s;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name iiif.mused.org;
+    ssl_certificate /etc/letsencrypt/live/iiif.mused.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/iiif.mused.com/privkey.pem;
+    # Match the VM's existing working TLS policy (including its default vhost).
+    ssl_protocols TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers EECDH+AESGCM:EDH+AESGCM;
+    ssl_ecdh_curve secp384r1;
+    ssl_session_timeout 10m;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/iiif-acme;
+        default_type text/plain;
+    }
+    location / {
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Range" always;
+        if ($request_method = OPTIONS) { return 204; }
+        return 301 https://iiif.mused.com$request_uri;
+    }
+}

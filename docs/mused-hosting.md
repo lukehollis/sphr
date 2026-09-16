@@ -14,11 +14,12 @@ Project: `archimedes-01201`.
 | `static.mused.com` | `mused` | `34.36.73.63` |
 | `spaces.mused.com` | `mused-spaces` | `34.110.150.140` |
 | `tours.mused.com` | `mused-em` | `34.149.137.219` |
+| `iiif.mused.com` | Image VM `iiif-loris` | `35.185.123.17` |
 
 Create explicit A records for these hostnames at the authoritative DNS provider.
-Use DNS-only records pointing directly to the GCP load balancers; Google-managed
+Use DNS-only records for the app and bucket domains. Google-managed
 certificate validation must see those frontend IPs. Remove conflicting records for
-these same names. The existing `.org` frontends remain usable.
+these same names. The existing `.org` bucket frontends remain usable.
 
 `app.mused.com` uses a DNS-only A record for the VM's reserved `struct-ip` address.
 Nginx terminates HTTPS and proxies to the app service on `127.0.0.1:3035`.
@@ -29,6 +30,76 @@ to that backend; existing asset paths continue using their existing backend poli
 All three buckets' GCS CORS configurations include `https://app.mused.com`. The SPHR CDN backend
 allows anonymous cross-origin asset reads; browser config and splat fetches send
 credentials only to their own origin.
+
+## IIIF image hosting and legacy URLs
+
+`iiif.mused.com` serves the existing Loris Image API from `iiif-loris`, zone
+`us-east1-b`. Its reserved address is `35.185.123.17`. Both `iiif.mused.com` and
+`iiif.mused.org` have proxied Cloudflare A records pointing to that VM.
+Loris reads source images from `https://storage.googleapis.com/mused/`; existing
+identifiers and cached images are retained. Its `info.json` uses the canonical
+`https://iiif.mused.com/` service URL.
+
+Nginx serves `.com` and permanently redirects `.org` to `.com`, preserving the raw
+path and query string. The redirect includes `Access-Control-Allow-Origin: *` and
+handles OPTIONS, so old URLs still work in cross-origin image viewers. Keep the
+Cloudflare rule named **IIIF mused.org to mused.com disabled**: an edge redirect
+without these CORS headers blocks browser fetches before they reach Loris.
+
+Configuration on the VM:
+
+- `/etc/nginx/sites-available/iiif.mused.com.conf`, from
+  `scripts/deploy/iiif.mused.com.nginx`.
+- `/etc/systemd/system/iiif-loris.service`, from
+  `scripts/deploy/iiif-loris.service`. It starts at boot, restarts on failure, and
+  runs uWSGI on `127.0.0.1:8888` as the existing `lrh` account. Two workers with two
+  threads share a 3 GiB service memory limit.
+- `/etc/loris/app.wsgi`, from `scripts/deploy/iiif-loris.wsgi`. The runtime remains
+  the VM's installed Loris 3.2.1 / Python 3.8 environment.
+- `/etc/loris/loris.conf`, copied from the installed Loris configuration with
+  `logging.log_to` changed to `console` for systemd logs. The source cache remains
+  `/usr/local/share/images/loris`, and transformed images remain in `/var/cache/loris`.
+
+The `iiif.mused.com` Certbot certificate covers both IIIF domains. Webroot validation
+uses `/var/www/iiif-acme`; the challenge location is served on both HTTP and HTTPS
+because Cloudflare may upgrade validation requests. The existing
+`snap.certbot.renew.timer` renews it, and the executable hook
+`/etc/letsencrypt/renewal-hooks/deploy/iiif-reload-nginx.sh` reloads Nginx.
+The hook is tracked in `scripts/deploy/iiif-reload-nginx.sh`.
+
+```sh
+gcloud compute ssh iiif-loris --zone us-east1-b --project archimedes-01201
+sudo systemctl status iiif-loris nginx
+sudo journalctl -u iiif-loris -n 50 --no-pager
+sudo nginx -t
+sudo certbot renew --cert-name iiif.mused.com --dry-run --no-random-sleep-on-renew --run-deploy-hooks
+```
+
+Real browser verification covers `info.json`, resized JPEGs, cropped PNGs and
+percent-encoded folder identifiers through both hostnames, including anonymous
+cross-origin loading. The VM's existing working TLS policy is preserved; changing
+it must account for the other legacy Nginx virtual hosts on this VM.
+
+## Legacy guided-site redirects
+
+Cloudflare's **mused.org → Rules → Redirect Rules** has one active rule named
+**Legacy guided sites to mused.com**. It matches exactly:
+
+```text
+http.host in {"giza.mused.org" "copan.mused.org" "stcatherines.mused.org" "luxortemple.mused.org"}
+```
+
+The dynamic destination is `concat("https://mused.com", http.request.uri.path)`,
+with status **301** and **Preserve query string** enabled. The declarative rule is
+tracked in `scripts/deploy/mused-org-redirects.json`. The existing proxied wildcard
+DNS record brings these requests to Cloudflare; the rule does not match other
+subdomains or the root domain.
+
+For example, `https://copan.mused.org/guided/221/temple-16-and-rosalila-tunnels?lang=en`
+redirects to `https://mused.com/guided/221/temple-16-and-rosalila-tunnels?lang=en`.
+The destination application may then add its normal trailing slash. To add another
+legacy site, extend the explicit hostname set in this Cloudflare rule and the
+tracked JSON, then verify both HTTP and HTTPS requests with paths and queries.
 
 ## Deploy the app on struct25
 

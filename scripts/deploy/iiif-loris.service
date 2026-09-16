@@ -1,0 +1,24 @@
+[Unit]
+Description=Mused Loris IIIF image service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lrh
+Group=lrh
+WorkingDirectory=/home/lrh/loris-3.2.1
+ExecStart=/usr/local/bin/uwsgi --http 127.0.0.1:8888 --wsgi-file /etc/loris/app.wsgi --master --processes 2 --threads 2 --need-app --die-on-term --vacuum --harakiri 180 --max-requests 500
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/cache/loris /usr/local/share/images/loris
+MemoryHigh=2G
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
