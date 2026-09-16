@@ -1,6 +1,6 @@
-# Mused hosting: Vercel application, GCP assets
+# Mused hosting: GCP application and assets
 
-The Next.js app runs on Vercel at `https://app.mused.com`. Images, GLBs, splats,
+The Next.js app runs on GCP VM `struct25` at `https://app.mused.com`. Images, GLBs, splats,
 bootstraps and the scene catalog are served directly by Google Cloud Storage/CDN
 at `https://static.mused.com/sphr/`. IIIF and a database are not required.
 
@@ -10,6 +10,7 @@ Project: `archimedes-01201`.
 
 | Domain | Bucket | GCP frontend IPv4 |
 | --- | --- | --- |
+| `app.mused.com` | App VM `struct25` | `35.243.207.174` |
 | `static.mused.com` | `mused` | `34.36.73.63` |
 | `spaces.mused.com` | `mused-spaces` | `34.110.150.140` |
 | `tours.mused.com` | `mused-em` | `34.149.137.219` |
@@ -19,8 +20,8 @@ Use DNS-only records pointing directly to the GCP load balancers; Google-managed
 certificate validation must see those frontend IPs. Remove conflicting records for
 these same names. The existing `.org` frontends remain usable.
 
-`app.mused.com` belongs to the Vercel project: add the domain in Vercel and use the
-exact DNS record Vercel supplies. Do not point the app hostname at a storage bucket.
+`app.mused.com` uses a DNS-only A record for the VM's reserved `struct-ip` address.
+Nginx terminates HTTPS and proxies to the app service on `127.0.0.1:3035`.
 
 The dedicated `mused-sphr` CDN backend uses the `mused` bucket and honors origin
 cache headers. The `mused-static` URL map directs `/sphr/*` on the static domains
@@ -29,13 +30,51 @@ All three buckets' GCS CORS configurations include `https://app.mused.com`. The 
 allows anonymous cross-origin asset reads; browser config and splat fetches send
 credentials only to their own origin.
 
-## Deploy the app to Vercel
+## Deploy the app on struct25
+
+Project `archimedes-01201`, zone `us-east1-b`. The source checkout is `/home/lrh/sphr`.
+The app uses a dedicated `sphr` system account and a systemd service, with a 768 MiB
+memory ceiling. Releases live in `/opt/sphr/releases`; `/opt/sphr/current` is the
+active symlink. The app's Node runtime is isolated from the VM's other applications.
+
+```sh
+gcloud compute ssh struct25 --zone us-east1-b --project archimedes-01201
+cd /home/lrh/sphr
+git pull --ff-only
+bash scripts/deploy/vm-release.sh
+```
+
+The release script verifies the pinned Node download against the official SHA-256
+checksums, installs locked dependencies, builds the actual Linux standalone server,
+and activates it only after the build succeeds. It keeps prior releases and rolls
+back the active symlink if the new service cannot start. Builds use one worker and
+a 1536 MiB Node heap limit. Imported datasets and the Garden assets are served from
+GCS, and are excluded from the app release.
+
+Nginx configuration: `/etc/nginx/sites-available/app.mused.com.conf`, using the
+tracked template `scripts/deploy/app.mused.com.nginx`. The app certificate is managed
+by Certbot using `/var/www/sphr-acme` for HTTP validation. Its renewal hook reloads
+Nginx after a successful renewal. The three bucket domains use the Google-managed
+certificate `mused-com-assets-20260916` on their existing GCP load balancers.
+
+```sh
+sudo systemctl status sphr
+sudo journalctl -u sphr -n 50 --no-pager
+sudo nginx -t
+curl -I https://app.mused.com/
+```
+
+To roll back, atomically replace `/opt/sphr/current` with a symlink to the desired
+previous release, then run `sudo systemctl restart sphr`. Publishing more captures
+does not require rebuilding or restarting this service.
+
+## Optional Vercel deployment
 
 Import the `lukehollis/sphr` GitHub repository with the Next.js preset. The repository
 root is the application root (do not choose another nested `sphr-next` directory).
 Use the standard `npm run build` command. Add `app.mused.com` in project Domains.
 
-When Vercel sets `VERCEL=1`, `next.config.mjs` supplies these public, non-secret defaults:
+When `SPHR_HOSTED=1` or Vercel sets `VERCEL=1`, `next.config.mjs` supplies these public, non-secret defaults:
 
 ```text
 SPHR_PUBLIC_URL=https://app.mused.com
@@ -49,7 +88,7 @@ Preview deployments use the same public assets. Local development uses local fil
 unless these variables are set. Changing build configuration requires a redeploy;
 publishing a new scene does not.
 
-No GCP credentials belong in Vercel or in browser JavaScript. Vercel reads the public
+No GCP credentials belong in the app runtime or in browser JavaScript. The app reads the public
 catalog on each request, and the browser fetches the scene assets from GCP. Large
 captures are excluded from Git and from CLI deployment uploads.
 

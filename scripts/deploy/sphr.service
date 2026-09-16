@@ -1,0 +1,30 @@
+[Unit]
+Description=SPHR Mused scene viewer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sphr
+Group=sphr
+WorkingDirectory=/opt/sphr/current
+ExecStart=/opt/sphr/runtime/node /opt/sphr/current/server.js
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3035
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=NODE_OPTIONS=--max-old-space-size=512
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+MemoryHigh=512M
+MemoryMax=768M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/cache/sphr
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target
