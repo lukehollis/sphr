@@ -659,7 +659,9 @@ export class SphrRuntime {
     }
     return selectNavigationTarget(
       this.raycaster.ray,
-      this.nav.getNavigableNodes().map((node) => ({ value: node, floor: this.nav!.getWorldFloorPosition(node) })),
+      // Unknown floors use directly selectable camera spheres, not inferred floor targets.
+      this.nav.getNavigableNodes().filter((node) => !node.floorUnobserved)
+        .map((node) => ({ value: node, floor: this.nav!.getWorldFloorPosition(node) })),
       this.nav.getWorldFloorPosition(this.currentNode),
       floorHit
     );

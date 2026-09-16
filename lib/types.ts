@@ -143,7 +143,8 @@ export type NodeData = {
   textureTemplate?: string;
   index?: number;
   position: Vector3Like;
-  floorPosition?: Vector3Like;
+  floorPosition?: Vector3Like | null;
+  floorUnobserved?: boolean;
   rotation?: EulerLike;
   quaternion?: [number, number, number, number];
   neighbors?: string[];

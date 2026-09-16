@@ -149,6 +149,13 @@ export class NavigationLayer {
       depthWrite: false
     });
     const radius = this.data.navigation?.markerRadius ?? 0.15;
+    if (node.floorUnobserved) {
+      // Preserve direct access to a measured camera without inventing a floor.
+      const cameraPoint = new THREE.Mesh(new THREE.SphereGeometry(radius * .6, 16, 12), ringMaterial);
+      cameraPoint.userData.node = node;
+      group.add(cameraPoint);
+      return group;
+    }
     const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.78, radius, 48), ringMaterial);
     ring.rotation.x = -Math.PI / 2;
     ring.userData.node = node;
