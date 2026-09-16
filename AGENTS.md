@@ -47,3 +47,4 @@ Use the supplied NASA 1975 design system's Reversed dark theme throughout. Read
 [docs/design-system.md](docs/design-system.md) before interface changes. Tokens
 live in `app/design-system/`. Keep the collection free of an H1/hero; use Helvetica,
 square opaque panels, ruled sections, icon controls, and the `#0098db` blue accent. Next uses white with black text, never an accent fill.
+Buttons have no visible outer borders; retain keyboard focus outlines and blue active indicators.

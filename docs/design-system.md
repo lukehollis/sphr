@@ -27,6 +27,8 @@ as the single accent. Avoid red UI accents. Keep square corners, flat opaque pan
 Avoid gradients, glass, UI shadows, decorative tracking, and serif text.
 Use Lucide icons for viewer actions, with accessible labels and tooltips; this user
 preference overrides the reference system’s text-only control guidance. Do not add NASA branding.
+Buttons have no visible outer borders in normal, hover, or disabled states. Keep
+keyboard focus outlines and blue active indicators, and preserve control dimensions.
 
 The collection has no H1 or hero. Its compact running header leads into a narrow
 annotation/filter column and photographic cards. Preserve searching by title/ID,
