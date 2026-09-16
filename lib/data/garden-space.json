@@ -1,7 +1,7 @@
 {
   "title": "Example Garden Scene",
-  "dollhouse": "https://static.mused.org/gardenvase_small5.glb",
-  "loadingImage": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+  "dollhouse": "/demo/gardenvase_small5.glb",
+  "loadingImage": "/demo/garden_scene_splats_tour.jpg",
   "loadingTotal": 1,
   "initialNavPoint": null,
   "initialPosition": {

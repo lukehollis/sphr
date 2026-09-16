@@ -3,7 +3,7 @@
     "slug": "learning-about-gausssian-splats",
     "title": "Learning about Gaussian Splats | Garden Scene",
     "language": "en",
-    "loadingImage": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+    "loadingImage": "/demo/garden_scene_splats_tour.jpg",
     "signup_message": "",
     "background_video": null,
     "last_button_link": "",
@@ -18,7 +18,7 @@
       "id": "garden",
       "slug": "garden",
       "title": "Garden Scene",
-      "thumbnail": "https://iiif.mused.org/garden_example_intro.png/full/full/0/default.jpg",
+      "thumbnail": "/demo/garden_scene_splats_tour.jpg",
       "tourpoints": [
         {
           "viewMode": "FPV",

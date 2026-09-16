@@ -51,6 +51,10 @@ their new public files. Updates to existing scene metadata are visible on the ne
 
 ## Public hosting
 
+For the current Mused deployment (Vercel app plus GCP static assets), use
+[Mused hosting](mused-hosting.md). The app supports a remote catalog and the
+`npm run scenes:publish` command uploads validated packages without a Vercel redeploy.
+
 Local links work on the computer running SPHR. Internet sharing requires deploying the
 Next application and its generated assets to the chosen public host. No public deployment
 is implied by a local import or by copying a localhost link.

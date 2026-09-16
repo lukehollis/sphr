@@ -1,0 +1,6 @@
+public/datasets/
+public/demo/
+tmp/
+docs/media/
+.venv-matterport/
+.agents/

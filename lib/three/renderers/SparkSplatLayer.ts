@@ -75,7 +75,7 @@ export class SparkSplatLayer {
   }
 
   private async loadFileBytes(config: SplatConfig, label: string) {
-    const response = await fetch(config.url, { credentials: "include" });
+    const response = await fetch(config.url, { credentials: "same-origin" });
     if (!response.ok) {
       throw new Error(`Failed to load ${config.url}: ${response.status} ${response.statusText}`);
     }

@@ -1,7 +1,7 @@
 import type { IiifConfig, MediaFile, NodeData } from "@/lib/types";
 
-const IIIF_BASE = "https://iiif.mused.org";
-const STATIC_BASE = "https://static.mused.org";
+const IIIF_BASE = (process.env.NEXT_PUBLIC_SPHR_IIIF_BASE_URL || "https://iiif.mused.org").replace(/\/$/, "");
+const STATIC_BASE = (process.env.NEXT_PUBLIC_SPHR_MEDIA_BASE_URL || "https://static.mused.com").replace(/\/$/, "");
 
 export function isAbsoluteUrl(value?: string | null) {
   return Boolean(value && /^https?:\/\//i.test(value));
@@ -27,6 +27,7 @@ export function mediaImageUrl(input?: Pick<MediaFile, "filename" | "url" | "file
   if (!input) return "";
   const raw = input.url ?? input.file ?? input.image ?? input.filename ?? "";
   if (!raw) return "";
+  if (raw.startsWith("/")) return raw;
   const mimeType = input.mime_type ?? input.mimeType ?? "";
   if (raw.endsWith(".gif") || mimeType.includes("gif")) return staticUrl(raw);
   if (isAbsoluteUrl(raw)) return raw.includes("/iiif/") || raw.includes("iiif.") ? raw : raw;

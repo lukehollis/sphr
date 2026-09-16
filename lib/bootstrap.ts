@@ -1,6 +1,7 @@
 import gardenSpaceJson from "@/lib/data/garden-space.json";
 import gardenTourJson from "@/lib/data/garden-tour.json";
 import gardenUiJson from "@/lib/data/garden-ui.json";
+import { withAssetBase } from "@/lib/hosted-assets";
 import type {
   NormalizedTour,
   SphrBootstrap,
@@ -31,7 +32,7 @@ export function defaultBootstrap(): SphrBootstrap {
   const modelOffset = modelSettings?.offsetPosition ?? { x: 0, y: 0, z: 0 };
   const modelRotation = modelSettings?.offsetRotation ?? { x: 0, y: 0, z: 0 };
 
-  return {
+  return withAssetBase({
     space: {
       id: "garden-demo",
       title: gardenSpace.title ?? "Example Garden Scene",
@@ -98,7 +99,7 @@ export function defaultBootstrap(): SphrBootstrap {
       ...gardenUi,
       loadingImage: "/demo/garden_scene_splats_tour.jpg"
     }
-  };
+  });
 }
 
 function parseScriptJson<T>(id: string): T | null {
@@ -114,11 +115,11 @@ function parseScriptJson<T>(id: string): T | null {
 }
 
 async function fetchBootstrapFromUrl(url: string): Promise<SphrBootstrap> {
-  const response = await fetch(url, { credentials: "include" });
+  const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) {
     throw new Error(`Failed to load config ${url}: ${response.status} ${response.statusText}`);
   }
-  return (await response.json()) as SphrBootstrap;
+  return withAssetBase((await response.json()) as SphrBootstrap);
 }
 
 export async function loadBootstrapData(explicitConfigUrl?: string): Promise<SphrBootstrap> {
@@ -149,7 +150,7 @@ export async function loadBootstrapData(explicitConfigUrl?: string): Promise<Sph
 
   if (!params.has("demo")) {
     try {
-      const response = await fetch("/datasets/matterport/index.json");
+      const response = await fetch(withAssetBase("/datasets/matterport/index.json"), { cache: "no-store" });
       if (response.ok) {
         const index = await response.json();
         const latest = index.spaces?.[0];

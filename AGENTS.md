@@ -21,6 +21,9 @@ runtime transforms, image permutations, camera-height constants, or custom UI br
 The homepage is the scene collection. Canonical links are `/s/<sceneId>/<title-slug>`;
 IDs persist in package manifests across reimports and title changes. See
 [collection and hosting](docs/scene-library.md). Never regenerate IDs for existing scenes.
+Mused deploys the app on Vercel and assets to GCS. Read [Mused hosting](docs/mused-hosting.md)
+before publishing. Use `npm run scenes:publish`; preserve remote scenes and publish
+the catalog only after immutable assets upload successfully. Keep raw exports private.
 
 ## Current viewer contract
 
