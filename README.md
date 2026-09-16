@@ -20,6 +20,10 @@ https://github.com/user-attachments/assets/169c7729-e4d7-4889-99d2-42d81e33a6d8
 
 ## Matterport E57 migration
 
+[![Watch the Loomis–Michael Observatory E57 migration workflow](docs/media/observatory-e57-workflow.jpg)](docs/media/observatory-e57-workflow.mp4)
+
+[Watch the workflow (MP4, 49 seconds)](docs/media/observatory-e57-workflow.mp4): import overview, the migrated observatory, scan navigation, textured dollhouse, and double-click return to first person.
+
 Import a Matterport export ZIP or E57 into a complete local tour:
 
 ```sh
