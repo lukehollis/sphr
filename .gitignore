@@ -47,6 +47,7 @@ pnpm-debug.log*
 
 # generated verification artifacts
 /tmp/
+/.sphr-state/
 
 # Python importer environments and caches
 /.venv-matterport/

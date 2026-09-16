@@ -30,9 +30,15 @@ preference overrides the reference system’s text-only control guidance. Do not
 Buttons have no visible outer borders in normal, hover, or disabled states. Keep
 keyboard focus outlines and blue active indicators, and preserve control dimensions.
 
-The collection has no H1 or hero. Its compact running header leads into a narrow
-annotation/filter column and photographic cards. Preserve searching by title/ID,
-sorting, canonical URLs, copy links, keyboard focus, and accessible control names.
+The collection has no visible heading, counts, instructions, or footer. Keep the
+search/sort controls and photographic cards. Each card contains only a linked
+thumbnail and title, without badges, location counts, mode labels, IDs, or copy-link
+controls. Preserve searching by title/ID, sorting, canonical URLs, keyboard focus,
+and accessible control names. Sharing controls remain in the viewer toolbar.
+
+Visibility controls belong on `/admin`, where each card adds a labeled Public/Private
+select. The public collection keeps the thumbnail/title-only layout. Admin forms use
+the same square dark surfaces, Helvetica, white action buttons and blue focus outlines.
 
 Viewer controls use compact 44px icon buttons. Show mute only when the normalized
 scene/tour audio configuration contains a nonempty audio URL. Do not expose a markers
@@ -53,7 +59,7 @@ tour navigation. Desktop tour navigation can remain compact.
 Scenes open directly after loading, with no intro or Start/Free Explore action.
 Tourless captures open free exploration; authored tours start guided. A small loading
 status disappears automatically when ready and offers Retry only on a real error.
-Clipboard fallback panels must remain visible in both the collection and the viewer.
+Clipboard fallback panels must remain visible in the viewer.
 
 Color transitions are 120ms and honor reduced motion. The existing camera lerp,
 dollhouse transitions, panorama blending, and authored tour movement are scene

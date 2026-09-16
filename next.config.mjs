@@ -12,6 +12,12 @@ const nextConfig = {
   reactStrictMode: true,
   devIndicators: false,
   allowedDevOrigins: ["local-origin.dev", "*.local-origin.dev"],
+  async headers() {
+    return [{ source: "/admin/:path*", headers: [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "Referrer-Policy", value: "same-origin" }
+    ] }];
+  },
   env: {
     SPHR_ASSET_BASE_URL: assetBase,
     NEXT_PUBLIC_SPHR_ASSET_BASE_URL: assetBase,

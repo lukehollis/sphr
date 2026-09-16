@@ -2,7 +2,8 @@
 
 The Next.js app runs on GCP VM `struct25` at `https://app.mused.com`. Images, GLBs, splats,
 bootstraps and the scene catalog are served directly by Google Cloud Storage/CDN
-at `https://static.mused.com/sphr/`. IIIF and a database are not required.
+at `https://static.mused.com/sphr/`. IIIF is not required for E57 spaces. A small local
+SQLite database stores the admin account, sessions, and website visibility settings.
 
 ## Domain and bucket assignments
 
@@ -150,6 +151,11 @@ does not require rebuilding or restarting this service.
 
 ## Optional Vercel deployment
 
+The admin implementation requires persistent Node 24 storage. Its SQLite state must
+stay on a persistent VM disk; do not deploy this access-control mode on Vercel's
+ephemeral filesystem. A stateless public viewer can still use the setup below with
+access control disabled.
+
 Import the `lukehollis/sphr` GitHub repository with the Next.js preset. The repository
 root is the application root (do not choose another nested `sphr-next` directory).
 Use the standard `npm run build` command. Add `app.mused.com` in project Domains.
@@ -187,6 +193,10 @@ npm run scenes:publish -- --slug my-space --dry-run
 npm run scenes:publish -- --slug my-space
 ```
 
+Uploaded spaces are **private on app.mused.com by default**. Open `/admin`, sign in,
+and change a space's Visibility to Public when it should appear for visitors.
+Reimports preserve visibility because it is keyed by the persistent scene ID.
+
 The publisher needs Python 3.11 or newer and the Google Cloud CLI. Authenticate the
 publishing computer with `gcloud auth login` if needed. Publication
 defaults to `gs://mused/sphr` and `https://static.mused.com/sphr`. Override `--bucket`,
@@ -221,6 +231,53 @@ and is fetched without a Next.js data cache. Stable `/s/<id>/<title-slug>` links
 reimports. Old revisions remain available for visitors already viewing them.
 Raw E57s, source ZIPs, manifests with local source paths, and validation receipts stay
 local; back up those originals and manifests separately.
+
+## Admin and website visibility
+
+Open `https://app.mused.com/admin`. The admin can preview every space, switch each
+between Private and Public, sign out, and change their password. The normal collection
+shows only public spaces to anonymous visitors and all spaces to a signed-in admin.
+Private scene links lead to sign-in, then return to the requested viewer. Old title
+slugs and legacy config links also pass through the viewer's access check.
+
+This controls access to **the website viewer**, as requested. Images, meshes, bootstraps,
+and the GCS catalog remain public in `gs://mused/sphr`; their static URLs keep working.
+Changing visibility does not move assets, change bucket permissions, or invalidate CDN
+caches. Production app pages and authentication responses use no-store caching.
+
+The VM loads `/etc/sphr/environment` through systemd:
+
+```text
+SPHR_ACCESS_CONTROL=1
+SPHR_STATE_DIR=/var/lib/sphr
+```
+
+`/var/lib/sphr/admin.sqlite` and its WAL files belong to `sphr`. The directory is mode
+700, and the database is mode 600. State lives outside releases, so app deploys and
+rollbacks preserve account and visibility settings. Passwords use salted scrypt hashes;
+random session tokens are hashed in the database. Cookies are HttpOnly, Secure in
+production, SameSite=Lax, and expire after eight hours. Logout revokes the session;
+password changes revoke other sessions. Mutation routes check the request origin
+and admin session. Login attempts are rate limited in persistent storage, using the
+client IP overwritten by Nginx; keep the Node listener on loopback.
+
+Initialize the one admin account on a new installation by running
+`scripts/deploy/admin-init.mjs` with Node 24 and `SPHR_STATE_DIR` set, passing a JSON
+object containing `username` and `password` through stdin. Never commit that input.
+It refuses to overwrite an existing account. The deployed account's password is
+managed through the admin page; no default password is embedded in application code.
+
+Back up the state with SQLite's online backup API, or briefly stop `sphr`, copy the
+whole `/var/lib/sphr` directory with permissions intact, and start it again. Keep the
+backup private. Restoring the database also restores visibility settings.
+
+For local verification, initialize a separate account with state in `.sphr-state`
+(ignored by Git), then start the app with `SPHR_ACCESS_CONTROL=1`, `SPHR_HOSTED=1`,
+`SPHR_STATE_DIR` set to that absolute directory, and `SPHR_PUBLIC_URL` matching the
+local origin. Run `npm run test:admin` and `scripts/test-admin-routes.mjs` against that
+server with `SPHR_TEST_USERNAME` and `SPHR_TEST_PASSWORD` set. The route test refuses
+non-local hosts because it exercises public/private changes. Visually check actual
+admin thumbnails, a private viewer after login, search, and a narrow mobile layout.
 
 ## Verify
 

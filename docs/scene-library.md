@@ -23,9 +23,16 @@ npm run import:matterport -- --e57 /captures/export.zip --slug my-space --title 
 The collection reads lightweight listing metadata, and lazy-loads photographs. It does not
 initialize the 3D renderer or download scene meshes/panorama sets until a scene is opened.
 Search matches titles and IDs; sorting supports recent imports, title and location count.
-Copy-link controls are available on each card and the viewer toolbar. Individual
+Cards show only a linked thumbnail and title. Copy-link controls are available in
+the viewer toolbar. Individual
 spaces load directly into free exploration or their authored tour without an intro screen.
 If clipboard access is unavailable, a selectable URL is shown instead.
+
+On app.mused.com, imported spaces start private. Sign in at `/admin` to preview them
+and set Visibility to Public when ready. Anonymous visitors see only public cards;
+private viewer URLs require admin sign-in. The files and catalog in the public GCS
+bucket remain accessible directly. See [admin and website visibility](mused-hosting.md#admin-and-website-visibility)
+for deployment, account storage, and backups.
 
 Use a unique storage `--slug` per scene. Reimporting that same storage slug preserves its
 saved ID even when source bytes or the display title change. Preserve `sceneId` when moving
@@ -64,8 +71,8 @@ For a persistent Node host:
 1. Install the app with `npm ci` and build with `npm run build`.
 2. Copy the complete `public/datasets/matterport/` tree, including the index, manifests,
    bootstraps, previews, faces and meshes. These generated assets are ignored by Git and
-   will not arrive through a code-only deployment. Include demo assets if retaining the
-   Garden demo link.
+   will not arrive through a code-only deployment. Include demo assets if serving the
+   Garden demo at `/?demo=garden`.
 3. Set `SPHR_PUBLIC_URL=https://your-domain.example` for build/start so canonical and social
    preview metadata use the public domain.
 4. Run `npm run start` behind the host's HTTPS endpoint. Keep `public/datasets` on persistent

@@ -14,6 +14,7 @@ Environment=HOSTNAME=127.0.0.1
 Environment=PORT=3035
 Environment=NEXT_TELEMETRY_DISABLED=1
 Environment=NODE_OPTIONS=--max-old-space-size=512
+EnvironmentFile=-/etc/sphr/environment
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -23,7 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/cache/sphr
+ReadWritePaths=/var/cache/sphr /var/lib/sphr
 LimitNOFILE=16384
 
 [Install]

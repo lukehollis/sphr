@@ -42,6 +42,7 @@ printf '%s\n' "$revision" | sudo tee "$destination/REVISION" >/dev/null
 sudo chown -R root:root "$destination"
 sudo chmod -R go-w "$destination"
 sudo install -d -m 755 -o sphr -g sphr /var/cache/sphr
+sudo install -d -m 700 -o sphr -g sphr /var/lib/sphr
 sudo rm -rf "$destination/.next/cache"
 sudo ln -s /var/cache/sphr "$destination/.next/cache"
 sudo install -m 644 scripts/deploy/sphr.service /etc/systemd/system/sphr.service

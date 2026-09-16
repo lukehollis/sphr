@@ -14,6 +14,7 @@
     "scenes:index": "python3 scripts/matterport/catalog.py",
     "scenes:publish": "python3 scripts/matterport/publish.py",
     "test:hosting": "node --test scripts/test-hosting.mjs && python3 -m unittest discover -s scripts/matterport -p test_publish.py -v",
+    "test:admin": "node --test scripts/test-admin.mjs",
     "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-audio-autoplay.mjs",
     "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v"
   },

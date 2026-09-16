@@ -24,6 +24,11 @@ IDs persist in package manifests across reimports and title changes. See
 Mused deploys the app on GCP `struct25` and assets to GCS. Read [Mused hosting](docs/mused-hosting.md)
 before publishing. Use `npm run scenes:publish`; preserve remote scenes and publish
 the catalog only after immutable assets upload successfully. Keep raw exports private.
+On app.mused.com, website visibility is admin-controlled and new scene IDs default to
+Private. Preserve `/var/lib/sphr` across deploys. This gates the web viewer only: the
+user explicitly keeps the generated files and catalog in the public bucket. Do not
+move assets or change bucket access when toggling website visibility. See the admin
+section in `docs/mused-hosting.md` before changing authentication or publishing.
 
 ## Current viewer contract
 
