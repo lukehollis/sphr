@@ -1,8 +1,8 @@
 # Observatory E57 workflow video
 
 `observatory-e57-workflow.mp4` demonstrates the Loomis–Michael Telescope Observatory
-Matterport import in SPHR. The README poster links to the MP4 so it remains usable
-in GitHub and Markdown viewers that do not support embedded video.
+Matterport import in SPHR. The README poster links directly to the downloadable
+MP4, bypassing GitHub's file-preview page, which does not render this video format.
 
 - Recorded from the real local SPHR viewer on 2026-09-16, after the borderless-button update.
 - H.264 MP4, 1280 × 800, 30 fps delivery, approximately 49 seconds, silent.
