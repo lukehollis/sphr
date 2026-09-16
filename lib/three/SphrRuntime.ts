@@ -115,7 +115,12 @@ export class SphrRuntime {
     this.attachEvents();
 
     const nodes = this.getNodes();
-    const initialPoint = activeTourPoint(this.tour, 0, 0);
+    const exploreEntry = !this.tour.hasGuidedTour ? this.resolveInitialNode() : null;
+    const initialLocation = (exploreEntry && this.findTourPointForNode(exploreEntry.uuid))
+      || { spaceIndex: 0, pointIndex: 0 };
+    this.state.activeSpaceIndex = initialLocation.spaceIndex;
+    this.state.activePointIndex = initialLocation.pointIndex;
+    const initialPoint = activeTourPoint(this.tour, initialLocation.spaceIndex, initialLocation.pointIndex);
     this.currentNode = this.resolveNode(initialPoint?.nodeUUID) ?? this.resolveInitialNode();
     this.setCameraPose(this.poseForPoint(initialPoint, "FPV"), true);
 
@@ -162,7 +167,7 @@ export class SphrRuntime {
     this.annotations.init();
     this.nav?.setOccluders(this.sceneGraph.getRaycastObjects());
 
-    await this.goTo(0, 0, true);
+    await this.goTo(initialLocation.spaceIndex, initialLocation.pointIndex, true);
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
