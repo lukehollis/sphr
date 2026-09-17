@@ -9,7 +9,7 @@ type Sdk = {
     Transition: Record<string, string>;
     Conversion: { createIdMap(invert: boolean): Promise<Record<string, string>> };
     moveTo(id: string, options: object): Promise<string>;
-    current: Observable<{ sid: string }>;
+    current: Observable<{ id?: string; sid?: string }>;
   };
   Mode: { Mode: Record<string, string>; moveTo(mode: string, options?: object): Promise<void>; current: Observable<string> };
   Camera: { zoomTo(zoom: number): Promise<number>; pose: Observable<EmbeddedCameraPose> };
@@ -76,7 +76,8 @@ export class MatterportViewer {
       this.subscriptions.push(this.sdk.Camera.pose.subscribe(pose => this.annotations?.update(pose)));
     }
     this.subscriptions.push(this.sdk.Sweep.current.subscribe(sweep => {
-      if (!this.disposed && sweep.sid) this.onChange({ activeNodeId: sweep.sid });
+      const id = sweep.id || sweep.sid;
+      if (!this.disposed && id) this.onChange({ activeNodeId: id });
     }), this.sdk.Mode.current.subscribe(mode => {
       if (!this.disposed) this.onChange({ viewMode: mode === this.sdk!.Mode.Mode.INSIDE ? 'FPV' : 'ORBIT' });
     }));
