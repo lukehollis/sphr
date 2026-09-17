@@ -79,11 +79,6 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .primary-action:disabled, .secondary-action:disabled, .tour-next:disabled, .tour-prev:disabled { background: var(--surface-page); color: var(--text-label); }
 .tour-next:disabled { background: #ececec; color: #666666; }
 .viewer-button.active { border-bottom: 3px solid var(--accent); }
-.share-control { position: relative; pointer-events: auto; }
-.share-compact { display: flex; }
-.share-fallback { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(300px, 80vw); padding: var(--space-2); border: var(--rule-section); background: var(--surface-page); color: var(--text-body); font-size: var(--size-caption); }
-.share-fallback input { width: 100%; min-height: 44px; margin: var(--space-1) 0; padding: var(--space-1); border: var(--rule-section); background: var(--paper-tint); color: var(--text-heading); }
-.share-fallback button { min-height: 44px; padding: 0; background: transparent; border: 0; color: var(--text-heading); text-decoration: underline; }
 
 /* Viewer chrome stays separate from the photographic scene. */
 .sphr-root { position: fixed; inset: 0; overflow: hidden; background: var(--surface-desk); }
@@ -106,7 +101,6 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .guide-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--always-paper); }
 .guide-toggle[aria-checked="true"] .guide-switch { background: var(--accent); border-color: var(--accent); }
 .guide-toggle[aria-checked="true"] .guide-switch::after { transform: translateX(16px); }
-.hud-right .share-fallback { top: calc(100% + 8px); bottom: auto; }
 .navigation-status { position: absolute; z-index: 25; top: 88px; left: var(--space-3); max-width: calc(100% - 48px); padding: var(--space-2); border-left: 3px solid var(--accent); background: var(--surface-page); font-size: var(--size-caption); }
 
 /* Authored tour text uses the same page stock and rules. Camera motion is unchanged. */

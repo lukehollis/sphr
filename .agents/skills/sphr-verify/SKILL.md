@@ -39,6 +39,7 @@ still need interpretation; they are not automatic proof of photographic alignmen
   and settle. Drags stay at the current scan. Prefetch is not navigation.
 - Dollhouse works and double-click returns to eye-level first person.
 - Desktop/mobile title and HUD do not overlap; removed branding/dropdown stay removed.
+- Share/copy-link and fullscreen buttons are absent; tourless silent scenes have no empty settings row.
 - On mobile guided tours, Next is full-width at the bottom with small Previous above,
   settings/guide toggle are in the header, and dollhouse appears only after switching
   to free exploration. Mute exists only with audio; debug markers never appear as a button.

@@ -41,6 +41,7 @@ Imported scans enter free exploration (`tour.tour_data.mode: "explore"`); author
 tours start guided and alone expose guide/text toggles and Previous/Next. The top header
 contains the scene title and viewer controls, including a switch followed by “Guide”
 for toggling guided/free-explore mode. Do not use a lightbulb for this control.
+Do not show share/copy-link or fullscreen buttons in the viewer.
 On mobile, keep a full-width 72px Next text button at the bottom, with a small Previous
 button above it. Dollhouse stays at the bottom and is visible only in free exploration.
 Other viewer controls use accessible icon buttons. Show mute only

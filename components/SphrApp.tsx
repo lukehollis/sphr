@@ -24,7 +24,7 @@ const initialRuntimeState: RuntimeState = {
   navigating: false
 };
 
-export default function SphrApp({ configUrl, sharePath }: { configUrl?: string; sharePath?: string }) {
+export default function SphrApp({ configUrl }: { configUrl?: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<SphrRuntime | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -102,7 +102,6 @@ export default function SphrApp({ configUrl, sharePath }: { configUrl?: string; 
       {started && activePoint && (
         <>
           <HudControls
-            sharePath={sharePath}
             title={bootstrap?.space.title}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
@@ -110,7 +109,6 @@ export default function SphrApp({ configUrl, sharePath }: { configUrl?: string; 
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}
             onToggleText={() => runtimeRef.current?.toggleText()}
-            onFullscreen={() => runtimeRef.current?.setFullscreen()}
             onToggleGuide={() => runtimeRef.current?.start(!runtimeState.guided)}
           />
           {tour?.hasGuidedTour && <TourOverlay

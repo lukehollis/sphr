@@ -58,7 +58,8 @@ Runtime behavior:
 - If a new `extra` is reusable, implement it in a named runtime method or layer.
 - Mobile guided tours require a full-width 72px Next text button at the bottom and a
   small Previous button above it. Next is white with black text; accents are `#0098db` blue. Reserve space for both below the tour copy. Keep
-  guide/free-explore, optional mute, and fullscreen controls in the top header.
+  guide/free-explore, optional mute, and text controls in the top header. Do not
+  show share/copy-link or fullscreen buttons.
 - Dollhouse is a bottom control visible only in free exploration, never guided mode.
 - Tour copy, header icons, and bottom navigation must not overlap, including at 320px.
 - Do not hide broken timing behind instant jumps. Animated tours should visibly transition unless the user requests otherwise.

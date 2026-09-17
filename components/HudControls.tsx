@@ -1,11 +1,9 @@
 "use client";
 
-import { Box, Footprints, Volume2, VolumeX, Captions, CaptionsOff, Expand } from "lucide-react";
+import { Box, Footprints, Volume2, VolumeX, Captions, CaptionsOff } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
-import ShareLink from "@/components/ShareLink";
 
 type Props = {
-  sharePath?: string;
   title?: string;
   state: RuntimeState;
   hasGuidedTour: boolean;
@@ -13,12 +11,10 @@ type Props = {
   onToggleView: () => void;
   onToggleMute: () => void;
   onToggleText: () => void;
-  onFullscreen: () => void;
   onToggleGuide: () => void;
 };
 
 export default function HudControls({
-  sharePath,
   title,
   state,
   hasGuidedTour,
@@ -26,7 +22,6 @@ export default function HudControls({
   onToggleView,
   onToggleMute,
   onToggleText,
-  onFullscreen,
   onToggleGuide
 }: Props) {
   return (
@@ -38,22 +33,18 @@ export default function HudControls({
       </div>}
       <header className="viewer-header">
         <div className="scene-heading"><span>{title}</span></div>
-      <div className="hud-right" aria-label="Viewer settings">
-        {hasGuidedTour && <button className="guide-toggle" type="button" role="switch" aria-label="Guide" aria-checked={state.guided} title={state.guided ? "Switch to free exploration" : "Switch to guided tour"} onClick={onToggleGuide}>
-          <span className="guide-switch" aria-hidden="true" />
-          <span>Guide</span>
-        </button>}
-        {sharePath && <ShareLink path={sharePath} title={title ?? "this space"} compact />}
-        {hasAudio && <ControlButton label={state.muted ? "Unmute audio" : "Mute audio"} onClick={onToggleMute}>
-          {state.muted ? <VolumeX size={22} aria-hidden="true" /> : <Volume2 size={22} aria-hidden="true" />}
-        </ControlButton>}
-        {hasGuidedTour && <ControlButton label={state.showText ? "Hide text" : "Show text"} onClick={onToggleText} active={state.showText}>
-          {state.showText ? <CaptionsOff size={22} aria-hidden="true" /> : <Captions size={22} aria-hidden="true" />}
-        </ControlButton>}
-        <ControlButton label="Toggle fullscreen" onClick={onFullscreen}>
-          <Expand size={22} aria-hidden="true" />
-        </ControlButton>
-      </div>
+        {(hasGuidedTour || hasAudio) && <div className="hud-right" aria-label="Viewer settings">
+          {hasGuidedTour && <button className="guide-toggle" type="button" role="switch" aria-label="Guide" aria-checked={state.guided} title={state.guided ? "Switch to free exploration" : "Switch to guided tour"} onClick={onToggleGuide}>
+            <span className="guide-switch" aria-hidden="true" />
+            <span>Guide</span>
+          </button>}
+          {hasAudio && <ControlButton label={state.muted ? "Unmute audio" : "Mute audio"} onClick={onToggleMute}>
+            {state.muted ? <VolumeX size={22} aria-hidden="true" /> : <Volume2 size={22} aria-hidden="true" />}
+          </ControlButton>}
+          {hasGuidedTour && <ControlButton label={state.showText ? "Hide text" : "Show text"} onClick={onToggleText} active={state.showText}>
+            {state.showText ? <CaptionsOff size={22} aria-hidden="true" /> : <Captions size={22} aria-hidden="true" />}
+          </ControlButton>}
+        </div>}
       </header>
     </>
   );

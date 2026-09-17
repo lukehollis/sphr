@@ -28,5 +28,5 @@ export default async function ScenePage({ params }: Props) {
   if (!isScenePublic(id) && !(await isAdmin())) redirect(`/admin/login?next=${encodeURIComponent(scene.scenePath)}`);
   // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} sharePath={scene.scenePath} />;
+  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} />;
 }

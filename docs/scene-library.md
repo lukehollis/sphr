@@ -23,10 +23,9 @@ npm run import:matterport -- --e57 /captures/export.zip --slug my-space --title 
 The collection reads lightweight listing metadata, and lazy-loads photographs. It does not
 initialize the 3D renderer or download scene meshes/panorama sets until a scene is opened.
 Search matches titles and IDs; sorting supports recent imports, title and location count.
-Cards show only a linked thumbnail and title. Copy-link controls are available in
-the viewer toolbar. Individual
+Cards show only a linked thumbnail and title. Share the canonical scene URL from
+the browser address bar. Individual
 spaces load directly into free exploration or their authored tour without an intro screen.
-If clipboard access is unavailable, a selectable URL is shown instead.
 
 On app.mused.com, imported spaces start private. Sign in at `/admin` to preview them
 and set Visibility to Public when ready. Anonymous visitors see only public cards;
@@ -96,4 +95,4 @@ Catalog tests cover 100 entries, repeated indexing, duplicate IDs, URL-safe titl
 identity preservation across title/source changes. Route integration checks exercise every
 real local scene, ID-only and old-title redirects, preview/config access, metadata, unknown
 IDs and legacy links. Browser acceptance also requires actual thumbnails, title/ID search,
-sorting, an empty result, clipboard contents, a working scene and mobile layout.
+sorting, an empty result, a working canonical scene URL and mobile layout.

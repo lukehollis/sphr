@@ -2,7 +2,7 @@
 
 SPHR uses the **Reversed** dark theme from the supplied
 [NASA 1975 Graphics Standards Manual Design System](../../NASA%201975%20Graphics%20Standards%20Manual%20Design%20System/README.md).
-The collection, loading status, viewer controls, guided tour overlays, sharing, and
+The collection, loading status, viewer controls, guided tour overlays, and
 error pages share this system. Photographic and 3D scene content retain their colors.
 
 ## Source and implementation
@@ -38,7 +38,8 @@ viewers retain their existing controls without a collection footer. Keep the
 search/sort controls and photographic cards. Each card contains only a linked
 thumbnail and title, without badges, location counts, mode labels, IDs, or copy-link
 controls. Preserve searching by title/ID, sorting, canonical URLs, keyboard focus,
-and accessible control names. Sharing controls remain in the viewer toolbar.
+and accessible control names. Share/copy-link and fullscreen buttons are absent
+from the viewer; canonical scene URLs remain available in the address bar.
 
 Visibility controls belong on `/admin`, where each card adds a labeled Public/Private
 select. The public collection keeps the thumbnail/title-only layout. Admin forms use
@@ -47,7 +48,8 @@ the same square dark surfaces, Helvetica, white action buttons and blue focus ou
 Viewer controls use compact 44px icon buttons. Show mute only when the normalized
 scene/tour audio configuration contains a nonempty audio URL. Do not expose a markers
 or debug button in the viewer. Put viewer settings (guide/free-explore toggle, optional
-mute, text, share, and fullscreen) in the top header. The guide control is a switch
+mute and text) in the top header. Omit the settings row when none of those controls
+are available. The guide control is a switch
 to the left of the visible label “Guide”, blue when on, with `role="switch"` and
 `aria-checked`; do not replace it with a lightbulb icon. On mobile, the title has its own
 row above the icons. Put the dollhouse control at the bottom only in free exploration;
@@ -63,7 +65,6 @@ tour navigation. Desktop tour navigation can remain compact.
 Scenes open directly after loading, with no intro or Start/Free Explore action.
 Tourless captures open free exploration; authored tours start guided. A small loading
 status disappears automatically when ready and offers Retry only on a real error.
-Clipboard fallback panels must remain visible in the viewer.
 
 Color transitions are 120ms and honor reduced motion. The existing camera lerp,
 dollhouse transitions, panorama blending, and authored tour movement are scene
@@ -72,7 +73,7 @@ behavior and remain intact.
 ## Verification
 
 Run `npm run typecheck`, `npm run build`, and the canonical scene route checks.
-Inspect real desktop and mobile collection, search/empty states, automatic entry/share
-controls, panorama, dollhouse and double-click return, and an authored 3DGS tour.
+Inspect real desktop and mobile collection, search/empty states, automatic entry,
+panorama, dollhouse and double-click return, and an authored 3DGS tour.
 Check narrow (320px) viewports and keyboard focus. Do not infer scene correctness
 from CSS checks or a successful build.
