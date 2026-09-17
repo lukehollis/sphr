@@ -97,7 +97,10 @@ These private receipts and raw sources are not uploaded to the public asset buck
 ## Still processing
 
 - Temple 16 / Rosalila: both source parts and all 723 scans are validated; reduction
-  of the 113,802,391-triangle measured checkpoint is running. No final package yet.
+  of the 113,802,391-triangle measured checkpoint stopped at the 50k ceiling check.
+  Open3D reached 512,530 triangles; the best fast-QEM attempt reached 128,575.
+  The full measured checkpoint is preserved, but an intermediate reduced surface
+  was not saved. A reduction fix is required before retrying. No final package yet.
 - Temples 20, 22 and 26: original split ZIP retained; import held for external capacity.
 - A new Center for Hellenic Studies export finished after the original batch and
   was also moved and verified externally. Its import has not started. Further
