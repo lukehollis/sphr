@@ -6,6 +6,8 @@ export class NavigationLayer {
   readonly group = new THREE.Group();
   private readonly markers = new Map<string, THREE.Object3D>();
   private activeNodeId: string | null = null;
+  private readonly navigableNodeIds = new Set<string>();
+  private transitionVisibleIds: Set<string> | null = null;
   private occluders: THREE.Object3D[] = [];
   private orbit = false;
   private readonly occlusionRay = new THREE.Raycaster();
@@ -19,10 +21,27 @@ export class NavigationLayer {
   setOrbit(orbit: boolean) { this.orbit = orbit; this.setActive(this.activeNodeId); }
 
   getNavigableNodes() {
-    return this.nodes.filter((node) => this.markers.get(node.uuid)?.visible && node.uuid !== this.activeNodeId);
+    return this.nodes.filter((node) => this.navigableNodeIds.has(node.uuid) && node.uuid !== this.activeNodeId);
   }
 
-  getDebugSnapshot() { return { activeNodeId: this.activeNodeId, visibleNodes: this.getNavigableNodes().map((node) => node.uuid) }; }
+  getDebugSnapshot() {
+    return {
+      activeNodeId: this.activeNodeId,
+      visible: this.group.visible,
+      transitioning: this.transitionVisibleIds !== null,
+      visibleNodes: this.getNavigableNodes().map((node) => node.uuid),
+      renderedNodes: [...this.markers].filter(([, marker]) => marker.visible).map(([id]) => id)
+    };
+  }
+
+  beginTransition() {
+    this.transitionVisibleIds = new Set([...this.markers].filter(([, marker]) => marker.visible).map(([id]) => id));
+  }
+
+  endTransition() {
+    this.transitionVisibleIds = null;
+    this.setActive(this.activeNodeId);
+  }
 
   private unobstructed(from: THREE.Vector3, to: THREE.Vector3) {
     const direction = to.clone().sub(from);
@@ -49,6 +68,8 @@ export class NavigationLayer {
       marker.position.copy(localPosition);
       marker.userData.node = node;
       marker.visible = true;
+      // Draw over the projected transition photo, with depth testing against its geometry.
+      marker.traverse((child) => { if ((child as THREE.Mesh).isMesh) child.renderOrder = 20; });
       this.group.add(marker);
       this.markers.set(node.uuid, marker);
 
@@ -77,17 +98,22 @@ export class NavigationLayer {
     this.activeNodeId = nodeId ?? null;
     const activeNode = this.nodes.find((node) => node.uuid === this.activeNodeId) ?? null;
     const visibleNeighborIds = this.visibleNeighborIds(activeNode);
+    this.navigableNodeIds.clear();
     this.markers.forEach((marker, id) => {
       marker.visible = this.orbit ? id !== this.activeNodeId : visibleNeighborIds ? visibleNeighborIds.has(id) : id !== this.activeNodeId;
       if (marker.visible && !this.orbit && activeNode && this.occluders.length) {
         const targetNode = marker.userData.node as NodeData;
         marker.visible = this.unobstructed(this.getWorldPosition(activeNode), this.getWorldPosition(targetNode));
       }
+      if (marker.visible) this.navigableNodeIds.add(id);
+      // Keep the departure pucks, including the destination, until the camera arrives.
+      // Visual continuity must not broaden the next scan's navigation/prefetch choices.
+      marker.visible ||= this.transitionVisibleIds?.has(id) ?? false;
       marker.traverse((child) => {
         const mesh = child as THREE.Mesh;
         const material = mesh.material as THREE.MeshBasicMaterial | undefined;
         if (!material || !("color" in material)) return;
-        if (id === this.activeNodeId) {
+        if (id === this.activeNodeId && !this.transitionVisibleIds) {
           material.color.set(0xe7f18c);
           material.opacity = 0.95;
         } else {
@@ -135,6 +161,8 @@ export class NavigationLayer {
     });
     this.group.clear();
     this.markers.clear();
+    this.navigableNodeIds.clear();
+    this.transitionVisibleIds = null;
   }
 
   private createMarker(node: NodeData) {

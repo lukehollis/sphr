@@ -47,8 +47,14 @@ provides measured poses. Legacy `rotation` uses the old SPHR Euler path; new E57
 - Await all incoming textures; failed loads retain the previous scene and recover controls.
 - Photographs have no fog, vignette or tone-mapping changes; texture memory is bounded.
 - Use measured floor markers, occlusion checks and heading-preserving free navigation.
+- Keep the user's field of view throughout free navigation, including nodes without a
+  tourpoint. Keep departure sweep pucks visible until arrival, without expanding the
+  next scan's reachable neighbors. Render pucks over transition photos with geometry
+  depth testing so walls still occlude them.
 - Keep transition mesh hidden at rest but raycastable. Capture the outgoing panorama once;
   project from its fixed camera origin, not as a reflection; fade late during movement.
+  Retain the outgoing background in mesh gaps until that late fade. Camera, panorama
+  and control-release timing must agree, including when projection geometry is absent.
 - Dollhouse fits mesh bounds. If sparse distant surfaces make the mesh span more
   than four times the measured camera span, initial framing uses the padded survey
   bounds and includes every camera/floor. This camera-framing heuristic retains all

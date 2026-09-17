@@ -45,7 +45,7 @@ export class PanoramaLayer {
   private visible = true;
   private presentationOpacity = 1;
   private disposed = false;
-  private fade: { start: number; duration: number } | null = null;
+  private fade: { start: number; duration: number; fadeStart: number } | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -74,7 +74,7 @@ export class PanoramaLayer {
     this.scene.add(this.active.group);
   }
 
-  navigate(node: NodeData, duration = 700, projected = false) {
+  navigate(node: NodeData, duration = 700, options: { replaceImmediately?: boolean; fadeStart?: number } = {}) {
     if (this.disposed || this.active?.node.uuid === node.uuid) return;
     if (this.outgoing) { this.scene.remove(this.outgoing.group); this.disposeObject(this.outgoing); }
     this.outgoing = this.active;
@@ -82,22 +82,25 @@ export class PanoramaLayer {
       this.setOpacity(this.outgoing, 1);
       this.outgoing.group.traverse((mesh) => { mesh.renderOrder = -20; });
     }
-    if (projected && this.outgoing) {
+    if (options.replaceImmediately && this.outgoing) {
       this.scene.remove(this.outgoing.group);
       this.disposeObject(this.outgoing);
       this.outgoing = null;
     }
-    this.active = this.createPano(node, projected ? 1 : 0);
+    this.active = this.createPano(node, options.replaceImmediately ? 1 : 0);
     this.active.group.visible = this.visible;
     this.scene.add(this.active.group);
-    this.fade = projected ? null : { start: performance.now(), duration };
+    this.fade = options.replaceImmediately ? null : {
+      start: performance.now(), duration: Math.max(1, duration),
+      fadeStart: THREE.MathUtils.clamp(options.fadeStart ?? 0, 0, 0.99)
+    };
   }
 
   update(camera: THREE.Camera) {
     this.active?.group.position.copy(camera.position);
     this.outgoing?.group.position.copy(camera.position);
     if (!this.fade) return;
-    const progress = Math.min(1, (performance.now() - this.fade.start) / this.fade.duration);
+    const progress = this.fadeProgress();
     this.setOpacity(this.active, progress);
     if (progress === 1) {
       if (this.outgoing) { this.scene.remove(this.outgoing.group); this.disposeObject(this.outgoing); this.outgoing = null; }
@@ -106,7 +109,16 @@ export class PanoramaLayer {
   }
 
   getDebugSnapshot() {
-    return { activeNode: this.active?.node.uuid, outgoingNode: this.outgoing?.node.uuid, fading: Boolean(this.fade), visible: this.visible };
+    return {
+      activeNode: this.active?.node.uuid, outgoingNode: this.outgoing?.node.uuid,
+      fading: Boolean(this.fade), visible: this.visible, incomingOpacity: this.fadeProgress() * this.presentationOpacity
+    };
+  }
+
+  private fadeProgress() {
+    if (!this.fade) return 1;
+    const elapsed = (performance.now() - this.fade.start) / this.fade.duration;
+    return THREE.MathUtils.clamp((elapsed - this.fade.fadeStart) / (1 - this.fade.fadeStart), 0, 1);
   }
 
   prepareTransitionCapture(scene: THREE.Scene, node: NodeData, position: THREE.Vector3) {
@@ -138,7 +150,7 @@ export class PanoramaLayer {
 
   setPresentationOpacity(opacity: number) {
     this.presentationOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
-    const progress = this.fade ? Math.min(1, (performance.now() - this.fade.start) / this.fade.duration) : 1;
+    const progress = this.fadeProgress();
     this.setOpacity(this.active, progress);
     this.setOpacity(this.outgoing, 1);
   }

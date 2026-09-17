@@ -254,6 +254,7 @@ export class SphrRuntime {
     this.state.activePointIndex = pointIndex;
     this.state.viewMode = nextViewMode;
     this.updateControlsForViewMode();
+    if (this.isNavigating) this.nav?.beginTransition();
     this.nav?.setOrbit(nextViewMode === "ORBIT");
 
     this.splats?.setStudyMode(point.extra);
@@ -265,13 +266,17 @@ export class SphrRuntime {
 
     const returningFromOverview = fromOverview && nextViewMode === "FPV" && !instant;
     const teleport = nodeChanged && !fromOverview && Boolean(outgoingNode?.neighbors && !outgoingNode.neighbors.includes(node!.uuid));
+    const navigationMs = teleport ? 700 : this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
     const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV"
       ? this.beginNavigationTransition(outgoingNode)
       : null;
 
     if (node) {
       this.currentNode = node;
-      this.panorama?.navigate(node, this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 700, returningFromOverview || Boolean(navigationTransition));
+      this.panorama?.navigate(node, navigationMs, {
+        replaceImmediately: returningFromOverview || instant,
+        fadeStart: navigationTransition?.fadeStart
+      });
       this.nav?.setActive(node.uuid);
     }
 
@@ -287,7 +292,7 @@ export class SphrRuntime {
     if (returningFromOverview) this.flyFromOverview(pose);
     else {
       this.flyTo(pose, instant || teleport);
-      if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationTransition?.navigationMs ?? (teleport ? 700 : 1100));
+      if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationMs);
       else if (this.isNavigating) this.endNavigationTransition();
     }
     if (node) this.prefetchNeighbors(node);
@@ -297,6 +302,7 @@ export class SphrRuntime {
   toggleViewMode() {
     if (this.isNavigating) return;
     const newMode = this.state.viewMode === "FPV" ? "ORBIT" : "FPV";
+    this.nav?.beginTransition();
     this.state.viewMode = newMode;
     this.updateControlsForViewMode();
     const point = this.getActivePoint();
@@ -615,8 +621,10 @@ export class SphrRuntime {
     if (this.disposed) return;
     const direction = this.camera.getWorldDirection(new THREE.Vector3());
     const transition = fromOverview ? null : this.beginNavigationTransition(this.currentNode);
+    const navigationMs = this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
+    this.nav?.beginTransition();
     this.currentNode = node;
-    this.panorama?.navigate(node, 700, fromOverview || Boolean(transition));
+    this.panorama?.navigate(node, navigationMs, { replaceImmediately: fromOverview, fadeStart: transition?.fadeStart });
     this.panorama?.setVisible(true);
     this.state.viewMode = "FPV";
     this.updateControlsForViewMode();
@@ -624,11 +632,14 @@ export class SphrRuntime {
     this.nav?.setOrbit(false);
     this.nav?.setActive(node.uuid);
     const pose = this.poseForNode(node, "FPV");
-    if (!fromOverview) pose.target.copy(pose.position).addScaledVector(direction, 0.1);
+    if (!fromOverview) {
+      pose.target.copy(pose.position).addScaledVector(direction, 0.1);
+      pose.fov = this.camera.fov;
+    }
     if (fromOverview) this.flyFromOverview(pose);
     else {
       this.flyTo(pose);
-      this.scheduleNavigationTransitionEnd(transition?.navigationMs ?? 1100);
+      this.scheduleNavigationTransitionEnd(navigationMs);
     }
     this.emitState();
     this.prefetchNeighbors(node);
@@ -692,7 +703,6 @@ export class SphrRuntime {
     this.isNavigating = true;
     this.state.navigating = true;
     this.controls.enabled = false;
-    this.nav?.setVisible(false);
     this.panorama?.setVisible(true);
     this.panorama?.setPresentationOpacity(0);
     this.sceneGraph?.setOverviewReturnBlend(0);
@@ -829,13 +839,12 @@ export class SphrRuntime {
       fadeMs: config?.meshFadeMs
     });
     if (!meshState) {
-      this.endNavigationTransition();
+      this.panorama.clearTransitionCapture();
       return null;
     }
 
     const navigationMs = config?.navigationMs ?? 1100;
     const fadeMs = Math.min(meshState.fadeMs, navigationMs * 0.4);
-    this.nav?.setVisible(false);
     this.transitionMeshTween = createTween({
       duration: navigationMs,
       easing: (value) => value,
@@ -850,7 +859,8 @@ export class SphrRuntime {
 
     this.emitState();
     return {
-      navigationMs
+      navigationMs,
+      fadeStart: 1 - fadeMs / navigationMs
     };
   }
 
@@ -867,6 +877,7 @@ export class SphrRuntime {
   private endNavigationTransition() {
     this.sceneGraph?.restoreNavigationTransition();
     this.nav?.setVisible(true);
+    this.nav?.endTransition();
     this.panorama?.clearTransitionCapture();
     this.isNavigating = false;
     this.state.navigating = false;

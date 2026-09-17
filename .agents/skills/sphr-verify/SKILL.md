@@ -13,6 +13,7 @@ tools when supplied, and follow their interaction policy.
 node .agents/scripts/project/sphr-state.mjs
 node .agents/scripts/project/validate-bootstrap.mjs public/datasets/matterport/my-space/bootstrap.json
 npm run typecheck
+npm run test:navigation
 npm run build
 ```
 
@@ -37,6 +38,9 @@ still need interpretation; they are not automatic proof of photographic alignmen
 - Real 3DGS/panorama/IIIF content renders; assets return successfully; errors are understood.
 - Real single clicks on a marker and on floor between markers change active node/camera
   and settle. Drags stay at the current scan. Prefetch is not navigation.
+- Inspect intermediate travel frames at a wider zoom: departure pucks remain visible,
+  field of view/heading stay constant, and mesh gaps do not immediately show the next
+  panorama. Test both indexed tourpoints and direct nodes, plus failed texture loads.
 - Dollhouse works and double-click returns to eye-level first person.
 - Desktop/mobile title and HUD do not overlap; removed branding/dropdown stay removed.
 - Share/copy-link and fullscreen buttons are absent; tourless silent scenes have no empty settings row.
