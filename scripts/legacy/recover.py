@@ -12,11 +12,12 @@ import html
 import io
 import json
 import re
+import shutil
 import sys
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
@@ -78,6 +79,67 @@ def normalize_graph(records):
             item['children'] = normalize_graph(item['children'])
         output.append(item)
     return output
+
+
+def attach_native_archive(folder, spaces, origin, output, audit):
+    """Replace an exact hosted model with its verified native archive, retaining legacy identity."""
+    host = urlsplit(origin)
+    if host.scheme != 'https' or not host.netloc or host.username or host.query or host.fragment:
+        raise ValueError('Native archive delivery requires an HTTPS asset prefix')
+    manifest = json.loads((folder / 'manifest.json').read_text())
+    validation = json.loads((folder / 'validation.json').read_text())
+    if manifest.get('schema') != 'sphr-matterport-web-v1' or not validation.get('valid') or not validation.get('sourceVerified'):
+        raise ValueError('Native archive requires a source-verified web package')
+    model_id = manifest['modelId']
+    matches = [space for space in spaces.values() if space['type'] == 'matterport'
+               and parse_qs(urlsplit(space.get('src') or '').query).get('m') == [model_id]]
+    if not matches:
+        raise ValueError('Native archive does not match a recovered Matterport model')
+    assets = {item['path']: item for item in manifest['assets']}
+    if len(assets) != len(manifest['assets']): raise ValueError('Duplicate native asset path')
+    for name, item in assets.items():
+        path = (folder / name).resolve()
+        if Path(name).is_absolute() or '..' in Path(name).parts or not path.is_relative_to(folder.resolve()) or not path.is_file():
+            raise ValueError('Invalid native archive asset path')
+        if path.stat().st_size != item['bytes'] or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('Native archive asset differs from its verified manifest')
+    revision = hashlib.sha256(json.dumps(manifest['assets'], sort_keys=True).encode()).hexdigest()[:16]
+    base = origin.rstrip('/') + '/' + revision
+    prefix = manifest['datasetUrl'].rstrip('/') + '/'
+    needed = set()
+
+    def rewrite(value):
+        if isinstance(value, dict): return {key: rewrite(item) for key, item in value.items()}
+        if isinstance(value, list): return [rewrite(item) for item in value]
+        if isinstance(value, str) and value.startswith(prefix):
+            name = value[len(prefix):]
+            if name not in assets: raise ValueError('Native archive references an unverified asset')
+            needed.add(name)
+            return base + '/' + quote(name, safe='/()_-.,')
+        return value
+
+    bootstrap = json.loads((folder / 'bootstrap.json').read_text())
+    native = rewrite(bootstrap['space'])
+    graph = rewrite(bootstrap.get('tour', {}).get('tour_data', {}).get('sceneGraph', []))
+    existing = native['space_data'].get('sceneGraph', [])
+    by_id = {item['id']: item for item in existing}
+    for item in graph:
+        if item['id'] in by_id and by_id[item['id']] != item:
+            raise ValueError('Conflicting archive scene graph identity')
+        by_id[item['id']] = item
+    native['space_data']['sceneGraph'] = list(by_id.values())
+    for space in matches:
+        for key in ('type', 'version', 'mesh', 'space_custom', 'space_data'):
+            if key in native: space[key] = copy.deepcopy(native[key])
+        space.pop('src', None)
+        audit.setdefault('nativeArchives', []).append({'spaceId': space['id'], 'modelId': model_id,
+            'sourceSha256': manifest['sourceSha256'], 'revision': revision, 'nodeCount': len(native['space_data']['nodes'])})
+    for name in needed:
+        destination = output / revision / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != assets[name]['sha256']:
+            raise ValueError('Immutable native asset was changed')
+        if not destination.exists(): shutil.copyfile(folder / name, destination)
 
 
 def recover_space(record, inventory, origin, iiif_origin, audit):
@@ -185,6 +247,9 @@ def recover_tour(record, records, spaces, audit):
             # against the new viewer's narrower free-exploration default.
             point['fov'] = max(40, min(110, 110 - (point.get('zoom') or 0)))
             if space['type'] != 'matterport' and point.get('targetType') != 'MODEL':
+                aliases = {node.get('sourceLocationId'): node['uuid'] for node in nodes.values() if node.get('sourceLocationId')}
+                if point.get('nodeUUID') in aliases:
+                    point['nodeUUID'] = aliases[point['nodeUUID']]
                 if not point.get('nodeUUID'):
                     point['nodeUUID'] = space['space_data'].get('initialNode')
                 if point.get('nodeUUID') not in nodes:
@@ -225,6 +290,9 @@ def main():
     parser.add_argument('--origin', default='https://static.mused.com')
     parser.add_argument('--iiif-origin', default='https://iiif.mused.com')
     parser.add_argument('--sdk-key-file', type=Path, help='Existing public Matterport Embed SDK application key')
+    parser.add_argument('--native-archive', type=Path, action='append', default=[], help='Source-verified native web package for an exact hosted model')
+    parser.add_argument('--native-origin', default='https://static.mused.com/sphr/archives', help='Delivery prefix for the staged native-assets directory')
+    parser.add_argument('--hosted-audit', type=Path, help='Source-bound report from audit-hosted.py; retains unavailable models with an explicit viewer message')
     parser.add_argument('--allow-unavailable-nodes', action='store_true', help='Record unavailable source nodes and omit broken navigation targets')
     args = parser.parse_args()
     source = json.loads(args.export.read_text())
@@ -232,6 +300,20 @@ def main():
     audit = {'sourceSha256': hashlib.sha256(args.export.read_bytes()).hexdigest(), 'unavailableNodes': [], 'repairs': []}
     records = {str(record['id']): record for record in source['spaces']}
     spaces = {key: recover_space(record, inventory, args.origin, args.iiif_origin, audit) for key, record in records.items()}
+    for folder in args.native_archive:
+        attach_native_archive(folder, spaces, args.native_origin, args.out / 'native-assets', audit)
+    if args.hosted_audit:
+        hosted = json.loads(args.hosted_audit.read_text())
+        if hosted['sourceSha256'] != audit['sourceSha256']:
+            raise ValueError('Hosted audit does not match the source export')
+        if hosted.get('missingTourNodes'):
+            raise ValueError('Hosted audit found missing authored sweep references')
+        for model in hosted['models']:
+            space = spaces[str(model['id'])]
+            if space['type'] == 'matterport' and model.get('available') is False:
+                if model['url'] != space['src']: raise ValueError('Hosted audit source URL mismatch')
+                space['availability'] = {'status': 'unavailable', 'message': 'This space’s original Matterport model is currently unavailable.'}
+                audit.setdefault('unavailableHosted', []).append({'spaceId': space['id'], 'title': space['title'], 'url': space['src'], 'checkedAt': hosted['checkedAt']})
     if audit['unavailableNodes'] and not args.allow_unavailable_nodes:
         write_json(args.out / 'audit.json', audit)
         raise ValueError('Source panoramas are unavailable; inspect audit.json before allowing omission')

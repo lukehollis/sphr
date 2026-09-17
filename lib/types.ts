@@ -228,6 +228,7 @@ export type SphrSpace = {
   type?: "spaces" | "splat" | "iiif" | "matterport" | string;
   src?: string | null;
   description?: string;
+  availability?: { status: 'unavailable'; message: string };
   share_image?: string | null;
   thumbnail?: string | null;
   video?: string | null;

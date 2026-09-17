@@ -53,6 +53,40 @@ previews, delivered initial faces, GLB headers and external resources, audio and
 video. The hash-bound `validation.json` prevents publishing modified packages.
 It does not establish visual alignment; inspect real scenes and navigation too.
 
+### Hosted models and native backups
+
+Check linked models separately; a valid catalog route or thumbnail does not prove
+that a hosted model is still available:
+
+```sh
+python3 scripts/legacy/audit-hosted.py --export /captures/recovery/source.json --out /captures/recovery/hosted-audit.json
+```
+
+The report checks the model's public prefetch and every authored v1/v2 sweep
+reference. Pass it to preparation with `--hosted-audit`; unavailable sources retain
+their identities and previews, and show an explicit message instead of waiting for
+an SDK timeout. Network errors stay unresolved, rather than being classified as
+missing models. Inspect actual embeds too: an HTTP prefetch is not an SDK playback
+test. Restore source access or provide an archive, then audit and prepare again.
+
+An existing source-verified `sphr-matterport-web-v1` package can replace its exact
+Matterport model using `--native-archive /captures/native-package` during preparation.
+The model ID must match, all asset hashes must pass, camera/sweep identities are
+retained, and the replacement also applies inside tours. No title-based matching
+or substitute photographs are used. Preparation stages only referenced assets in
+`/captures/recovery/packages/native-assets`, under immutable content revisions.
+Upload those before the normal delivery validation:
+
+```sh
+gcloud storage rsync /captures/recovery/packages/native-assets gs://ASSET_BUCKET/sphr/archives --recursive --checksums-only --cache-control=public,max-age=31536000,immutable
+gcloud storage ls --long --recursive gs://ASSET_BUCKET/sphr/archives > /captures/recovery/native-objects.txt
+```
+
+Set `--native-origin https://ASSET_HOST/sphr/archives` when preparing for another
+host, and include the native inventory with `--inventory` during validation.
+Source exports, archive manifests and validation reports stay local. Source-specific
+replacement paths and recovery receipts must not be committed.
+
 ## Preview and publish
 
 For local use, mount the package directory at `public/datasets/legacy`. Its index

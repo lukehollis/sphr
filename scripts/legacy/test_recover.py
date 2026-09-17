@@ -1,12 +1,19 @@
 import copy
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 
 spec = importlib.util.spec_from_file_location('recover', Path(__file__).with_name('recover.py'))
 r = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
+sys.modules['recover'] = r
+hosted_spec = importlib.util.spec_from_file_location('hosted', Path(__file__).with_name('audit-hosted.py'))
+hosted = importlib.util.module_from_spec(hosted_spec)
+hosted_spec.loader.exec_module(hosted)
 
 
 def record(id=1):
@@ -26,6 +33,15 @@ def audit():
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_hosted_prefetch_parses_data_without_running_source_scripts(self):
+        value = {'queries': {'GetModelPrefetch': {'data': {'model': {'id': 'model', 'locations': []}}}}}
+        self.assertEqual(hosted.prefetched_model('window.MP_PREFETCHED_MODELDATA=' + json.dumps(value) + ';')['id'], 'model')
+        self.assertEqual(hosted.prefetched_model('window.MP_PREFETCHED_MODELDATA=parseJSON(' + json.dumps(json.dumps(value)) + ');')['id'], 'model')
+        value['queries']['GetModelPrefetch']['data']['model'] = None
+        self.assertIsNone(hosted.prefetched_model('window.MP_PREFETCHED_MODELDATA=' + json.dumps(value)))
+        with self.assertRaisesRegex(ValueError, 'No prefetched'):
+            hosted.prefetched_model('<html>temporary error</html>')
+
     def recover(self, rec=None, inv=None, log=None):
         return r.recover_space(rec or record(), inv if inv is not None else inventory(), 'https://assets.example.com', 'https://images.example.com', log if log is not None else audit())
 
@@ -94,6 +110,32 @@ class RecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             p = Path(temp) / 'inventory.txt'; p.write_text('  0 2026-01-01T00:00:00Z gs://bucket/empty.jpg\n  42 2026-01-01T00:00:00Z gs://bucket/ok.jpg\n')
             self.assertEqual(r.read_inventory([p]), {'empty.jpg': 0, 'ok.jpg': 42})
+
+    def test_verified_native_archive_retains_identity_and_rewrites_only_its_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); package = root / 'package'; package.mkdir()
+            native = {'space': {'type': 'spaces', 'mesh': '/datasets/example/mesh.glb', 'space_data': {
+                'initialNode': 'camera', 'nodes': [{'uuid': 'camera', 'sourceLocationId': 'sweep', 'faces': ['/datasets/example/face.jpg'] * 6}]}},
+                'tour': {'tour_data': {'sceneGraph': [{'id': 'mesh', 'file': '/datasets/example/mesh.glb', 'persistent': True}]}}}
+            (package / 'bootstrap.json').write_text(json.dumps(native)); (package / 'mesh.glb').write_bytes(b'mesh'); (package / 'face.jpg').write_bytes(b'face')
+            assets = [{'path': p.name, 'bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(package.iterdir())]
+            (package / 'manifest.json').write_text(json.dumps({'schema': 'sphr-matterport-web-v1', 'modelId': 'Example',
+                'sourceSha256': 'source', 'datasetUrl': '/datasets/example', 'assets': assets}))
+            (package / 'validation.json').write_text(json.dumps({'valid': True, 'sourceVerified': True}))
+            spaces = {'1': {'id': 1, 'title': 'Original title', 'type': 'matterport', 'src': 'https://my.matterport.com/show/?m=Example', 'space_data': {}}}
+            log = audit(); r.attach_native_archive(package, spaces, 'https://assets.example.com/archives', root / 'stage', log)
+            self.assertEqual(spaces['1']['id'], 1); self.assertEqual(spaces['1']['title'], 'Original title')
+            self.assertEqual(spaces['1']['type'], 'spaces'); self.assertNotIn('src', spaces['1'])
+            self.assertTrue(spaces['1']['mesh'].startswith('https://assets.example.com/archives/'))
+            self.assertEqual(spaces['1']['mesh'], spaces['1']['space_data']['sceneGraph'][0]['file'])
+            self.assertEqual(sorted(p.name for p in (root / 'stage').rglob('*') if p.is_file()), ['face.jpg', 'mesh.glb'])
+            source = {'1': {'id': 1, 'space_type': 'matterport', 'src': 'https://my.matterport.com/show/?m=Example'}}
+            tour = {'id': 2, 'title': 'Tour', 'space_ids': [1], 'tour_data': {'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'sweep'}]}]}}
+            recovered = r.recover_tour(tour, source, spaces, log)
+            self.assertEqual(recovered['tour']['tour_data']['spaces'][0]['tourpoints'][0]['nodeUUID'], 'camera')
+            (package / 'face.jpg').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'manifest'):
+                r.attach_native_archive(package, {'1': {'type': 'matterport', 'src': source['1']['src']}}, 'https://assets.example.com/archives', root / 'stage', log)
 
 
 if __name__ == '__main__': unittest.main()

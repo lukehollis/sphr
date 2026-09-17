@@ -54,6 +54,7 @@ export class ViewerSession {
     this.state = { ...this.state, navigating: true, navigationError: undefined, loading: { label: 'Loading ' + segment.space.title, progress: 0, ready: false } };
     this.emit();
     try {
+      if (segment.space.availability?.status === 'unavailable') throw new Error(segment.space.availability.message);
       if (segment.space.type === 'matterport') {
         stage.audio = new AudioController(normalizeTour(this.bootstrap).audio);
         stage.audio.setMuted(this.preferences.muted);
