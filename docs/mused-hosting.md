@@ -223,8 +223,11 @@ Only the published bootstrap receives absolute CDN URLs; local packages and thei
 calibration remain unchanged. The publisher checks image and mesh hashes before
 upload, uploads the full runtime package, then updates the catalog last. Existing
 remote scenes absent from the local machine remain in the catalog. A GCS generation
-precondition prevents concurrent publishers from silently overwriting each other;
-rerun if another publication wins the race.
+precondition prevents concurrent publishers from silently overwriting each other.
+The catalog is read after asset upload, then publication retries a changed generation
+up to five times while preserving the other publisher's scenes. Unchanged-generation
+failures propagate instead of hiding authentication, network or storage errors.
+Rerun the publisher if repeated contention exhausts those attempts.
 
 Scene revisions use long immutable caching. The catalog uses `Cache-Control: no-store`
 and is fetched without a Next.js data cache. Stable `/s/<id>/<title-slug>` links survive

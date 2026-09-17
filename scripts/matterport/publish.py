@@ -113,6 +113,24 @@ def read_remote_catalog(uri):
     return catalog['spaces'], generation
 
 
+def commit_catalog(published, index, uri):
+    """Merge after asset upload; retry only when another publisher won the CAS."""
+    remote, generation = read_remote_catalog(uri)
+    for attempt in range(5):
+        catalog = {'schema': 'sphr-matterport-index-v2', 'spaces': merge_catalog(remote, published)}
+        index.write_text(json.dumps(catalog, indent=2) + '\n')
+        try:
+            gcloud('cp', index, uri, '--content-type=application/json',
+                   '--cache-control=no-store', '--if-generation-match=' + generation)
+            return catalog
+        except subprocess.CalledProcessError:
+            latest, current_generation = read_remote_catalog(uri)
+            if current_generation == generation or attempt == 4:
+                raise
+            print('Catalog changed during publication; merging the latest scenes and retrying.', flush=True)
+            remote, generation = latest, current_generation
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bucket', default='mused')
@@ -137,7 +155,6 @@ def main():
         if missing: parser.error('Unknown scene slugs: ' + ', '.join(sorted(missing)))
         local = [entry for entry in local if entry['slug'] in args.slug]
     if not local: parser.error('No scenes to publish')
-    remote, generation = ([], '0') if args.dry_run else read_remote_catalog(catalog_uri)
     with tempfile.TemporaryDirectory(prefix='sphr-publish-') as temp:
         stage = Path(temp)
         published, paths = [], []
@@ -152,16 +169,16 @@ def main():
             if not (demo/'garden_demo.spark.splat').is_file(): raise ValueError('Missing real Garden splat')
             shutil.copytree(demo, stage/'demo')
             paths.append('demo')
-        catalog = {'schema':'sphr-matterport-index-v2', 'spaces':merge_catalog(remote, published)}
+        catalog = {'schema':'sphr-matterport-index-v2', 'spaces':merge_catalog([], published)}
         index = stage/'index.json'
         index.write_text(json.dumps(catalog, indent=2) + '\n')
         if not args.dry_run:
             for relative in paths:
                 cache = 'public,max-age=3600' if relative == 'demo' else 'public,max-age=31536000,immutable'
                 gcloud('rsync', stage/relative, bucket_root+'/'+relative, '--recursive', '--checksums-only', '--cache-control='+cache)
-            # One atomic pointer switch, guarded against concurrent publishers.
-            gcloud('cp', index, catalog_uri, '--content-type=application/json',
-                   '--cache-control=no-store', '--if-generation-match='+generation)
+            # Take a fresh remote snapshot after the potentially long upload.
+            # The generation guard remains mandatory on every attempted switch.
+            catalog = commit_catalog(published, index, catalog_uri)
         print(json.dumps({'dryRun':args.dry_run, 'published':len(published), 'catalogScenes':len(catalog['spaces']),
                           'catalogUrl':base_url+'/datasets/matterport/index.json',
                           'links':['https://app.mused.com'+entry['scenePath'] for entry in published]}, indent=2))
