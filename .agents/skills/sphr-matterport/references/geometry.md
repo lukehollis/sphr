@@ -41,16 +41,35 @@ handedness, measured floors and lack of floor evidence.
 `reconstruct.py` projects nearest measured ranges into six depth maps using the same
 camera bases. Only continuous one-pixel sampling holes are filled. TSDF integration
 uses measured depth, not a guessed closed hull. Measure source-point distances after
-quadric reduction. 49,999 triangles satisfies a 50k ceiling. UV splitting can increase
+quadric reduction. Open3D's requested triangle count is not guaranteed: record actual
+topology, retry boundary weights, and use the tracked QEM fallback if necessary.
+Fail before texture baking when the configured ceiling is still unmet.
+49,999 triangles satisfies a 50k ceiling. UV splitting can increase
 vertex count without increasing triangle count.
 
 `texture.py` selects calibrated cameras by surface angle, distance and ray visibility,
 unwraps with xatlas, and bakes photographic texture. Unobserved triangles retain source
 vertex-color fallback. Texture coverage is not physical completeness of the capture.
 
-Floors use measured local planes. Expand the search for missing nadir and use a
-capture-specific measured height prior. Fail on missing support instead of inventing
-a 1.45 m offset. Graph edges need camera/floor sightlines. Report disconnected components;
+Floors first use measured local planes with two-dimensional support and bounded
+extrapolation. Wall stripes and decorative ledges can mimic a plane, so refine every
+marker with a downward ray at the source camera footprint on the full fused surface
+before decimation. Neighboring scans can supply missing nadir measurements. For steep
+passages or a small gap underneath the tripod, fit a two-dimensional measured TSDF
+footprint within at most 0.5 m, recording slope, support and residuals. Reject unsupported
+extrapolation and separated surfaces. This supports measured ramps and steps without
+inventing a fixed camera height. Retain
+and flag a valid local plane if the mesh lacks that downward observation. If both
+sources lack support, record `floorUnobserved: true` and a null floor position, with
+an explicit `unobserved-source-floor` warning. Preserve the original camera and all
+photographs. The viewer exposes a sphere at the measured camera position, selectable
+directly in first person when visible or from dollhouse. It excludes these camera
+points from inferred floor-click targeting; a sphere must never become a fake floor
+ring. Preserve measured camera sightlines so an uncertain floor does not strand a
+neighboring scan that is reachable only through this camera.
+Never replace missing evidence with a standard height. Elevated tripods can legitimately be nearly four meters
+above the floor: preserve source camera height and flag it for visual review instead
+of imposing a standard tripod offset. Graph edges need camera/floor sightlines. Report disconnected components;
 never force through-wall connections just to produce one component.
 
 ## Viewer

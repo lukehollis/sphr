@@ -24,10 +24,7 @@ import os
 import hashlib
 import re
 import shutil
-import struct
-import zipfile
 import time
-import zlib
 from pathlib import Path
 from typing import Any
 
@@ -42,10 +39,11 @@ import trimesh
 from pye57.libe57 import NodeType
 from scipy.spatial.transform import Rotation
 from geometry import C, CENTERS, camera_face_assignment
-from reconstruct import fuse
+from reconstruct import Fusion
+from sources import ExportSources, source_digest
 from texture import texture_mesh
 from seams import measure_seams
-from catalog import scene_identity, write_matterport_index
+from catalog import scene_identity, write_matterport_index, matching_capture
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,14 +64,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
     )
     parser.add_argument("--dataset-prefix", default="/datasets/matterport")
+    parser.add_argument("--extraction-root", type=Path, default=os.environ.get("SPHR_MATTERPORT_EXTRACTION_ROOT"), help="Separate temporary E57 extraction storage, organized by capture slug")
     parser.add_argument("--target-triangles", default=50000, type=int)
     parser.add_argument("--voxel-size", default=0.035, type=float)
     parser.add_argument("--mesh-method", default="tsdf", choices=["tsdf"])
     parser.add_argument("--skip-images", action="store_true")
     parser.add_argument("--skip-mesh", action="store_true")
+    parser.add_argument("--resume-geometry", action="store_true", help="Retry a source-bound fused-surface checkpoint after a geometry or texture failure")
+    parser.add_argument("--buffer-part-images", action="store_true", help="Buffer each part's JPEGs in RAM (12 GiB limit), then write them after releasing its verified extraction cache")
     parser.add_argument("--face-size", default=2048, type=int)
     parser.add_argument("--depth-size", default=512, type=int)
     parser.add_argument("--atlas-size", default=4096, type=int)
+    parser.add_argument("--discard-extracted-source", action="store_true", help="Release each extracted E57 cache after source validation; original ZIP stays intact")
     return parser.parse_args()
 
 
@@ -157,7 +159,7 @@ def image_translation(node: Any) -> np.ndarray:
     )
 
 
-def extract_images(e57, dataset_dir, dataset_url, headers, face_size=2048):
+def extract_images(e57, dataset_dir, dataset_url, headers, face_size=2048, scan_offset=0, source_part=0, image_buffer=None):
     images = child(e57.root, "images2D")
     grouped = {}
     for index in range(images.childCount()):
@@ -188,7 +190,7 @@ def extract_images(e57, dataset_dir, dataset_url, headers, face_size=2048):
             raise ValueError(
                 f"Scan {scan_index}: image cameras differ from scan origin; cannot represent as a central panorama"
             )
-        uuid = f"scan-{scan_index:03d}"
+        uuid = f"scan-{scan_offset + scan_index:03d}"
         folder = dataset_dir / "faces" / uuid
         folder.mkdir(parents=True, exist_ok=True)
         faces, records, source_photos = [], [], []
@@ -233,7 +235,11 @@ def extract_images(e57, dataset_dir, dataset_url, headers, face_size=2048):
                 if face_size:
                     image.thumbnail((face_size, face_size), Image.Resampling.LANCZOS)
                 path = folder / f"face{face}.jpg"
-                image.save(path, quality=94, subsampling=0)
+                if image_buffer is not None:
+                    checksum = image_buffer.save(path, image)
+                else:
+                    image.save(path, quality=94, subsampling=0)
+                    checksum = hashlib.sha256(path.read_bytes()).hexdigest()
             faces.append(f"{dataset_url}/faces/{uuid}/face{face}.jpg")
             records.append(
                 {
@@ -245,18 +251,20 @@ def extract_images(e57, dataset_dir, dataset_url, headers, face_size=2048):
                     "basisResidual": residual,
                     "sourceSize": [width, height],
                     "size": list(image.size),
-                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "sha256": checksum,
                 }
             )
         nodes.append(
             {
                 "uuid": uuid,
-                "label": f"Location {scan_index + 1}",
+                "label": f"Location {scan_offset + scan_index + 1}",
                 "faces": faces,
                 "position": dict(zip("xyz", camera.tolist())),
                 "quaternion": Rotation.from_matrix(group).as_quat().tolist(),
                 "matterport": {
-                    "scanIndex": scan_index,
+                    "scanIndex": scan_offset + scan_index,
+                    "sourceScanIndex": scan_index,
+                    "sourcePart": source_part,
                     "guid": header.guid,
                     "sourceTranslation": list(map(float, header.translation)),
                     "sourceRotation": list(map(float, header.rotation)),
@@ -390,10 +398,38 @@ def preferred_view_target(
     return neighbors[0][1] if neighbors else None
 
 
+def initial_explore_node(nodes):
+    """Start in the largest reachable area, preserving source order within it."""
+    if not nodes:
+        return None
+    remaining = {node['uuid'] for node in nodes}
+    adjacency = {node['uuid']: set(node.get('neighbors', [])) & remaining for node in nodes}
+    for origin, targets in list(adjacency.items()):
+        for target in list(targets):
+            adjacency[target].add(origin)
+    components = []
+    for node in nodes:
+        if node['uuid'] not in remaining:
+            continue
+        component, queue = set(), [node['uuid']]
+        remaining.remove(node['uuid'])
+        while queue:
+            current = queue.pop()
+            component.add(current)
+            found = adjacency[current] & remaining
+            remaining.difference_update(found)
+            queue.extend(found)
+        components.append(component)
+    largest = max(components, key=len)
+    candidates = [node for node in nodes if node['uuid'] in largest and node.get('neighbors') and not node.get('floorUnobserved')]
+    return next((node for node in candidates if len(node['neighbors']) >= 2), candidates[0] if candidates else nodes[0])
+
+
 def build_bootstrap(
     slug: str, title: str, dataset_url: str, nodes: list[dict[str, Any]], mesh_url: str
 ) -> dict[str, Any]:
     navigation_config = infer_navigation_config(nodes)
+    initial = initial_explore_node(nodes)
     tourpoints = []
     for index, node in enumerate(nodes):
         rotation = camera_rotation_toward(
@@ -425,10 +461,9 @@ def build_bootstrap(
             "space_custom": "matterport-e57",
             "space_data": {
                 "title": title,
-                "initialNode": nodes[0]["uuid"] if nodes else None,
-                "initialRotation": tourpoints[0]["rotation"]
-                if tourpoints
-                else {"azimuth": 0, "polar": 0},
+                "initialNode": initial["uuid"] if initial else None,
+                "initialRotation": next((point['rotation'] for point in tourpoints if point['nodeUUID'] == initial['uuid']),
+                                        {"azimuth": 0, "polar": 0}) if initial else {"azimuth": 0, "polar": 0},
                 "nodes": nodes,
                 "navigation": navigation_config,
                 "navigationTransition": {
@@ -537,43 +572,16 @@ def main():
         raise ValueError("Invalid mesh/image resolution")
     processed = (args.processed_root / args.slug).resolve()
     processed.mkdir(parents=True, exist_ok=True)
-    e57_path = source
-    if source.suffix.lower() == ".zip":
-        with zipfile.ZipFile(source) as archive:
-            entries = [
-                i
-                for i in archive.infolist()
-                if i.filename.lower().endswith(".e57") and not i.is_dir()
-            ]
-            if len(entries) != 1:
-                raise ValueError(
-                    f"Expected exactly one E57 in ZIP, found {len(entries)}"
-                )
-            e57_path = processed / "source" / "cloud_0.e57"
-            e57_path.parent.mkdir(parents=True, exist_ok=True)
-            cached_crc = 0
-            if e57_path.exists() and e57_path.stat().st_size == entries[0].file_size:
-                with e57_path.open("rb") as cached:
-                    for chunk in iter(lambda: cached.read(8 * 1024 * 1024), b""):
-                        cached_crc = zlib.crc32(chunk, cached_crc)
-            if not e57_path.exists() or cached_crc != entries[0].CRC:
-                temporary = e57_path.with_suffix(".extracting")
-                with archive.open(entries[0]) as src, temporary.open("wb") as dst:
-                    shutil.copyfileobj(src, dst, 8 * 1024 * 1024)
-                temporary.replace(e57_path)
-    # Reject incomplete downloads before libE57 reads any compressed point records.
-    with e57_path.open("rb") as stream:
-        header = stream.read(48)
-    if (
-        len(header) != 48
-        or header[:8] != b"ASTM-E57"
-        or struct.unpack_from("<Q", header, 16)[0] != e57_path.stat().st_size
-    ):
-        raise ValueError(
-            "E57 header/physical file length mismatch; source is incomplete or corrupt"
-        )
-    print(f"source {e57_path} ({e57_path.stat().st_size:,} bytes)", flush=True)
-    source_hash = sha256_file(e57_path)
+    extraction_directory = (args.extraction_root / args.slug).resolve() if args.extraction_root else None
+    sources = ExportSources(source, processed, args.discard_extracted_source, cache_directory=extraction_directory)
+    if args.buffer_part_images and (source.suffix.lower() != '.zip' or not args.discard_extracted_source):
+        raise ValueError('--buffer-part-images requires a ZIP and --discard-extracted-source')
+    from image_buffer import ImageBuffer
+    image_buffer = ImageBuffer() if args.buffer_part_images else None
+    if args.resume_geometry and (args.skip_images or args.skip_mesh):
+        raise ValueError('--resume-geometry cannot be combined with reuse flags')
+    if len(sources.entries) > 1 and (args.skip_images or args.skip_mesh):
+        raise ValueError("Multi-part exports require a full import; reuse flags cannot certify partial captures")
     parent = (args.public_root / "datasets" / "matterport").resolve()
     final = parent / args.slug
     staging = parent / f".{args.slug}.building"
@@ -581,31 +589,75 @@ def main():
     dataset_url = f"{args.dataset_prefix.rstrip('/')}/{args.slug}"
     mesh_path = staging / "mesh" / f"{args.slug}-50k.glb"
     mesh_path.parent.mkdir(parents=True, exist_ok=True)
-    e57 = pye57.E57(str(e57_path))
-    try:
-        headers = [e57.get_header(i) for i in range(e57.scan_count)]
-        if not headers:
-            raise ValueError("No scans in E57")
-        if args.skip_images:
-            previous = json.loads((final / "manifest.json").read_text())
-            if (
-                previous.get("sourceSha256") != source_hash
-                or previous.get("schema") != "sphr-matterport-e57-v2"
-            ):
-                raise ValueError(
-                    "--skip-images requires a matching, calibrated v2 package"
-                )
-            shutil.copytree(final / "faces", staging / "faces", dirs_exist_ok=True)
-            nodes = json.loads((final / "bootstrap.json").read_text())["space"][
-                "space_data"
-            ]["nodes"]
-            image_manifest = previous["imageManifest"]
-        else:
-            nodes, image_manifest = extract_images(
-                e57, staging, dataset_url, headers, args.face_size
-            )
-    finally:
-        e57.close()
+    nodes, source_checks, seen_guids = [], [], set()
+    staged_identity = None
+    image_manifest = {"images2D": 0, "orientationMethod": "calibrated-image-poses-v2", "groups": {}}
+    fusion = None if args.skip_mesh else Fusion(staging, args)
+    if fusion is not None:
+        fusion.image_buffer = image_buffer
+    if args.resume_geometry:
+        from checkpoint import load_inputs
+        saved, surface = load_inputs(processed / 'geometry-checkpoint', source, args)
+        nodes, image_manifest = saved['nodes'], saved['imageManifest']
+        source_checks, sources.records = saved['sourceChecks'], saved['sourceParts']
+        if (staging / 'manifest.json').is_file():
+            candidate = json.loads((staging / 'manifest.json').read_text())
+            if candidate.get('sourceSha256') == source_digest(sources.records):
+                staged_identity = candidate
+        fusion.reports = surface['reports']
+        fusion.sampled = [np.load(processed / 'geometry-checkpoint/samples.npy', allow_pickle=False)]
+    from validate import validate_source_nodes
+    for e57_path, part in ([] if args.resume_geometry else sources):
+        e57 = pye57.E57(str(e57_path))
+        try:
+            headers = [e57.get_header(i) for i in range(e57.scan_count)]
+            if not headers:
+                raise ValueError("No scans in E57 part")
+            if any(header.guid in seen_guids for header in headers) or len({header.guid for header in headers}) != len(headers):
+                raise ValueError("Duplicate scan GUID across source parts; cannot silently duplicate capture coverage")
+            seen_guids.update(header.guid for header in headers)
+            if len(sources.entries) == 1 and not final.exists():
+                existing = matching_capture(parent, seen_guids)
+                if existing:
+                    args.slug = existing['slug']
+                    print(f"Keeping existing capture identity and storage slug: {args.slug}", flush=True)
+                    processed = (args.processed_root / args.slug).resolve()
+                    processed.mkdir(parents=True, exist_ok=True)
+                    final, staging = parent / args.slug, parent / f'.{args.slug}.building'
+                    dataset_url = f"{args.dataset_prefix.rstrip('/')}/{args.slug}"
+                    mesh_path = staging / 'mesh' / f'{args.slug}-50k.glb'
+                    mesh_path.parent.mkdir(parents=True, exist_ok=True)
+                    if fusion is not None:
+                        fusion.dataset_dir = staging
+            part.update(scanCount=len(headers), scanOffset=len(nodes))
+            if args.skip_images:
+                candidates = [(folder, json.loads((folder / 'manifest.json').read_text()))
+                              for folder in [final, staging] if (folder / 'manifest.json').is_file()]
+                reusable = [(folder, data) for folder, data in candidates
+                            if data.get('sourceSha256') == part['sha256'] and data.get('schema') == 'sphr-matterport-e57-v2']
+                if not reusable:
+                    raise ValueError("--skip-images requires a matching, calibrated v2 package")
+                reuse, previous = reusable[0]
+                if reuse != staging:
+                    shutil.copytree(reuse / "faces", staging / "faces", dirs_exist_ok=True)
+                else:
+                    staged_identity = previous
+                part_nodes = json.loads((reuse / "bootstrap.json").read_text())["space"]["space_data"]["nodes"]
+                part_images = previous["imageManifest"]
+            else:
+                part_nodes, part_images = extract_images(e57, staging, dataset_url, headers, args.face_size, len(nodes), part['part'], image_buffer)
+        finally:
+            e57.close()
+        image_manifest['images2D'] += part_images['images2D']
+        image_manifest['groups'].update(part_images['groups'])
+        if fusion is not None:
+            fusion.integrate(e57_path, part_nodes)
+        source_checks.append(validate_source_nodes(e57_path, part_nodes, part['sha256']))
+        nodes.extend(part_nodes)
+        sources.release_verified(e57_path, source_checks[-1])
+        if image_buffer is not None:
+            image_buffer.flush()
+    source_hash = source_digest(sources.records)
     if args.skip_mesh:
         previous = json.loads((final / "manifest.json").read_text())
         if (
@@ -620,15 +672,17 @@ def main():
         for n, old in zip(nodes, old_nodes):
             for key in ["floorPosition", "floorEstimate", "neighbors"]:
                 n[key] = old[key]
+            n['floorUnobserved'] = old.get('floorUnobserved', False)
         shutil.copy2(final / "quality.json", staging / "quality.json")
         mesh_manifest = previous["mesh"]
         if (final / "mesh" / "atlas.jpg").exists():
             shutil.copy2(final / "mesh" / "atlas.jpg", staging / "mesh" / "atlas.jpg")
         validate_glb(mesh_path)
     elif args.mesh_method == "tsdf":
-        mesh_manifest = fuse(
-            e57_path, nodes, staging, mesh_path, args, export_validated_glb
-        )
+        if not args.resume_geometry:
+            from checkpoint import save_inputs
+            save_inputs(processed / 'geometry-checkpoint', source, args, nodes, image_manifest, sources.records, source_checks)
+        mesh_manifest = fusion.finish(nodes, mesh_path, export_validated_glb)
     else:
         raise ValueError(
             "The calibrated v2 pipeline requires --mesh-method tsdf; legacy methods cannot certify visibility and registration"
@@ -672,14 +726,15 @@ def main():
         point["rotation"] = node["initialRotation"]
         point["text"] = ""
         point["secondaryText"] = None
-    bootstrap["space"]["space_data"]["initialRotation"] = nodes[0]["initialRotation"]
+    initial = initial_explore_node(nodes)
+    bootstrap["space"]["space_data"]["initialRotation"] = initial["initialRotation"]
     bootstrap["space"]["thumbnail"] = f"{dataset_url}/preview.jpg"
-    azimuth = math.radians(nodes[0]["initialRotation"]["azimuth"])
+    azimuth = math.radians(initial["initialRotation"]["azimuth"])
     direction = np.array([-math.sin(azimuth), 0, -math.cos(azimuth)])
-    local_direction = Rotation.from_quat(nodes[0]["quaternion"]).inv().apply(direction)
+    local_direction = Rotation.from_quat(initial["quaternion"]).inv().apply(direction)
     cover_face = 1 + int(np.argmax(CENTERS[1:5] @ local_direction))
     with Image.open(
-        staging / "faces" / nodes[0]["uuid"] / f"face{cover_face}.jpg"
+        staging / "faces" / initial["uuid"] / f"face{cover_face}.jpg"
     ) as image:
         image.resize((960, 960), Image.Resampling.LANCZOS).save(
             staging / "preview.jpg", quality=90
@@ -690,7 +745,8 @@ def main():
         "title": args.title,
         "source": str(source),
         "sourceSha256": source_hash,
-        "scanCount": len(headers),
+        "scanCount": len(nodes),
+        "sourceParts": sources.records,
         "nodeCount": len(nodes),
         "datasetUrl": dataset_url,
         "bootstrapUrl": f"{dataset_url}/bootstrap.json",
@@ -699,14 +755,14 @@ def main():
         "mesh": mesh_manifest,
         "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    previous_manifest = json.loads((final / "manifest.json").read_text()) if (final / "manifest.json").exists() else None
+    previous_manifest = json.loads((final / "manifest.json").read_text()) if (final / "manifest.json").exists() else staged_identity
     manifest.update(scene_identity(manifest, previous_manifest))
     for name, data in [("bootstrap.json", bootstrap), ("manifest.json", manifest)]:
         (staging / name).write_text(json.dumps(data, indent=2) + "\n")
     # Publish only a fully validated package; failed runs leave the previous import usable.
     from validate import validate_package
 
-    result = validate_package(staging, source=e57_path)
+    result = validate_package(staging, source_checks=source_checks)
     (staging / "validation.json").write_text(json.dumps(result, indent=2) + "\n")
     backup = parent / f".{args.slug}.previous"
     if backup.exists():
@@ -722,6 +778,9 @@ def main():
     (processed / "nodes.json").write_text(json.dumps(nodes, indent=2) + "\n")
     (processed / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     write_matterport_index(parent)
+    checkpoint = processed / 'geometry-checkpoint'
+    if checkpoint.is_dir():
+        shutil.rmtree(checkpoint)
     print(
         json.dumps(
             {

@@ -1,6 +1,7 @@
 """Metric camera geometry shared by conversion and independent validation."""
 
 import numpy as np
+from scipy.spatial import ConvexHull, QhullError
 
 # SPHR plane order: up, +Z, -X, -Z, +X, down. Image rows run downwards.
 CENTERS = np.array(
@@ -44,10 +45,14 @@ def camera_face_assignment(scan_rotation, image_rotations):
 def estimate_floor(points, camera, expected_height=None):
     delta = points - camera
     radius = np.linalg.norm(delta[:, [0, 2]], axis=1)
-    # Expand only when the nadir is unmeasured (common on dark or reflective floors).
-    # The height prior is learned from measured floors in this capture, not a fixed offset.
-    minimum = max(0.5, expected_height * 0.72) if expected_height else 0.8
-    maximum = min(2.8, expected_height * 1.4) if expected_height else 2.5
+    # Captures can mix ordinary tripod scans with elevated scans of frescoes.
+    # Search the measured vertical extent instead of imposing the previous tripod height.
+    below = camera[1] - points[(radius < 5.0) & np.isfinite(points).all(1), 1]
+    below = below[below > 0.3]
+    if len(below) < 50:
+        raise ValueError("No measured floor points below scan camera")
+    minimum = 0.3
+    maximum = float(np.quantile(below, 0.999)) + 0.05
     for search_radius in [0.9, 1.5, 3.0, 5.0]:
         sample = points[
             (radius > 0.16)
@@ -64,6 +69,19 @@ def estimate_floor(points, camera, expected_height=None):
             continue
         level = (edges[peak] + edges[peak + 1]) * 0.5
         patch = sample[np.abs(sample[:, 1] - level) < 0.045]
+        # A thin horizontal stripe on a wall is not a two-dimensional floor patch.
+        spread = np.linalg.eigvalsh(np.cov(patch[:, [0, 2]], rowvar=False))
+        if len(patch) < 50 or spread[0] < 0.0036:
+            continue
+        try:
+            footprint = ConvexHull(patch[:, [0, 2]] - camera[[0, 2]])
+        except QhullError:
+            continue
+        # A shelf/ledge beside the scan cannot support a marker under the camera.
+        # Permit a small unmeasured edge around the tripod, not meter-scale extrapolation.
+        outside = float(np.max(footprint.equations[:, 2]))
+        if footprint.volume < 0.04 or outside > 0.25:
+            continue
         a = np.column_stack(
             [patch[:, 0] - camera[0], patch[:, 2] - camera[2], np.ones(len(patch))]
         )
@@ -78,5 +96,7 @@ def estimate_floor(points, camera, expected_height=None):
             "points": len(patch),
             "cameraHeight": float(camera[1] - floor),
             "medianResidualMeters": float(np.median(residual)),
+            "footprintAreaSquareMeters": float(footprint.volume),
+            "footprintExtrapolationMeters": max(0.0, outside),
         }
     raise ValueError("No supported floor plane found within five meters of scan camera")

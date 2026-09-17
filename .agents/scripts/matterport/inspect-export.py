@@ -25,12 +25,14 @@ def inspect(path, crc=False, digest=False):
     if path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
             files = [item for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith(".e57")]
-            if len(files) != 1:
-                raise ValueError(f"Expected exactly one E57, found {len(files)}")
-            item = files[0]
-            with archive.open(item) as stream:
-                check_header(stream.read(48), item.file_size)
-            result.update(e57Member=item.filename, e57Bytes=item.file_size, e57Crc32=f"{item.CRC:08x}")
+            if not files:
+                raise ValueError("ZIP contains no E57 files")
+            parts = []
+            for item in files:
+                with archive.open(item) as stream:
+                    check_header(stream.read(48), item.file_size)
+                parts.append(dict(member=item.filename, bytes=item.file_size, crc32=f"{item.CRC:08x}"))
+            result.update(e57Parts=parts, e57Bytes=sum(item.file_size for item in files))
             if crc:
                 bad = archive.testzip()
                 if bad:

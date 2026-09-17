@@ -16,6 +16,9 @@ measured-floor and neighbor-ID checks. The validator reads actual GLB topology/h
 `--source` additionally checks original E57 bytes, scan identities and poses. Imports
 run source-bound validation before publication. Standalone checks without that argument
 truthfully report `sourceVerified: false`.
+`--source` also accepts the original ZIP and validates every member sequentially;
+allow scratch space for its largest E57. Check `sourcePartCount` and source scan totals
+against the archive inventory, including global node offsets for split exports.
 
 For new imports, seam measurements are compared with original-image baselines measured
 before image downsampling/re-encoding. Large inherited edge differences are explicit
@@ -23,6 +26,10 @@ warnings, not quietly reported as seamless. Added conversion error still fails. 
 packages without baselines retain strict absolute thresholds. Review `quality.json`
 for all point/photo errors, floor support, point-to-mesh median/p95, graph components
 and isolated scans. A stale receipt does not certify edited assets.
+For any `cameraPointNodes` (older receipts call these `overviewOnlyNodes`), verify
+its camera-position sphere and panorama, including direct first-person selection
+from a measured neighbor and dollhouse access. Confirm it is excluded from inferred
+floor-click targeting. These source limitations must remain in the delivered receipt.
 
 ## Browser tools
 

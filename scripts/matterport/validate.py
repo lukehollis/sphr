@@ -12,7 +12,47 @@ from geometry import C, CENTERS, RIGHTS, UPS
 from seams import measure_seams, assess_seams
 
 
-def validate_package(folder, source=None):
+def validate_source_nodes(source, nodes, expected_hash):
+    import pye57
+
+    source = Path(source)
+    hasher = hashlib.sha256()
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            hasher.update(chunk)
+    if hasher.hexdigest() != expected_hash:
+        raise ValueError("Source E57 content differs from the import manifest")
+    e57 = pye57.E57(str(source))
+    try:
+        if e57.scan_count != len(nodes):
+            raise ValueError("Source E57 scan count differs from the package")
+        indices = [node['matterport'].get('sourceScanIndex', index) for index, node in enumerate(nodes)]
+        if sorted(indices) != list(range(e57.scan_count)) or len({node['matterport']['guid'] for node in nodes}) != len(nodes):
+            raise ValueError('Source scans must be covered exactly once')
+        for index, node in enumerate(nodes):
+            header = e57.get_header(node["matterport"].get("sourceScanIndex", index))
+            if header.guid != node["matterport"]["guid"] or not np.allclose(
+                header.translation,
+                node["matterport"]["sourceTranslation"],
+                atol=1e-8,
+                rtol=0,
+            ):
+                raise ValueError(f"Source scan pose differs: {node['uuid']}")
+            w, x, y, z = header.rotation
+            expected = C @ Rotation.from_quat([x, y, z, w]).as_matrix() @ C.T
+            if not np.allclose(
+                Rotation.from_quat(node["quaternion"]).as_matrix(),
+                expected,
+                atol=2e-4,
+                rtol=0,
+            ):
+                raise ValueError(f"Source scan rotation differs: {node['uuid']}")
+    finally:
+        e57.close()
+    return {"sha256": hasher.hexdigest(), "bytes": source.stat().st_size, "scanCount": len(nodes), "nodes": [node["uuid"] for node in nodes]}
+
+
+def validate_package(folder, source=None, source_checks=None):
     folder = Path(folder)
     bootstrap = json.loads((folder / "bootstrap.json").read_text())
     manifest = json.loads((folder / "manifest.json").read_text())
@@ -22,39 +62,33 @@ def validate_package(folder, source=None):
     ):
         raise ValueError("Missing or duplicate scans")
     if source is not None:
-        import pye57
-
-        source = Path(source)
-        hasher = hashlib.sha256()
-        with source.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-                hasher.update(chunk)
-        if hasher.hexdigest() != manifest["sourceSha256"]:
-            raise ValueError("Source E57 content differs from the import manifest")
-        e57 = pye57.E57(str(source))
-        try:
-            if e57.scan_count != len(nodes):
-                raise ValueError("Source E57 scan count differs from the package")
-            for index, node in enumerate(nodes):
-                header = e57.get_header(index)
-                if header.guid != node["matterport"]["guid"] or not np.allclose(
-                    header.translation,
-                    node["matterport"]["sourceTranslation"],
-                    atol=1e-8,
-                    rtol=0,
-                ):
-                    raise ValueError(f"Source scan pose differs: {node['uuid']}")
-                w, x, y, z = header.rotation
-                expected = C @ Rotation.from_quat([x, y, z, w]).as_matrix() @ C.T
-                if not np.allclose(
-                    Rotation.from_quat(node["quaternion"]).as_matrix(),
-                    expected,
-                    atol=2e-4,
-                    rtol=0,
-                ):
-                    raise ValueError(f"Source scan rotation differs: {node['uuid']}")
-        finally:
-            e57.close()
+        if Path(source).suffix.lower() == '.zip':
+            import tempfile
+            from sources import ExportSources
+            source_checks = []
+            with tempfile.TemporaryDirectory(prefix='sphr-source-validation-') as cache:
+                for source_path, part in ExportSources(source, cache, discard=True):
+                    subset = [node for node in nodes if node['matterport'].get('sourcePart', 0) == part['part']]
+                    expected = manifest.get('sourceParts', [{'sha256': manifest['sourceSha256']}])
+                    if part['part'] >= len(expected):
+                        raise ValueError('Source archive contains an unexpected E57 part')
+                    if manifest.get('sourceParts') and any(part[key] != expected[part['part']][key] for key in ('member', 'bytes', 'sha256')):
+                        raise ValueError('Source archive member differs from the import manifest')
+                    source_checks.append(validate_source_nodes(source_path, subset, expected[part['part']]['sha256']))
+        else:
+            source_checks = [validate_source_nodes(source, nodes, manifest["sourceSha256"])]
+    if source_checks:
+        from sources import source_digest
+        parts = manifest.get("sourceParts") or [{"sha256": manifest["sourceSha256"], "bytes": source_checks[0]["bytes"]}]
+        if len(parts) != len(source_checks) or source_digest(parts) != manifest["sourceSha256"]:
+            raise ValueError("Source-part binding differs from the manifest")
+        for part, check in zip(parts, source_checks):
+            if part['sha256'] != check['sha256'] or part['bytes'] != check['bytes']:
+                raise ValueError("A source part differs from its verified bytes")
+            if part.get('scanCount', check['scanCount']) != check['scanCount']:
+                raise ValueError('A source part scan count differs from its verified coverage')
+        if [uuid for check in source_checks for uuid in check['nodes']] != [node['uuid'] for node in nodes]:
+            raise ValueError("Source validation does not cover every scan exactly once")
     reports = []
     warnings = []
     for node in nodes:
@@ -101,9 +135,22 @@ def validate_package(folder, source=None):
             warnings.append(
                 {"node": node["uuid"], "type": "source-image-seam", **seam_quality}
             )
-        height = node["position"]["y"] - node["floorPosition"]["y"]
-        if not 0.4 < height < 2.6:
-            raise ValueError(f"Invalid measured camera height: {height}")
+        floor = node.get("floorEstimate", {})
+        if node.get('floorUnobserved'):
+            if node.get('floorPosition') is not None or floor.get('method') != 'unobserved' or floor.get('access') not in {'camera-point', 'dollhouse-camera-point'}:
+                raise ValueError('An unobserved floor must not invent a floor position')
+            height = None
+            warnings.append({'node': node['uuid'], 'type': 'unobserved-source-floor', 'access': floor['access']})
+        else:
+            height = node["position"]["y"] - node["floorPosition"]["y"]
+            if not np.isfinite(height) or height <= 0.15:
+                raise ValueError(f"Invalid measured camera height: {height}")
+            if abs(height - (floor.get("cameraHeight", float("inf")) - 0.025)) > 1e-6:
+                raise ValueError(f"Floor marker differs from measured plane: {node['uuid']}")
+        if height is not None and height > 2.6:
+            warnings.append({"node": node["uuid"], "type": "elevated-source-camera", "cameraHeightMeters": height})
+        if floor.get('meshNadirUnobserved'):
+            warnings.append({"node": node['uuid'], "type": "unmeasured-mesh-nadir", "floorMethod": floor['method']})
         if any(n not in {x["uuid"] for x in nodes} for n in node["neighbors"]):
             raise ValueError("Unknown navigation neighbor")
         reports.append(
@@ -142,7 +189,8 @@ def validate_package(folder, source=None):
         raise ValueError("Missing measured registration QA")
     return {
         "passed": True,
-        "sourceVerified": source is not None,
+        "sourceVerified": bool(source_checks),
+        "sourcePartCount": len(source_checks) if source_checks else 0,
         "nodeCount": len(nodes),
         "faceCount": len(nodes) * 6,
         "triangles": len(mesh.faces),

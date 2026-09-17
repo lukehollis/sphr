@@ -36,20 +36,32 @@ npm run import:matterport -- \
 
 Before a large import, check both drives with `df -h . /Volumes/amaryl`. Original
 ZIPs, final packages and conversion scratch space can together exceed the external
-drive's free capacity. A temporary local `--processed-root` is appropriate when the
-Mac has sufficient room for the largest raw part, fusion checkpoint and headroom.
-Keep the final public root on the external drive. Once the source-verified import
-finishes, move its private metadata to external `processed/` and remove only its
-empty temporary extraction directory. Never discard the original ZIP or a failed
-geometry checkpoint needed for a retry.
+drive's free capacity. Use `--extraction-root` when the Mac has room for the largest
+raw part and headroom. It keeps only the temporary raw caches on that disk; private
+metadata, geometry checkpoints and final scene files remain on the external drive.
+Each cache is released after source validation with `--discard-extracted-source`.
+The same setting is available as `SPHR_MATTERPORT_EXTRACTION_ROOT`.
 
-The running September 16 Copán import temporarily retains its extracted source in
-the workspace scratch directory. Its external `processed/.../source` link points to
-that scratch directory while it runs. `--discard-extracted-source` removes each raw
-cache only after its source checks pass; the link is removed when the import finishes.
+```sh
+npm run import:matterport -- \
+  --e57 /Volumes/amaryl/spaces/exports/mp_e57_Title_ModelID.zip \
+  --slug my-space --title 'My Space' \
+  --extraction-root /Users/lrh/Projects/sphr/.matterport-scratch \
+  --discard-extracted-source
+```
+
+Never discard the original ZIP or a failed geometry checkpoint needed for a retry.
+
+During relocation, the running Copán import temporarily retained its extracted E57
+in a local scratch directory without restarting its in-memory fusion. Both source
+parts subsequently passed validation, and their derived caches and temporary link
+were removed. All remaining capture data and geometry output are external.
 
 The relocation verifies every copied file's byte count and SHA-256 before removing
-its internal-disk copy. Each original source path stays usable through a symlink.
-An absent drive leaves these links unresolved: reconnect it rather than replacing
-the links with empty local directories. Unfinished browser downloads remain
-unfinished after relocation; moving them does not resume or complete the download.
+its internal-disk copy. Completed ZIP paths stay usable through symlinks. An absent
+drive leaves these links unresolved: reconnect it rather than replacing the links
+with empty local directories. Unfinished browser downloads remain unfinished after
+relocation; moving them does not resume or complete the download. A browser can
+remove or replace its temporary download paths, so the preserved partial files in
+`incomplete-downloads/` must be inventoried separately. Newly started downloads can
+still arrive on the Mac; check capacity on both drives before moving completed files.

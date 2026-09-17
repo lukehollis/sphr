@@ -5,3 +5,4 @@ open3d
 trimesh
 scipy>=1.11
 xatlas==0.0.11
+fast-simplification>=0.1.13,<0.2

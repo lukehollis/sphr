@@ -22,6 +22,9 @@ class PublisherTests(unittest.TestCase):
             mesh=folder/'mesh/capture-50k.glb'; mesh.write_bytes(b'mesh')
             (folder/'preview.jpg').write_bytes(b'preview')
             (folder/'raw.e57').write_bytes(b'private raw export')
+            (folder/'faces/scan-retired').mkdir()
+            (folder/'faces/scan-retired/face0.jpg').write_bytes(b'retired image')
+            (folder/'mesh/old.glb').write_bytes(b'retired mesh')
             (folder/'bootstrap.json').write_text(json.dumps({'space':{'mesh':'/datasets/matterport/capture/mesh/capture-50k.glb',
                 'position':[1,2,3],'faces':['/datasets/matterport/capture/faces/scan-000/face0.jpg']}}))
             manifest={'sceneId':'aaaaaaaaaaaa','slug':'capture','datasetUrl':'/datasets/matterport/capture',
@@ -36,6 +39,8 @@ class PublisherTests(unittest.TestCase):
             self.assertEqual(data['space']['position'],[1,2,3])
             self.assertTrue(data['space']['mesh'].startswith('https://static.mused.com/sphr/scenes/aaaaaaaaaaaa/'))
             self.assertFalse((output/'raw.e57').exists())
+            self.assertFalse((output/'faces/scan-retired').exists())
+            self.assertFalse((output/'mesh/old.glb').exists())
             self.assertFalse((output/'manifest.json').exists())
             self.assertEqual(json.loads((folder/'bootstrap.json').read_text())['space']['position'],[1,2,3])
             face.write_bytes(b'damaged photo')

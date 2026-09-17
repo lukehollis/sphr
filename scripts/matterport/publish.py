@@ -52,9 +52,14 @@ def stage_scene(folder, entry, base_url, stage):
     validation = json.loads((folder / 'validation.json').read_text())
     if not validation.get('passed') or manifest['sceneId'] != entry['sceneId']:
         raise ValueError(f'Unvalidated package or mismatched ID: {folder.name}')
-    files = sorted([folder/'bootstrap.json', folder/'preview.jpg']
-                   + list((folder/'faces').rglob('*.jpg'))
-                   + list((folder/'mesh').rglob('*.glb')) + list((folder/'mesh').rglob('*.jpg')))
+    # Publish only the current manifest's runtime assets. Reimports may leave
+    # older scan directories or mesh names in staging; those are not this scene.
+    names = {'bootstrap.json', 'preview.jpg', f"mesh/{manifest['slug']}-50k.glb"}
+    for node, group in manifest['imageManifest']['groups'].items():
+        names.update(f"faces/{node}/face{face['sphrFace']}.jpg" for face in group['sourceFaces'])
+    if (folder / 'mesh/atlas.jpg').is_file():
+        names.add('mesh/atlas.jpg')
+    files = sorted(folder / name for name in names)
     files = [path for path in files if path.is_file()]
     hashes = {}
     for path in files:

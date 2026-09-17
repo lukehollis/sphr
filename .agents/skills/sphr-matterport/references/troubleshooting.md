@@ -3,11 +3,15 @@
 | Symptom | Evidence and correction |
 | --- | --- |
 | ZIP cannot open / E57 size mismatch | Check download state, archive CRC and physical header size. Preserve partial source; wait for completion or report missing bytes. |
+| Export contains multiple E57s | Pass the entire ZIP. The importer fuses every part and certifies complete GUID coverage. Do not select only the first member. |
+| Extraction disk fills | Check the largest part and generated-image size. Use `--discard-extracted-source` to bound raw cache use. Preserve original downloads and failed parts; do not delete unrelated files. |
 | Missing Python module | Use importer-selected environment and tracked requirements, including xatlas. Installing in a different Python does not fix it. |
 | Image cameras do not form cube | Inspect GUID associations, pose bases and pinhole intrinsics. Do not guess a Skybox permutation or suppress the error. |
 | Seam check fails | Compare the same canonical edge in original embedded images and derived JPGs. Source exposure, masking or high-frequency geometry can differ at edges; record a source baseline/warning. Added conversion differences remain failures. |
 | Seamless but mesh faces wrong way | Check world point/photo reprojection and quaternion basis. The historic global 180° yaw error passed edge-only checks. |
 | Marker floats / wrong floor | Inspect local point support, search radius, plane residual, camera height and nearby scan evidence. Fix generic inference; never add a scene-specific height. |
+| Steep passage / unobserved tripod footprint | Inspect full measured-surface rays and the bounded footprint fit. Retry surface processing from its source-bound checkpoint; do not impose a flat floor or standard camera height. |
+| QEM returns more than 50,000 triangles | Use the recorded generic reduction passes and actual topology check before baking. Do not raise the requested budget to conceal a reduction failure. |
 | Mesh disappears / huge scale | Compare source camera translations, coordinate transform, GLB bounds and scene group transforms. Ensure transform applied once. |
 | Mesh has holes | Compare measured depth coverage and source returns before changing fusion. Reflective/dark/unobserved surfaces cannot be recovered by a validator. Distinguish source gaps from failed reconstruction. |
 | Overview texture artifacts | Check source-camera visibility, angle selection, UV winding/order, texture color space and atlas coverage; do not relight the panorama to hide geometry errors. |
@@ -24,7 +28,9 @@
 A failure leaves `.slug.building`; the previous published scene should remain intact.
 Resolve the cause before retrying. Do not run two writers for one slug. A changed image
 calibration requires re-extracting and reconstructing; changed viewer-only code does not.
-`--skip-*` is artifact reuse, not a general checkpoint/resume mechanism. Keep source hashes
+`--skip-*` is artifact reuse, not a general checkpoint/resume mechanism. `--resume-geometry`
+uses a completed, source-bound fusion checkpoint; it does not skip checks or resume a
+half-integrated export. Keep source hashes
 and original bytes unchanged. Do not edit validation JSON to turn a failure into a pass.
 
 ## Recorded real failure

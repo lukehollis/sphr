@@ -23,6 +23,24 @@ def scene_identity(manifest, previous=None):
     return {"sceneId": scene_id, "titleSlug": slug, "scenePath": f"/s/{scene_id}/{slug}"}
 
 
+def matching_capture(directory, scan_guids):
+    """Keep a previously imported capture's identity when a download is renamed."""
+    identities = []
+    for path in directory.glob('*/manifest.json'):
+        if path.parent.name.startswith('.'):
+            continue
+        manifest = json.loads(path.read_text())
+        groups = manifest.get('imageManifest', {}).get('groups', {})
+        known = {group.get('associatedData3DGuid') for group in groups.values()}
+        if known == set(scan_guids) and len(groups) == len(scan_guids) and None not in known:
+            if manifest.get('slug') != path.parent.name:
+                raise ValueError('Existing capture folder does not match its storage slug')
+            identities.append(manifest)
+    if len(identities) > 1:
+        raise ValueError('The same source capture already has multiple catalog identities')
+    return identities[0] if identities else None
+
+
 def atomic_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, suffix=".tmp", delete=False) as stream:

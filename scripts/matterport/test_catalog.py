@@ -3,10 +3,29 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from catalog import scene_identity, title_slug, write_matterport_index
+from catalog import matching_capture, scene_identity, title_slug, write_matterport_index
 
 
 class CatalogTests(unittest.TestCase):
+    def test_renamed_download_matches_exact_scan_identities_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = {'slug': 'original', 'sceneId': 'aaaaaaaaaaaa',
+                        'imageManifest': {'groups': {
+                            'scan-000': {'associatedData3DGuid': 'first'},
+                            'scan-001': {'associatedData3DGuid': 'second'}}}}
+            (root / 'original').mkdir()
+            (root / 'original/manifest.json').write_text(json.dumps(manifest))
+            (root / '.original.previous').mkdir()
+            (root / '.original.previous/manifest.json').write_text(json.dumps(manifest))
+            self.assertEqual(matching_capture(root, {'second', 'first'})['sceneId'], 'aaaaaaaaaaaa')
+            self.assertIsNone(matching_capture(root, {'first'}))
+            self.assertIsNone(matching_capture(root, {'first', 'different'}))
+            (root / 'duplicate').mkdir()
+            (root / 'duplicate/manifest.json').write_text(json.dumps(dict(manifest, slug='duplicate')))
+            with self.assertRaisesRegex(ValueError, 'multiple catalog identities'):
+                matching_capture(root, {'first', 'second'})
+
     def test_identity_survives_title_and_source_changes(self):
         old = {"title": "Original title", "sourceSha256": "old"}
         old.update(scene_identity(old))

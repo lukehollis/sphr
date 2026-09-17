@@ -46,6 +46,19 @@ class CameraGeometryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             estimate_floor(np.array([[0, 2, 0]]), np.array([0, 1.5, 0]))
 
+    def test_elevated_scan_keeps_measured_floor_despite_tripod_prior(self):
+        x, z = np.meshgrid(np.linspace(-3, 3, 121), np.linspace(-3, 3, 121))
+        points = np.column_stack([x.ravel(), np.zeros(x.size), z.ravel()])
+        points = points[np.linalg.norm(points[:, [0, 2]], axis=1) > 1.7]
+        floor, report = estimate_floor(points, np.array([0, 3.9, 0]), 1.8)
+        self.assertAlmostEqual(floor, 0, places=5)
+        self.assertAlmostEqual(report['cameraHeight'], 3.9)
+
+    def test_wall_stripe_is_not_a_supported_floor(self):
+        points = np.column_stack([np.linspace(-2, 2, 1000), np.zeros(1000), np.full(1000, 0.5)])
+        with self.assertRaises(ValueError):
+            estimate_floor(points, np.array([0, 1.8, 0]))
+
 
 if __name__ == "__main__":
     unittest.main()
