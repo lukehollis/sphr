@@ -130,9 +130,10 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(spaces['1']['mesh'], spaces['1']['space_data']['sceneGraph'][0]['file'])
             self.assertEqual(sorted(p.name for p in (root / 'stage').rglob('*') if p.is_file()), ['face.jpg', 'mesh.glb'])
             source = {'1': {'id': 1, 'space_type': 'matterport', 'src': 'https://my.matterport.com/show/?m=Example'}}
-            tour = {'id': 2, 'title': 'Tour', 'space_ids': [1], 'tour_data': {'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'sweep'}]}]}}
+            tour = {'id': 2, 'title': 'Tour', 'space_ids': [1], 'tour_data': {'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'sweep', 'viewMode': 'DOLLHOUSE'}]}]}}
             recovered = r.recover_tour(tour, source, spaces, log)
             self.assertEqual(recovered['tour']['tour_data']['spaces'][0]['tourpoints'][0]['nodeUUID'], 'camera')
+            self.assertEqual(recovered['tour']['tour_data']['spaces'][0]['tourpoints'][0]['viewMode'], 'ORBIT')
             (package / 'face.jpg').write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError, 'manifest'):
                 r.attach_native_archive(package, {'1': {'type': 'matterport', 'src': source['1']['src']}}, 'https://assets.example.com/archives', root / 'stage', log)

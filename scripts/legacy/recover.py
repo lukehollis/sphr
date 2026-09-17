@@ -247,6 +247,8 @@ def recover_tour(record, records, spaces, audit):
             # against the new viewer's narrower free-exploration default.
             point['fov'] = max(40, min(110, 110 - (point.get('zoom') or 0)))
             if space['type'] != 'matterport' and point.get('targetType') != 'MODEL':
+                if point.get('viewMode') in ('DOLLHOUSE', 'FLOORPLAN'):
+                    point['viewMode'] = 'ORBIT'
                 aliases = {node.get('sourceLocationId'): node['uuid'] for node in nodes.values() if node.get('sourceLocationId')}
                 if point.get('nodeUUID') in aliases:
                     point['nodeUUID'] = aliases[point['nodeUUID']]
