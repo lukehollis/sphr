@@ -19,6 +19,7 @@ const { legacyDestination } = await import('../lib/legacy-routes.ts');
 const { SphrRuntime } = await import('../lib/three/SphrRuntime.ts');
 const { AnnotationLayer } = await import('../lib/three/layers/AnnotationLayer.ts');
 const { MatterportViewer } = await import('../lib/viewer/MatterportViewer.ts');
+const { ViewerSession } = await import('../lib/viewer/ViewerSession.ts');
 const { defaultBootstrap, normalizeTour } = await import('../lib/bootstrap.ts');
 const bootstrap = {
   space: { id: 'a', title: 'First', type: 'spaces', space_data: { nodes: [{ uuid: 'entry' }], sceneGraph: [{ id: 'mesh', type: 'model', persistent: true, raycast: true, file: '/mesh.glb' }] } },
@@ -109,6 +110,27 @@ test('embedded tours convert legacy sweep IDs per model and retain current IDs a
   // A source ID that no longer exists must surface the SDK failure, not land elsewhere.
   viewer.sdk.Sweep.moveTo = async () => { throw new Error('Unavailable sweep'); };
   await assert.rejects(viewer.goTo({ nodeUUID: 'missing' }), /Unavailable sweep/);
+});
+
+test('a stalled hosted panorama releases navigation and retries with a fresh renderer', async () => {
+  const session = Object.create(ViewerSession.prototype);
+  session.bootstrap = bootstrap;
+  session.container = { dataset: {} }; session.callbacks = {};
+  session.preferences = { guided: true, muted: false, showText: true };
+  session.state = { activeSpaceIndex: 1, activePointIndex: 0, navigating: false };
+  session.active = { key: '1:matterport', matterport: { goTo: () => new Promise(() => {}) } };
+  const original = globalThis.setTimeout;
+  globalThis.setTimeout = callback => { queueMicrotask(callback); return 0; };
+  try { await session.goTo(1, 0); } finally { globalThis.setTimeout = original; }
+  assert.equal(session.state.navigating, false);
+  assert.match(session.state.navigationError, /did not finish loading/);
+  assert.equal(session.state.activeSpaceIndex, 1);
+  assert.equal(session.state.activePointIndex, 0);
+  assert.equal(session.active.reloadRequired, true);
+  let retried;
+  session.activate = async (...position) => { retried = position; };
+  await session.goTo(1, 0);
+  assert.deepEqual(retried, [1, 0]);
 });
 
 test('video annotation plays only when selected, follows mute and releases its resources', async () => {

@@ -5,7 +5,7 @@ import { AudioController } from '@/lib/three/AudioController';
 import { MatterportViewer } from './MatterportViewer';
 import { nextTourLocation, tourSegment } from './segments';
 
-type Stage = { element: HTMLDivElement; key: string; spaceIndex: number; three?: SphrRuntime; matterport?: MatterportViewer; audio?: AudioController };
+type Stage = { element: HTMLDivElement; key: string; spaceIndex: number; three?: SphrRuntime; matterport?: MatterportViewer; audio?: AudioController; reloadRequired?: boolean };
 
 /** Owns tour position across independent scene renderers; failed scene loads retain the last viewer. */
 export class ViewerSession {
@@ -114,21 +114,30 @@ export class ViewerSession {
   async goTo(spaceIndex: number, pointIndex: number) {
     if (this.disposed || this.switching || this.state.navigating) return;
     const segment = tourSegment(this.bootstrap, spaceIndex, pointIndex);
-    if (this.active?.key !== segment.key) return this.activate(spaceIndex, pointIndex);
+    if (this.active?.key !== segment.key || this.active.reloadRequired) return this.activate(spaceIndex, pointIndex);
     if (this.active.three) {
       await this.active.three.goTo(0, pointIndex);
       return;
     }
+    const stage = this.active;
     this.state = { ...this.state, navigating: true, navigationError: undefined };
     this.emit();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.active.matterport?.goTo(segment.point);
-      this.active.audio?.updateForPoint(this.preferences.guided ? segment.point : undefined);
-      this.active.matterport?.showAnnotations(this.preferences.guided ? segment.point.annotations : []);
+      await Promise.race([stage.matterport?.goTo(segment.point), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('This panorama did not finish loading. Try the tour button again.')), 30000);
+      })]);
+      if (this.disposed || this.active !== stage) return;
+      stage.audio?.updateForPoint(this.preferences.guided ? segment.point : undefined);
+      stage.matterport?.showAnnotations(this.preferences.guided ? segment.point.annotations : []);
       this.state = { ...this.state, activeSpaceIndex: spaceIndex, activePointIndex: pointIndex };
     } catch (error) {
+      if (this.disposed || this.active !== stage) return;
+      // A stalled vendor texture request can leave its SDK transition pending.
+      // Retry with a fresh renderer, retaining the current viewer until it is ready.
+      stage.reloadRequired = true;
       this.state = { ...this.state, navigationError: error instanceof Error ? error.message : String(error) };
-    } finally { this.state = { ...this.state, navigating: false }; this.emit(); }
+    } finally { if (timer) clearTimeout(timer); this.state = { ...this.state, navigating: false }; this.emit(); }
   }
 
   next() {

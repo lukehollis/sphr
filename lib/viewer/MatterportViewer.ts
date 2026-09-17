@@ -101,6 +101,7 @@ export class MatterportViewer {
       await this.sdk.Sweep.moveTo(mapping[point.nodeUUID] ?? point.nodeUUID, {
         rotation, transition: this.sdk.Sweep.Transition[instant ? 'INSTANT' : point.transition || 'FLY'], transitionTime: instant ? 0 : 1100
       });
+      if (this.disposed) return;
       await this.sdk.Camera.zoomTo(Math.max(1, 110 / Math.max(35, point.fov ?? 110 - (point.zoom ?? 0))));
     }
   }
