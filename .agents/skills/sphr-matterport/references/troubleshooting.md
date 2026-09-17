@@ -11,7 +11,7 @@
 | Seamless but mesh faces wrong way | Check world point/photo reprojection and quaternion basis. The historic global 180° yaw error passed edge-only checks. |
 | Marker floats / wrong floor | Inspect local point support, search radius, plane residual, camera height and nearby scan evidence. Fix generic inference; never add a scene-specific height. |
 | Steep passage / unobserved tripod footprint | Inspect full measured-surface rays and the bounded footprint fit. Retry surface processing from its source-bound checkpoint; do not impose a flat floor or standard camera height. |
-| QEM returns more than 50,000 triangles | Use the recorded generic reduction passes and actual topology check before baking. Do not raise the requested budget to conceal a reduction failure. |
+| QEM returns more than 50,000 triangles | Inspect non-manifold fragments and the recorded spatial/QEM passes. The reducer consolidates excess fragments before edge collapse, bounds very large working meshes, and checkpoints progress. Resume source-bound surface processing; inspect final source distances and actual rooms/walls. Do not raise the budget or delete the fusion checkpoint to conceal failure. |
 | Mesh disappears / huge scale | Compare source camera translations, coordinate transform, GLB bounds and scene group transforms. Ensure transform applied once. |
 | Mesh has holes | Compare measured depth coverage and source returns before changing fusion. Reflective/dark/unobserved surfaces cannot be recovered by a validator. Distinguish source gaps from failed reconstruction. |
 | Overview texture artifacts | Check source-camera visibility, angle selection, UV winding/order, texture color space and atlas coverage; do not relight the panorama to hide geometry errors. |

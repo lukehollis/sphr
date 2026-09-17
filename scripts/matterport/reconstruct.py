@@ -188,7 +188,12 @@ class Fusion:
         refine_floors(nodes, reports, mesh)
         before = len(mesh.triangles)
         print(f"reducing {before:,} triangles to at most {args.target_triangles:,}", flush=True)
-        mesh, reduction = reduce_mesh(mesh, args.target_triangles)
+        reduction_checkpoint = None
+        if checkpoint is not None:
+            from reduction import ReductionCheckpoint
+            source_hash = json.loads((checkpoint / 'surface.json').read_text())['hashes']['measured.ply']
+            reduction_checkpoint = ReductionCheckpoint(checkpoint, source_hash, args.target_triangles)
+        mesh, reduction = reduce_mesh(mesh, args.target_triangles, reduction_checkpoint)
         mesh.remove_degenerate_triangles().remove_duplicated_triangles().remove_unreferenced_vertices()
         mesh.compute_vertex_normals()
         if len(mesh.triangles) == 0:

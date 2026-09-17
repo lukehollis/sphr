@@ -110,6 +110,14 @@ It never resumes a partial fusion. All final image/geometry checks still run; th
 checkpoint is removed only after successful publication. Changing source bytes,
 voxel size, depth/face resolution or calibration requires a full import.
 
+Surface reduction also saves each successful intermediate pass atomically in that
+checkpoint. Its receipt binds the intermediate PLY hash, measured-source hash,
+algorithm version, triangle budget and reduction history. `--resume-geometry` reuses
+that progress after verifying the original source and full fusion checkpoint; it
+still refines floors against the full measured mesh. A changed/corrupt reduction
+checkpoint fails explicitly. Preserve it for diagnosis; do not edit its hashes or
+repeat the expensive original fusion to work around a reduction failure.
+
 ## 5. Serve the real scene
 
 ```sh

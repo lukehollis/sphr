@@ -43,6 +43,19 @@ camera bases. Only continuous one-pixel sampling holes are filled. TSDF integrat
 uses measured depth, not a guessed closed hull. Measure source-point distances after
 quadric reduction. Open3D's requested triangle count is not guaranteed: record actual
 topology, retry boundary weights, and use the tracked QEM fallback if necessary.
+The shared reducer first bounds very large surfaces with metric vertex clustering,
+then repairs non-manifold edges before QEM can spend the entire budget on fragments
+and erase ordinary walls. Each edge keeps at most two triangles by removing its
+smallest excess triangles; measured vertex positions remain fixed. Removed area and
+triangle counts are recorded. Repeatedly increasing cluster size to repair topology
+can merge nearby tunnel walls and must not replace this edge repair.
+Cluster vertices are measured averages;
+each pass records its voxel size and per-pass displacement bound. This bound is not
+an overall reconstruction error guarantee. Final source-point distances and visual
+inspection still decide whether the result is usable. QEM progress is retained even
+when it has not yet met the ceiling; remaining fragments receive spatial clustering
+and further QEM. No scene-specific component deletion, scale transform or closed hull
+is substituted for the measured surface.
 Fail before texture baking when the configured ceiling is still unmet.
 49,999 triangles satisfies a 50k ceiling. UV splitting can increase
 vertex count without increasing triangle count.
