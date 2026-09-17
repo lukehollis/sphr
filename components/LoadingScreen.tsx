@@ -43,15 +43,11 @@ export default function LoadingScreen({ loading, visible, title, image }: Props)
         </defs>
         <rect width="100%" height="100%" fill={`url(#${gridId}-major)`} />
       </svg>
-      <div className="scene-load-frame" aria-hidden="true"><i /><i /><i /><i /></div>
-
       <div className="scene-load-content">
         <svg className="scene-load-drawing" viewBox="0 0 160 144" fill="none" aria-hidden="true" focusable="false">
           <path className="scene-load-construction" d="M80 0V144 M0 72H160 M8 112L152 32 M8 32L152 112 M34 20V124 M126 20V124" />
           <path className="scene-load-hidden-edge" d="M34 98L80 72L126 98 M80 72V20" />
           <path className="scene-load-cube" d="M80 20L126 46V98L80 124L34 98V46Z M34 46L80 72L126 46 M80 72V124" />
-          <path className="scene-load-trace" pathLength="1" d="M80 20L126 46V98L80 124L34 98V46Z" />
-          <path className="scene-load-registration" d="M74 8H86 M80 2V14 M74 136H86 M80 130V142 M8 66V78 M2 72H14 M152 66V78 M146 72H158" />
         </svg>
         {title && <p className="scene-load-title">{title}</p>}
         <div className="scene-load-meta">

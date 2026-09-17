@@ -65,7 +65,8 @@ tour navigation. Desktop tour navigation can remain compact.
 Scenes open directly after loading, with no intro or Start/Free Explore action.
 Tourless captures open free exploration; authored tours start guided. While assets load,
 show a dark graph-paper sheet over the space's blurred thumbnail, with fine drafting
-lines, a blue wireframe trace, the scene title, and real loading progress. Canonical
+lines, a muted gray wireframe, the scene title, and real loading progress. The loader
+uses neutral grays without animated accent highlights or corner marks. Canonical
 scene routes provide the thumbnail with the initial page, before fetching the scene
 configuration. Missing images retain the grid backdrop. Respect reduced motion and
 remove the loader immediately when ready; offer Retry only on a real error.

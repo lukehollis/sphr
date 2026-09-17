@@ -777,7 +777,7 @@ export class SphrRuntime {
 
   private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT") {
     const direction = cameraDirection(rotation);
-    const fov = THREE.MathUtils.clamp(70 - zoom, 35, 85);
+    const fov = THREE.MathUtils.clamp((mode === "FPV" ? 75 : 70) - zoom, 35, 85);
     if (mode === "ORBIT") {
       return {
         position: target.clone().add(direction.clone().multiplyScalar(-8)),
@@ -797,7 +797,7 @@ export class SphrRuntime {
     const orbit = this.state.viewMode === "ORBIT";
     this.controls.enablePan = orbit;
     this.controls.enableZoom = orbit;
-    this.controls.rotateSpeed = orbit ? 0.4 : -0.25;
+    this.controls.rotateSpeed = orbit ? 0.4 : -0.32;
     this.controls.zoomSpeed = 0.8;
     this.controls.minDistance = orbit ? 1 : 0.1;
     // Large metric captures need portrait framing distances beyond 150 meters.
