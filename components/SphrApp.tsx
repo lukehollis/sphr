@@ -24,7 +24,9 @@ const initialRuntimeState: RuntimeState = {
   navigating: false
 };
 
-export default function SphrApp({ configUrl }: { configUrl?: string }) {
+type Props = { configUrl?: string; preview?: { title: string; image: string } };
+
+export default function SphrApp({ configUrl, preview }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<SphrRuntime | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -96,7 +98,12 @@ export default function SphrApp({ configUrl }: { configUrl?: string }) {
   return (
     <main className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <canvas ref={canvasRef} className="sphr-canvas" aria-label="SPHR interactive scene" />
-      <LoadingScreen loading={runtimeState.loading} visible={!started} />
+      <LoadingScreen
+        loading={runtimeState.loading}
+        visible={!started}
+        title={preview?.title || bootstrap?.space.title}
+        image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
+      />
 
       {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
       {started && activePoint && (
