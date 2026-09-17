@@ -78,6 +78,13 @@ class RecoveryTests(unittest.TestCase):
         result = r.recover_tour(rec, {'1': record()}, {'1': self.recover()}, audit())
         self.assertEqual(result['tour']['tour_data']['spaces'][0]['tourpoints'][0]['models'], ['object'])
         self.assertEqual(result['tour']['tour_data']['spaces'][0]['tourpoints'][0]['nodeUUID'], 'absent')
+        self.assertEqual(result['tour']['tour_data']['spaces'][0]['tourpoints'][0]['fov'], 110)
+
+    def test_authored_zoom_preserves_original_vertical_fov(self):
+        rec = {'id': 4, 'title': 'Example story', 'space_ids': [1], 'tour_data': {
+            'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'frame', 'zoom': 30}]}]}}
+        result = r.recover_tour(rec, {'1': record()}, {'1': self.recover()}, audit())
+        self.assertEqual(result['tour']['tour_data']['spaces'][0]['tourpoints'][0]['fov'], 80)
 
     def test_urls_preserve_escaped_paths(self):
         self.assertEqual(r.canonical_urls('https://static.mused.org/sounds/a%20b c.mp3'), 'https://static.mused.com/sounds/a%20b%20c.mp3')

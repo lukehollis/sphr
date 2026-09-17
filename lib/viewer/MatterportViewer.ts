@@ -48,7 +48,7 @@ export class MatterportViewer {
     if (url.protocol !== 'https:' || url.hostname !== 'my.matterport.com' || !/^[a-zA-Z0-9]+$/.test(url.searchParams.get('m') ?? '')) {
       throw new Error('Invalid Matterport model link.');
     }
-    for (const [key, value] of Object.entries({ play: '1', qs: '1', title: '0', brand: '0', dh: '0', tour: '0', vr: '0', fs: '0', hl: '0', mt: '0', applicationKey: this.sdkKey })) url.searchParams.set(key, value);
+    for (const [key, value] of Object.entries({ play: '1', qs: '1', title: '0', brand: '0', tour: '0', vr: '0', fs: '0', hl: '0', mt: '0', applicationKey: this.sdkKey })) url.searchParams.set(key, value);
     if (!this.sdkKey) throw new Error('An Embed SDK application key is required for this Matterport viewer.');
     const loaded = new Promise<void>((resolve) => {
       this.iframe.dataset.sphrEmbed = 'loading-document';
@@ -86,7 +86,7 @@ export class MatterportViewer {
       await this.sdk.Sweep.moveTo(point.nodeUUID, {
         rotation, transition: this.sdk.Sweep.Transition[instant ? 'INSTANT' : point.transition || 'FLY'], transitionTime: instant ? 0 : 1100
       });
-      await this.sdk.Camera.zoomTo(Math.max(1, 110 / Math.max(35, 110 - (point.zoom ?? 0))));
+      await this.sdk.Camera.zoomTo(Math.max(1, 110 / Math.max(35, point.fov ?? 110 - (point.zoom ?? 0))));
     }
   }
 

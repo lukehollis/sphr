@@ -37,6 +37,8 @@ viewer origin. Keep SDK secrets and backend API credentials out of bootstraps.
 Preparation retains calibrated camera positions, versioned cube faces and model
 transforms. Legacy node-group rotations are degrees; legacy dollhouse rotations
 are radians. Explicit scene graph transforms preserve that distinction. Tour
+zoom values are converted to explicit vertical FOV (`110 - zoom`) so authored
+framing survives changes to the default free-exploration camera. Tour
 segments resolve by their panorama references, Matterport model IDs and recorded
 relationships. Ambiguous references fail instead of selecting an unrelated space.
 

@@ -180,6 +180,10 @@ def recover_tour(record, records, spaces, audit):
         segment['title'], segment['type'] = space['title'], space['type']
         nodes = {node['uuid']: node for node in space['space_data'].get('nodes', [])}
         for point in segment['tourpoints']:
+            # The earlier viewer defined zoom as 110 minus vertical FOV.
+            # Store the optical quantity explicitly instead of reinterpreting it
+            # against the new viewer's narrower free-exploration default.
+            point['fov'] = max(40, min(110, 110 - (point.get('zoom') or 0)))
             if space['type'] != 'matterport' and point.get('targetType') != 'MODEL':
                 if not point.get('nodeUUID'):
                     point['nodeUUID'] = space['space_data'].get('initialNode')

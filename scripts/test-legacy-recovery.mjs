@@ -83,6 +83,8 @@ test('neutral model pose fits the object on portrait screens and preserves viewi
   assert.ok(pose.position.length() > 10);
   assert.ok(Math.abs(pose.position.x - pose.position.z) < 1e-8);
   assert.equal(runtime.poseForPoint({ ...point, zoom: 20 }, 'ORBIT').fov, 50);
+  assert.equal(runtime.poseForPoint({ ...point, zoom: 30, fov: 80 }, 'ORBIT').fov, 80);
+  assert.equal(runtime.poseForTarget(new THREE.Vector3(), { azimuth: 0, polar: 0 }, 30, 'FPV', 80).fov, 80);
 });
 
 test('video annotation plays only when selected, follows mute and releases its resources', async () => {

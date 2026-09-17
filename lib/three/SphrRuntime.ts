@@ -587,7 +587,7 @@ export class SphrRuntime {
   private handleWheel = (event: WheelEvent) => {
     if (this.state.viewMode !== "FPV" || this.isNavigating) return;
     event.preventDefault();
-    this.camera.fov = THREE.MathUtils.clamp(this.camera.fov + event.deltaY * 0.025, 30, 95);
+    this.camera.fov = THREE.MathUtils.clamp(this.camera.fov + event.deltaY * 0.025, 30, 110);
     this.camera.updateProjectionMatrix();
   };
 
@@ -770,7 +770,7 @@ export class SphrRuntime {
         if (direction.lengthSq() === 0) direction.set(0, 0, 1);
         if (direction.length() < distance) position.copy(target).addScaledVector(direction.normalize(), distance);
       }
-      return { position, target, fov: THREE.MathUtils.clamp(70 - (point.zoom ?? 0), 35, 85) };
+      return { position, target, fov: point.fov === undefined ? THREE.MathUtils.clamp(70 - (point.zoom ?? 0), 35, 85) : THREE.MathUtils.clamp(point.fov, 30, 110) };
     }
     const node = this.resolveNode(point?.nodeUUID);
     if (node) return this.poseForNode(node, mode, point);
@@ -783,7 +783,7 @@ export class SphrRuntime {
     const position = vectorFromLike(
       point?.position ?? this.bootstrap.space.space_data.initialPosition ?? { x: 0, y: 1.5, z: 4 }
     );
-    return this.poseForTarget(position, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode);
+    return this.poseForTarget(position, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode, point?.fov);
   }
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {
@@ -801,7 +801,7 @@ export class SphrRuntime {
       }
     }
     const target = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
-    return this.poseForTarget(target, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode);
+    return this.poseForTarget(target, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode, point?.fov);
   }
 
   private overviewPose(bounds: THREE.Box3): CameraPose {
@@ -812,9 +812,9 @@ export class SphrRuntime {
     return { position: center.clone().add(new THREE.Vector3(.7, 1, .85).normalize().multiplyScalar(fit)), target: center, fov };
   }
 
-  private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT") {
+  private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT", authoredFov?: number) {
     const direction = cameraDirection(rotation);
-    const fov = THREE.MathUtils.clamp((mode === "FPV" ? 75 : 70) - zoom, 35, 85);
+    const fov = authoredFov === undefined ? THREE.MathUtils.clamp((mode === "FPV" ? 75 : 70) - zoom, 35, 85) : THREE.MathUtils.clamp(authoredFov, 30, 110);
     if (mode === "ORBIT") {
       return {
         position: target.clone().add(direction.clone().multiplyScalar(-8)),

@@ -83,6 +83,8 @@ export type MediaFile = {
 };
 
 export type TourPoint = {
+  /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
+  fov?: number;
   id?: string;
   pan?: string;
   text?: string;
