@@ -2,8 +2,8 @@
 
 The public collection is [app.mused.com](https://app.mused.com/). Harvard and Loomis
 Observatory retain their existing Private website visibility. Public asset storage
-is independent of that viewer setting. This is an in-progress receipt: the two
-large Copán captures are not yet delivered.
+is independent of that viewer setting. This is an in-progress receipt; remaining
+captures are published individually after validation and visual review.
 
 ## Delivered captures
 
@@ -23,6 +23,11 @@ reduced mesh. Exact meter conversion does not imply a perfect reconstruction.
 | [Meresankh III](https://app.mused.com/s/49ea8cec19b9/tomb-of-queen-meresankh-iii-giza) | 24 | 144 | 50,000 | 0.00627 / 0.02581 | 24 |
 | [Great Pyramid](https://app.mused.com/s/0b7dabf2e410/inside-the-great-pyramid-of-giza-khufu) | 145 | 870 | 50,000 | 0.01308 / 0.10851 | 125, 20 |
 | [Xultun](https://app.mused.com/s/ba3c612e055a/xultun) | 18 | 108 | 49,999 | 0.01258 / 0.05672 | 18 |
+| [Center for Hellenic Studies office/library](https://app.mused.com/s/d8c44fc46d28/main-office-and-library-center-for-hellenic-studies) | 75 | 450 | 49,999 | 0.00824 / 0.06417 | 70, 5 |
+| [Temple 16 / Rosalila](https://app.mused.com/s/20e48f12b954/temple-16-and-rosalila-tunnels-copan-ruinas) | 723 | 4,338 | 49,934 | 0.03166 / 0.14309 | 719, 3, 1 |
+| [Temple of Artemis](https://app.mused.com/s/0d878986afb7/temple-of-artemis) | 122 | 732 | 49,932 | 0.01853 / 0.14264 | 3, 119 |
+| [Center for Hellenic Studies, Greece](https://app.mused.com/s/60d7bc0165f2/harvard-universitys-center-for-hellenic-studies-greece) | 80 | 480 | 49,987 | 0.01119 / 0.10208 | 79, 1 |
+| [Las Pinturas / San Bartolo](https://app.mused.com/s/553b789c052b/las-pinturas-san-bartolo) | 94 | 564 | 49,895 | 0.02538 / 0.52841 | 94 (one node has no outgoing edge) |
 
 ## Actual browser review
 
@@ -41,6 +46,11 @@ These are sampled visual checks, not an assertion that every scan was visited.
 | Meresankh | Mobile floor click 000 → 009; both dollhouse levels; double-click lower chamber → 020 |
 | Pyramid | Desktop/mobile 000 → 001; dollhouse → 101; source-floor cases 043, 044, 045; separate exterior component at 144; live mobile entry 000 |
 | Xultun | Mobile 000 → 010; revised desktop/mobile dollhouse framing; double-click ring → 016; desktop single click 016 → 015 |
+| Hellenic Studies office/library | Desktop/mobile 000 → 052; textured dollhouse → library 036; separate office component 013 → 014 on mobile; live anonymous mobile entry verified |
+| Temple 16 / Rosalila | Mobile and desktop 000 → 007; dollhouse → 469 / 380; all three components sampled; 175, 176, 177, 462, 550, 640, 700 reviewed; direct camera-sphere click 177 → 175 |
+| Temple of Artemis | Entry 003; desktop floor click → 084; dollhouse → 069; mobile → 070; separate component 000 → 001; repaired mobile framing and dollhouse → 063; live anonymous mobile overview verified |
+| Hellenic Studies Greece | Entry 001; desktop → 000; dollhouse → 067; mobile → 071; isolated balcony 062 inspected; live anonymous mobile entry verified |
+| Las Pinturas / San Bartolo | Mobile floor click 000 → 001; desktop → 003; desktop/mobile dollhouse; mobile dollhouse 088 → 053; sparse scan 033 and source-seam cases 060 / 088 inspected |
 
 Temporary local guided sequences were used to inspect separated graph components.
 Published imports remain ordinary free exploration. Sphinx's outdoor mesh and
@@ -96,15 +106,52 @@ These private receipts and raw sources are not uploaded to the public asset buck
 
 ## Still processing
 
-- Temple 16 / Rosalila: both source parts and all 723 scans are validated; reduction
-  of the 113,802,391-triangle measured checkpoint stopped at the 50k ceiling check.
-  Open3D reached 512,530 triangles; the best fast-QEM attempt reached 128,575.
-  The full measured checkpoint is preserved, but an intermediate reduced surface
-  was not saved. A reduction fix is required before retrying. No final package yet.
-- Temples 20, 22 and 26: original split ZIP retained; import held for external capacity.
-- A new Center for Hellenic Studies export finished after the original batch and
-  was also moved and verified externally. Its import has not started. Further
-  arrivals include the Hellenic Studies Greece ZIP, Las Pinturas / San Bartolo ZIP
-  and a raw `cloud_0-001.e57`, while three downloads remain active on the Mac.
-  The external drive has about 5.4 GiB free. These newer files need additional
-  capacity and are not reported as relocated or migrated.
+- Temples 20, 22 and 26: all 744 scans from both E57 parts have been fused;
+  full measured surface extraction is running on temporary Mac storage.
+- Sculpture Museum at Copán: complete 337-scan export is processing.
+- KSI Auto Parts: completed ZIP is extracting for full import.
+- The unnamed `cloud_0-001.e57` contains 131 scans; its title and complete-export
+  identity need clarification. Its GUIDs do not overlap the Greece capture.
+- An additional download remains active. Amaryl has about 5.4 GiB free, so newer
+  outputs use `/Users/lrh/Projects/sphr/.matterport-work` temporarily, with links
+  from the normal dataset and processed paths. These files are not yet relocated
+  to the external drive. Original exports remain intact.
+
+## Large-site mobile framing
+
+Runtime commit `6d6859b` removes the fixed 150 m orbit distance cap that clipped
+large surveys on portrait screens. The existing aspect-aware bounds calculation
+now controls the complete camera pose. Artemis needs about 688.19 m at 390 × 844;
+its projected horizontal extent now fits inside the viewport. Actual mobile
+review confirmed the full temple and a double-click return to scan 063.
+
+All 13 navigation/audio/framing regressions, typecheck and the production build
+passed. The Garden regression still renders 3,810,048 splats, advances the mobile
+white Next button from point 0 → 1, and switches to free exploration and orbit.
+The runtime is deployed on `struct25`. Publisher commit `1c2e225` also safely
+merges simultaneous catalog updates after asset upload; all 45 Python tests pass.
+
+## Large-surface reduction repair
+
+Pipeline commit `5c3150e` bounds QEM's working geometry, repairs non-manifold edges
+by removing their smallest excess triangles without moving vertices, and saves
+source-bound intermediate reduction checkpoints. It retains successful QEM progress
+even above the requested ceiling. Floors still use the original full measured mesh.
+The actual Copán retry needed two metric clustering passes (0.13678 and 0.20517 m),
+then repair of 411,684 non-manifold edges before ordinary QEM met the ceiling.
+The repair removed 18.16% of the clustered surface's triangle area; source-distance
+measurements and visual review are necessary to interpret the remaining geometry.
+
+An earlier attempt to repair topology by repeatedly enlarging spatial cells was
+stopped before publication because 1.314 m cells were too coarse for tunnels.
+The accepted implementation avoids that topology strategy. All 43 current Python
+regressions pass, including metric shape preservation, problematic fragments and
+interrupted/source-bound reduction recovery. A same-volume hard-link copy of the
+full Copán checkpoint was retained through visual review, then its 3.34 GB was
+released after live acceptance. All original source ZIPs remain intact.
+
+The completed office/library, Artemis, Greece and Las Pinturas output packages and
+processed metadata have now moved from temporary Mac storage to amaryl. Every file
+was copied and reread for SHA-256 verification before removing its internal copy;
+compatibility links remain at both expected roots. New original downloads and the
+still-running larger imports remain on the Mac because external capacity is limited.
