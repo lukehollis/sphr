@@ -800,7 +800,9 @@ export class SphrRuntime {
     this.controls.rotateSpeed = orbit ? 0.4 : -0.25;
     this.controls.zoomSpeed = 0.8;
     this.controls.minDistance = orbit ? 1 : 0.1;
-    this.controls.maxDistance = orbit ? 150 : 0.1;
+    // Large metric captures need portrait framing distances beyond 150 meters.
+    // Let the bounds-based camera pose fit the entire survey without clamping it.
+    this.controls.maxDistance = orbit ? Infinity : 0.1;
   }
 
   private beginNavigationTransition(outgoingNode: NodeData | null) {
