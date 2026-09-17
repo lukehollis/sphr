@@ -18,6 +18,7 @@ const { parseSceneCatalog } = await import('../lib/scene-catalog-data.ts');
 const { legacyDestination } = await import('../lib/legacy-routes.ts');
 const { SphrRuntime } = await import('../lib/three/SphrRuntime.ts');
 const { AnnotationLayer } = await import('../lib/three/layers/AnnotationLayer.ts');
+const { MatterportViewer } = await import('../lib/viewer/MatterportViewer.ts');
 const { defaultBootstrap, normalizeTour } = await import('../lib/bootstrap.ts');
 const bootstrap = {
   space: { id: 'a', title: 'First', type: 'spaces', space_data: { nodes: [{ uuid: 'entry' }], sceneGraph: [{ id: 'mesh', type: 'model', persistent: true, raycast: true, file: '/mesh.glb' }] } },
@@ -85,6 +86,29 @@ test('neutral model pose fits the object on portrait screens and preserves viewi
   assert.equal(runtime.poseForPoint({ ...point, zoom: 20 }, 'ORBIT').fov, 50);
   assert.equal(runtime.poseForPoint({ ...point, zoom: 30, fov: 80 }, 'ORBIT').fov, 80);
   assert.equal(runtime.poseForTarget(new THREE.Vector3(), { azimuth: 0, polar: 0 }, 30, 'FPV', 80).fov, 80);
+});
+
+test('embedded tours convert legacy sweep IDs per model and retain current IDs and authored camera', async () => {
+  const viewer = Object.create(MatterportViewer.prototype), calls = [];
+  let conversions = 0;
+  viewer.sdk = {
+    Sweep: {
+      Conversion: { createIdMap: async invert => { assert.equal(invert, true); conversions++; return { 'old-sweep': 'current-sweep' }; } },
+      Transition: { INSTANT: 'instant', FLY: 'fly' },
+      moveTo: async (...args) => { calls.push(args); }
+    },
+    Camera: { zoomTo: async value => calls.push(['zoom', value]) }
+  };
+  await viewer.goTo({ nodeUUID: 'old-sweep', rotation: { azimuth: 80, polar: -10 }, fov: 90 }, true);
+  await viewer.goTo({ nodeUUID: 'current-sweep', fov: 110 });
+  assert.equal(conversions, 1);
+  assert.deepEqual(calls[0], ['current-sweep', { rotation: { x: -10, y: 80 }, transition: 'instant', transitionTime: 0 }]);
+  assert.deepEqual(calls[1], ['zoom', 110 / 90]);
+  assert.equal(calls[2][0], 'current-sweep');
+  assert.equal(calls[2][1].transition, 'fly');
+  // A source ID that no longer exists must surface the SDK failure, not land elsewhere.
+  viewer.sdk.Sweep.moveTo = async () => { throw new Error('Unavailable sweep'); };
+  await assert.rejects(viewer.goTo({ nodeUUID: 'missing' }), /Unavailable sweep/);
 });
 
 test('video annotation plays only when selected, follows mute and releases its resources', async () => {

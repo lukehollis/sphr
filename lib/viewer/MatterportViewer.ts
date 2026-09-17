@@ -5,7 +5,12 @@ type Subscription = { cancel(): void };
 type Observable<T> = { subscribe(callback: (value: T) => void): Subscription; waitUntil(predicate: (value: T) => boolean): Promise<T> };
 type Sdk = {
   App: { Phase: { PLAYING: string }; state: Observable<{ phase: string }> };
-  Sweep: { Transition: Record<string, string>; moveTo(id: string, options: object): Promise<string>; current: Observable<{ sid: string }> };
+  Sweep: {
+    Transition: Record<string, string>;
+    Conversion: { createIdMap(invert: boolean): Promise<Record<string, string>> };
+    moveTo(id: string, options: object): Promise<string>;
+    current: Observable<{ sid: string }>;
+  };
   Mode: { Mode: Record<string, string>; moveTo(mode: string, options?: object): Promise<void>; current: Observable<string> };
   Camera: { zoomTo(zoom: number): Promise<number>; pose: Observable<EmbeddedCameraPose> };
 };
@@ -32,6 +37,7 @@ export class MatterportViewer {
   private subscriptions: Subscription[] = [];
   private readonly container: HTMLElement;
   private annotations?: EmbeddedAnnotations;
+  private sweepIds?: Promise<Record<string, string>>;
 
   constructor(container: HTMLElement, private readonly space: SphrSpace, private readonly sdkKey: string,
     private readonly onChange: (change: { viewMode?: 'FPV' | 'ORBIT'; activeNodeId?: string }) => void,
@@ -83,7 +89,15 @@ export class MatterportViewer {
     if (point.viewMode === 'DOLLHOUSE' || point.viewMode === 'FLOORPLAN') {
       await this.sdk.Mode.moveTo(this.sdk.Mode.Mode[point.viewMode], { rotation });
     } else if (point.nodeUUID) {
-      await this.sdk.Sweep.moveTo(point.nodeUUID, {
+      // Older authored tours store v1 UUIDs. Convert using this model's SDK map;
+      // current v2 IDs pass through unchanged, without guessing another position.
+      this.sweepIds ??= this.sdk.Sweep.Conversion.createIdMap(true).catch(error => {
+        this.sweepIds = undefined;
+        throw error;
+      });
+      const mapping = await this.sweepIds;
+      if (this.disposed) return;
+      await this.sdk.Sweep.moveTo(mapping[point.nodeUUID] ?? point.nodeUUID, {
         rotation, transition: this.sdk.Sweep.Transition[instant ? 'INSTANT' : point.transition || 'FLY'], transitionTime: instant ? 0 : 1100
       });
       await this.sdk.Camera.zoomTo(Math.max(1, 110 / Math.max(35, point.fov ?? 110 - (point.zoom ?? 0))));
