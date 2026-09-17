@@ -1,5 +1,5 @@
 [Unit]
-Description=SPHR Mused scene viewer
+Description=SPHR scene viewer
 After=network-online.target
 Wants=network-online.target
 

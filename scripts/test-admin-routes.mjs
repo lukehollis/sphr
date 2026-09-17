@@ -6,7 +6,8 @@ assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(base).hostname), 
 const username = process.env.SPHR_TEST_USERNAME;
 const password = process.env.SPHR_TEST_PASSWORD;
 assert.ok(username && password, 'Configure the local test account.');
-const catalog = await (await fetch('https://static.mused.com/sphr/datasets/matterport/index.json')).json();
+const catalogUrl = process.env.SPHR_TEST_CATALOG_URL || new URL('/datasets/matterport/index.json', base).href;
+const catalog = await (await fetch(catalogUrl)).json();
 assert.ok(catalog.spaces.length);
 const scene = catalog.spaces[0];
 const path = scene.scenePath;
@@ -48,7 +49,7 @@ try {
   assert.equal((await call(`/s/${scene.sceneId}/old-title`)).headers.get('location'), path);
   await visibility(false);
   assert.equal((await call(path)).status, 307);
-  assert.equal((await fetch(scene.thumbnail)).status, 200, 'public bucket assets remain available');
+  assert.equal((await fetch(new URL(scene.thumbnail, base))).status, 200, 'public bucket assets remain available');
   assert.equal((await call('/admin', { admin: true })).status, 200);
   assert.equal((await call('/api/admin/logout', { method: 'POST', admin: true })).status, 200);
   assert.equal((await call('/api/admin/scenes/' + scene.sceneId, { method: 'PATCH', admin: true, body: JSON.stringify({ public: true }) })).status, 401, 'logout revokes server session');

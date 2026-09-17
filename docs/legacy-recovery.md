@@ -21,10 +21,13 @@ python3 scripts/legacy/recover.py \
   --inventory /captures/recovery/panoramas.txt \
   --inventory /captures/recovery/meshes.txt \
   --namespace original-collection \
+  --origin https://static.example.com \
+  --iiif-origin https://iiif.example.com \
   --sdk-key-file /captures/recovery/public-embed-key \
   --out /captures/recovery/packages
 python3 scripts/legacy/validate.py \
   --directory /captures/recovery/packages \
+  --app-origin https://app.example.com \
   --inventory /captures/recovery/panoramas.txt \
   --inventory /captures/recovery/meshes.txt
 ```
@@ -33,6 +36,11 @@ Python 3.11+, Pillow, and an authenticated Google Cloud CLI are required. The SQ
 is read-only and exports selected content fields, not account records. The Embed
 SDK uses a public client application key whose allowed domains must include the
 viewer origin. Keep SDK secrets and backend API credentials out of bootstraps.
+
+If source domains changed, supply `--origin-map /captures/recovery/origins.json`.
+This private JSON object maps complete old HTTPS origins to new HTTPS origins;
+no deployment domains are built into the converter. The raw export hash remains
+the source identity even when runtime URLs are rewritten.
 
 Preparation retains calibrated camera positions, versioned cube faces and model
 transforms. Legacy node-group rotations are degrees; legacy dollhouse rotations
@@ -100,6 +108,8 @@ python3 scripts/legacy/publish.py --directory /captures/recovery/packages --dry-
 python3 scripts/legacy/publish.py --directory /captures/recovery/packages
 ```
 
+Configure `SPHR_PUBLISH_BUCKET`, `SPHR_PUBLISH_ORIGIN` and `SPHR_PUBLIC_URL` first,
+or supply `--bucket`, `--origin` and `--app-origin` explicitly; see [hosting](hosting.md).
 Publish the compatible app runtime first. Publication uploads only the runtime
 bootstrap and preview to immutable scene revisions, then merges the catalog with
 a generation guard. Other entries, prior revisions and privacy settings survive.

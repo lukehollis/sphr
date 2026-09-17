@@ -2,9 +2,8 @@
 
 ## 1. Locate and bind the source
 
-Use the actual download location and any configured capture archive. This workstation
-stores exports at `/Volumes/amaryl/spaces/exports`; the previous Downloads paths are
-symlinks. Read [local capture storage](../../../../docs/local-capture-storage.md)
+Use the actual download location and any configured capture archive. Resolve the capture root from the operator's ignored local configuration or
+explicit source path; do not assume a workstation-specific mount. Read [local capture storage](../../../../docs/local-capture-storage.md)
 before changing storage locations or working with the large split captures.
 Compare filenames, modification times and
 existing manifests; do not assume the last imported ZIP is the new one. Incomplete
@@ -151,7 +150,7 @@ make each public as its upload completes. `--dry-run` performs no network action
 and does not require credentials. The manual `/admin` visibility control also
 remains available. Preserve all other visibility settings and verify the anonymous
 URL in the actual browser. The public bucket remains public; this setting controls
-the website viewer. See `docs/mused-hosting.md`.
+the website viewer. See `docs/hosting.md`.
 
 ## 6. Handoff
 

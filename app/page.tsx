@@ -18,5 +18,5 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     if (!(await isAdmin())) redirect("/admin/login");
   }
   if (params.config || params.demo !== undefined) return <SphrApp />;
-  return <SceneLibrary scenes={await readSceneCatalog()} />;
+  return <SceneLibrary scenes={await readSceneCatalog()} showAdminLink={accessControlled()} />;
 }

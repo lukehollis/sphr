@@ -1,7 +1,7 @@
 import type { IiifConfig, MediaFile, NodeData } from "@/lib/types";
 
-const IIIF_BASE = (process.env.NEXT_PUBLIC_SPHR_IIIF_BASE_URL || "https://iiif.mused.org").replace(/\/$/, "");
-const STATIC_BASE = (process.env.NEXT_PUBLIC_SPHR_MEDIA_BASE_URL || "https://static.mused.com").replace(/\/$/, "");
+const IIIF_BASE = (process.env.NEXT_PUBLIC_SPHR_IIIF_BASE_URL || "/iiif").replace(/\/$/, "");
+const STATIC_BASE = (process.env.NEXT_PUBLIC_SPHR_MEDIA_BASE_URL || "").replace(/\/$/, "");
 
 export function isAbsoluteUrl(value?: string | null) {
   return Boolean(value && /^https?:\/\//i.test(value));
@@ -30,7 +30,7 @@ export function mediaImageUrl(input?: Pick<MediaFile, "filename" | "url" | "file
   if (raw.startsWith("/")) return raw;
   const mimeType = input.mime_type ?? input.mimeType ?? "";
   if (raw.endsWith(".gif") || mimeType.includes("gif")) return staticUrl(raw);
-  if (isAbsoluteUrl(raw)) return raw.includes("/iiif/") || raw.includes("iiif.") ? raw : raw;
+  if (isAbsoluteUrl(raw)) return raw;
   return iiifImageUrl(raw, size);
 }
 
@@ -76,7 +76,7 @@ export function iiifConfigUrl(config: IiifConfig, size = "1600,") {
   const source = config.url ?? config.image ?? "";
   if (!source) return "";
   if (isAbsoluteUrl(source) && source.includes("/full/")) return source;
-  if (isAbsoluteUrl(source) && !source.includes(IIIF_BASE)) return source;
+  if (isAbsoluteUrl(source) && (!isAbsoluteUrl(IIIF_BASE) || !source.startsWith(`${IIIF_BASE}/`))) return source;
   return iiifImageUrl(
     source.replace(`${IIIF_BASE}/`, ""),
     config.size ?? size,
@@ -90,7 +90,7 @@ export function iiifConfigUrl(config: IiifConfig, size = "1600,") {
 export function iiifInfoUrl(config: IiifConfig) {
   if (config.infoUrl) return config.infoUrl;
   const source = config.url ?? config.image ?? "";
-  if (!source || (isAbsoluteUrl(source) && !source.includes(IIIF_BASE))) return "";
+  if (!source || (isAbsoluteUrl(source) && (!isAbsoluteUrl(IIIF_BASE) || !source.startsWith(`${IIIF_BASE}/`)))) return "";
   const stripped = source
     .replace(`${IIIF_BASE}/`, "")
     .replace(/\/full\/.*$/, "")

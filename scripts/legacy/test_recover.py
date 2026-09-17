@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import sys
+from unittest.mock import MagicMock, patch
 
 spec = importlib.util.spec_from_file_location('recover', Path(__file__).with_name('recover.py'))
 r = importlib.util.module_from_spec(spec)
@@ -14,6 +15,9 @@ sys.modules['recover'] = r
 hosted_spec = importlib.util.spec_from_file_location('hosted', Path(__file__).with_name('audit-hosted.py'))
 hosted = importlib.util.module_from_spec(hosted_spec)
 hosted_spec.loader.exec_module(hosted)
+validation_spec = importlib.util.spec_from_file_location('recovery_validation', Path(__file__).with_name('validate.py'))
+validation = importlib.util.module_from_spec(validation_spec)
+validation_spec.loader.exec_module(validation)
 
 
 def record(id=1):
@@ -33,6 +37,24 @@ def audit():
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_asset_cors_is_checked_for_the_selected_viewer(self):
+        viewer = 'https://viewer.example.com'
+        for asset, cors, expected in [
+            ('https://assets.example.com/a.jpg', viewer, True),
+            ('https://assets.example.com/a.jpg', '*', True),
+            ('https://assets.example.com/a.jpg', 'https://other.example.com', False),
+            ('https://assets.example.com/a.jpg', None, False),
+            (viewer + '/a.jpg', None, True),
+        ]:
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.status = 200
+            response.headers = {'Content-Length': '42', 'Content-Type': 'image/jpeg', 'Access-Control-Allow-Origin': cors}
+            with patch.object(validation, 'urlopen', return_value=response) as request:
+                result = validation.inspect_url(asset, viewer)
+            self.assertEqual(request.call_args.args[0].get_header('Origin'), viewer)
+            self.assertEqual('error' not in result, expected, result)
+
     def test_hosted_prefetch_parses_data_without_running_source_scripts(self):
         value = {'queries': {'GetModelPrefetch': {'data': {'model': {'id': 'model', 'locations': []}}}}}
         self.assertEqual(hosted.prefetched_model('window.MP_PREFETCHED_MODELDATA=' + json.dumps(value) + ';')['id'], 'model')
@@ -103,7 +125,10 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result['tour']['tour_data']['spaces'][0]['tourpoints'][0]['fov'], 80)
 
     def test_urls_preserve_escaped_paths(self):
-        self.assertEqual(r.canonical_urls('https://static.mused.org/sounds/a%20b c.mp3'), 'https://static.mused.com/sounds/a%20b%20c.mp3')
+        self.assertEqual(r.canonical_urls('https://old.example.com/sounds/a%20b c.mp3'), 'https://old.example.com/sounds/a%20b%20c.mp3')
+        mapped = r.canonical_urls({'audio': ['https://old.example.com/sounds/a%20b c.mp3', 'https://old.example.com.evil.test/file.jpg']},
+                                  {'https://old.example.com': 'https://new.example.com'})
+        self.assertEqual(mapped, {'audio': ['https://new.example.com/sounds/a%20b%20c.mp3', 'https://old.example.com.evil.test/file.jpg']})
         with self.assertRaises(ValueError): r.asset_url('http://unsafe.example/a', 'https://assets.example.com')
 
     def test_inventory_retains_zero_bytes(self):

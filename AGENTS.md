@@ -25,14 +25,16 @@ paths in examples. GitHub changes must apply across captures.
 The homepage is the scene collection. Canonical links are `/s/<sceneId>/<title-slug>`;
 IDs persist in package manifests across reimports and title changes. See
 [collection and hosting](docs/scene-library.md). Never regenerate IDs for existing scenes.
-Mused deploys the app on GCP `struct25` and assets to GCS. Read [Mused hosting](docs/mused-hosting.md)
-before publishing. Use `npm run scenes:publish`; preserve remote scenes and publish
-the catalog only after immutable assets upload successfully. Keep raw exports private.
-On app.mused.com, website visibility is admin-controlled and new scene IDs default to
-Private. Preserve `/var/lib/sphr` across deploys. This gates the web viewer only: the
-user explicitly keeps the generated files and catalog in the public bucket. Do not
-move assets or change bucket access when toggling website visibility. See the admin
-section in `docs/mused-hosting.md` before changing authentication or publishing.
+Read [hosting](docs/hosting.md) before publishing. Deployments supply their own
+origins, bucket, private state directory and credentials through ignored environment
+files. Keep site branding, DNS rules, machine names, operator paths and deployment
+records outside Git. A clean checkout must use local assets and no operator-specific
+copyright or account links. Use `npm run scenes:publish` with explicit destinations;
+publish immutable assets before merging the catalog and preserve other scene entries.
+When access control is enabled, new scene IDs default to Private. Preserve the
+configured state directory across deploys; it contains account and visibility data.
+Website visibility gates the viewer only. Do not change asset bucket permissions
+when changing a scene's website visibility.
 
 ## Current viewer contract
 

@@ -44,10 +44,10 @@ def stage_scene(folder, entry, base, stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
-    parser.add_argument('--bucket', default='mused')
+    parser.add_argument('--bucket', default=os.environ.get('SPHR_PUBLISH_BUCKET'), required=not os.environ.get('SPHR_PUBLISH_BUCKET'))
     parser.add_argument('--prefix', default='sphr')
-    parser.add_argument('--origin', default='https://static.mused.com')
-    parser.add_argument('--app-origin', default='https://app.mused.com')
+    parser.add_argument('--origin', default=os.environ.get('SPHR_PUBLISH_ORIGIN'), required=not os.environ.get('SPHR_PUBLISH_ORIGIN'))
+    parser.add_argument('--app-origin', default=os.environ.get('SPHR_PUBLIC_URL'), required=not os.environ.get('SPHR_PUBLIC_URL'))
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--make-source-public', action='store_true', help='Enable only recovered records whose original privacy was PUBLIC')
     args = parser.parse_args()

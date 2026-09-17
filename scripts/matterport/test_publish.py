@@ -9,6 +9,14 @@ from publish import commit_catalog, digest, main, make_public, merge_catalog, No
 
 
 class PublisherTests(unittest.TestCase):
+    def test_unconfigured_publisher_never_chooses_a_cloud_destination(self):
+        with patch('sys.argv', ['publish.py', '--dry-run']), patch.dict('os.environ', {}, clear=True), patch('sys.stderr', new_callable=io.StringIO) as error, patch('publish.stage_scene') as stage:
+            with self.assertRaises(SystemExit) as failure: main()
+            self.assertEqual(failure.exception.code, 2)
+            self.assertIn('--bucket', error.getvalue())
+            self.assertIn('--origin', error.getvalue())
+            stage.assert_not_called()
+
     def test_public_switch_updates_only_selected_ids_and_logs_out(self):
         calls = []
 
@@ -46,7 +54,7 @@ class PublisherTests(unittest.TestCase):
 
     def test_public_switch_requires_selection_and_credentials_before_upload(self):
         for args in (['--make-public'], ['--make-public', '--slug', 'capture']):
-            with patch('sys.argv', ['publish.py', *args]), patch.dict('os.environ', {}, clear=True), patch('sys.stderr', new_callable=io.StringIO), patch('publish.stage_scene') as stage:
+            with patch('sys.argv', ['publish.py', '--bucket', 'example-assets', '--origin', 'https://static.example.com', '--app-origin', 'https://app.example.com', *args]), patch.dict('os.environ', {}, clear=True), patch('sys.stderr', new_callable=io.StringIO), patch('publish.stage_scene') as stage:
                 with self.assertRaises(SystemExit) as failure:
                     main()
                 self.assertEqual(failure.exception.code, 2)
@@ -69,7 +77,8 @@ class PublisherTests(unittest.TestCase):
                     events.append('catalog')
                     return {'spaces': [entry]}
 
-                argv = ['publish.py', '--directory', str(root), '--slug', 'capture', '--make-public']
+                argv = ['publish.py', '--directory', str(root), '--slug', 'capture', '--make-public',
+                        '--bucket', 'example-assets', '--origin', 'https://static.example.com', '--app-origin', 'https://app.example.com']
                 if dry_run: argv.append('--dry-run')
                 environment = {} if dry_run else {'SPHR_PUBLISH_ADMIN_USERNAME': 'admin', 'SPHR_PUBLISH_ADMIN_PASSWORD': 'secret'}
                 with patch('sys.argv', argv), patch.dict('os.environ', environment, clear=True), patch('sys.stdout', new_callable=io.StringIO), patch('publish.stage_scene', return_value=(entry, 'scene')), patch('publish.gcloud', side_effect=upload), patch('publish.commit_catalog', side_effect=catalog), patch('publish.make_public', side_effect=lambda *args: events.append('public')):
@@ -131,11 +140,11 @@ class PublisherTests(unittest.TestCase):
             (folder/'manifest.json').write_text(json.dumps(manifest))
             (folder/'validation.json').write_text('{"passed":true}')
             entry={'sceneId':'aaaaaaaaaaaa','title':'Capture'}
-            published,path=stage_scene(folder,entry,'https://static.mused.com/sphr',root/'stage')
+            published,path=stage_scene(folder,entry,'https://static.example.com/sphr',root/'stage')
             output=root/'stage'/path
             data=json.loads((output/'bootstrap.json').read_text())
             self.assertEqual(data['space']['position'],[1,2,3])
-            self.assertTrue(data['space']['mesh'].startswith('https://static.mused.com/sphr/scenes/aaaaaaaaaaaa/'))
+            self.assertTrue(data['space']['mesh'].startswith('https://static.example.com/sphr/scenes/aaaaaaaaaaaa/'))
             self.assertFalse((output/'raw.e57').exists())
             self.assertFalse((output/'faces/scan-retired').exists())
             self.assertFalse((output/'mesh/old.glb').exists())
@@ -143,17 +152,17 @@ class PublisherTests(unittest.TestCase):
             self.assertEqual(json.loads((folder/'bootstrap.json').read_text())['space']['position'],[1,2,3])
             face.write_bytes(b'damaged photo')
             with self.assertRaisesRegex(ValueError,'Image no longer matches'):
-                stage_scene(folder,entry,'https://static.mused.com/sphr',root/'bad')
+                stage_scene(folder,entry,'https://static.example.com/sphr',root/'bad')
             manifest['imageManifest']['groups']['scan-000']['sourceFaces'][0]['sha256']=digest(face)
             (folder/'manifest.json').write_text(json.dumps(manifest))
-            second,newpath=stage_scene(folder,entry,'https://static.mused.com/sphr',root/'new')
+            second,newpath=stage_scene(folder,entry,'https://static.example.com/sphr',root/'new')
             self.assertNotEqual(path,newpath)
             self.assertEqual(second['sceneId'],published['sceneId'])
             with self.assertRaisesRegex(ValueError,'Invalid scene ID'):
-                stage_scene(folder,dict(entry,sceneId='../escape'),'https://static.mused.com/sphr',root/'unsafe')
+                stage_scene(folder,dict(entry,sceneId='../escape'),'https://static.example.com/sphr',root/'unsafe')
             (folder/'bootstrap.json').unlink()
             with self.assertRaisesRegex(ValueError,'Missing runtime asset'):
-                stage_scene(folder,entry,'https://static.mused.com/sphr',root/'incomplete')
+                stage_scene(folder,entry,'https://static.example.com/sphr',root/'incomplete')
 
 
 if __name__=='__main__': unittest.main()

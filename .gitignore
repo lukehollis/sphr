@@ -56,3 +56,13 @@ pnpm-debug.log*
 /.venv-matterport/
 __pycache__/
 *.pyc
+
+# operator-specific sources, deployment data and capture reports
+/data/
+/local/
+*.e57
+*.crdownload
+mp_e57_*.zip
+/docs/*verification.md
+/docs/matterport-*.md
+!/docs/matterport-web-archives.md

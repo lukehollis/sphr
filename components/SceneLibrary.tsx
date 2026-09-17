@@ -11,7 +11,7 @@ function SceneThumbnail({ scene }: { scene: SceneListing }) {
   </div>;
 }
 
-export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
+export default function SceneLibrary({ scenes, showAdminLink = false }: { scenes: SceneListing[]; showAdminLink?: boolean }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recent");
   const filtered = useMemo(() => {
@@ -44,13 +44,9 @@ export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
           {!filtered.length && <section className="library-empty"><p>{scenes.length ? "No spaces found." : "No public spaces."}</p>{query && <button className="share-link-button" onClick={() => setQuery("")}>Clear search</button>}</section>}
         </div>
       </main>
-      <footer className="library-footer">
-        <p>© {new Date().getFullYear()} <a href="https://mused.com/">mused.com</a></p>
-        <nav aria-label="Account">
-          <a href="https://mused.com/login/">Login</a>
-          <a href="https://mused.com/sign-up/">Sign up</a>
-        </nav>
-      </footer>
+      {showAdminLink && <footer className="library-footer">
+        <nav aria-label="Account"><a href="/admin">Login</a></nav>
+      </footer>}
     </div>
   </div>;
 }

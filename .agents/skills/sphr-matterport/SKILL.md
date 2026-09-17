@@ -50,5 +50,6 @@ they do not require spawning agents or creating separate user tasks.
 
 Deliver a working URL, source identity, node/face counts, actual GLB triangle count,
 registration metrics, graph coverage, checks run, and source limitations. Retain
-machine receipts with assets and write a concise capture review in `docs/`.
+machine receipts with assets and write the capture review in ignored local records
+or the external capture store. Commit only generic procedures and examples to `docs/`.
 Import logs, HTTP success, prefetched images or unit tests alone are not completion.

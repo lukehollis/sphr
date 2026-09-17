@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { withAssetBase } from '../lib/hosted-assets.ts';
 import { parseSceneCatalog } from '../lib/scene-catalog-data.ts';
 import { mediaImageUrl, mediaVideoUrl } from '../lib/media.ts';
 
-const base='https://static.mused.com/sphr';
+const base='https://static.example.com/sphr';
 const entry={sceneId:'aaaaaaaaaaaa',titleSlug:'example-space',scenePath:'/s/aaaaaaaaaaaa/example-space',
   title:'Example Space',slug:'example-space',nodeCount:3,createdAt:'2026-01-01',
   bootstrapUrl:'/datasets/matterport/example-space/bootstrap.json',thumbnail:'/datasets/matterport/example-space/preview.jpg'};
@@ -19,7 +20,7 @@ test('local and remote catalogs preserve stable scene links and resolve their as
 });
 test('reject foreign origins, wrong scene IDs, path escapes, and duplicate IDs',()=>{
   const config=base+'/scenes/'+entry.sceneId+'/0123456789abcdef/bootstrap.json';
-  for(const url of [config.replace('static.mused.com','other.example'),config.replace(entry.sceneId,'ffffffffffff'),
+  for(const url of [config.replace('static.example.com','other.example'),config.replace(entry.sceneId,'ffffffffffff'),
     config.replace('/sphr/','/other/'),config+'?redirect=1','//other.example/bootstrap.json']){
     assert.throws(()=>parse([{...entry,bootstrapUrl:url}],base));
   }
@@ -39,8 +40,44 @@ test('rebase all nested runtime assets without mutating source data or camera ca
   assert.ok(input.space.mesh.startsWith('/datasets/'));
   assert.deepEqual(withAssetBase(input,''),input);
 });
-test('static tour media uses the .com bucket and local previews do not require IIIF',()=>{
-  assert.equal(mediaVideoUrl({filename:'tour/example.mp4'}),'https://static.mused.com/tour/example.mp4');
+test('unconfigured media stays on the local host and explicit asset URLs are preserved',()=>{
+  assert.equal(mediaVideoUrl({filename:'tour/example.mp4'}),'/tour/example.mp4');
   assert.equal(mediaImageUrl({url:'/demo/garden_scene_splats_tour.jpg'}),'/demo/garden_scene_splats_tour.jpg');
   assert.equal(mediaImageUrl({url:'https://images.example/photo.jpg'}),'https://images.example/photo.jpg');
+});
+
+function isolatedModule(module, expression, overrides = {}) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^(NEXT_PUBLIC_)?SPHR_|^VERCEL$/.test(key)) delete env[key];
+  const source = `const mod = await import(${JSON.stringify(new URL(module, import.meta.url).href)}); console.log(JSON.stringify(${expression}));`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { env: { ...env, ...overrides }, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+test('hosted platforms do not implicitly select an operator catalog or asset host', () => {
+  const env = isolatedModule('../next.config.mjs', 'mod.default.env', { VERCEL: '1' });
+  assert.equal(env.SPHR_ASSET_BASE_URL, '');
+  assert.equal(env.SPHR_CATALOG_URL, '');
+  assert.equal(env.SPHR_PUBLIC_URL, 'http://localhost:3002');
+  const configured = isolatedModule('../next.config.mjs', 'mod.default.env', {
+    SPHR_ASSET_BASE_URL: 'https://assets.example.com/scenes/', SPHR_PUBLIC_URL: 'https://viewer.example.com'
+  });
+  assert.equal(configured.SPHR_CATALOG_URL, 'https://assets.example.com/scenes/datasets/matterport/index.json');
+  assert.equal(configured.NEXT_PUBLIC_SPHR_ASSET_BASE_URL, 'https://assets.example.com/scenes');
+  assert.equal(configured.SPHR_PUBLIC_URL, 'https://viewer.example.com');
+});
+
+test('media origins can be configured independently without changing explicit URLs', () => {
+  const result = isolatedModule('../lib/media.ts', `[
+    mod.mediaVideoUrl({ filename: 'audio/clip.mp4' }),
+    mod.iiifImageUrl('photos/a.jpg', '600,'),
+    mod.iiifConfigUrl({ url: 'https://other.example.com/iiif/file.jpg' }),
+    mod.iiifInfoUrl({ image: 'photos/a.jpg' })
+  ]`, { NEXT_PUBLIC_SPHR_MEDIA_BASE_URL: 'https://assets.example.com', NEXT_PUBLIC_SPHR_IIIF_BASE_URL: 'https://images.example.com' });
+  assert.deepEqual(result, ['https://assets.example.com/audio/clip.mp4',
+    'https://images.example.com/photos/a.jpg/full/600,/0/default.jpg',
+    'https://other.example.com/iiif/file.jpg', 'https://images.example.com/photos/a.jpg/info.json']);
+  assert.equal(isolatedModule('../lib/media.ts', "mod.iiifConfigUrl({url:'https://images.example.com/iiif/file.jpg'})"),
+    'https://images.example.com/iiif/file.jpg');
 });

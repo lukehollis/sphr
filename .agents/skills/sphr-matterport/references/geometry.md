@@ -103,8 +103,8 @@ never force through-wall connections just to produce one component.
 
 ## Quality interpretation
 
-Use each capture's receipts. Observatory's measured median/p95 mesh distances
-(1.09/7.18 cm) are examples, not universal acceptance thresholds. Exact coordinate
-conversion certifies metric handling, not accuracy of every source measurement.
+Use each capture's own source-bound receipts. Do not reuse another capture's
+measured mesh distances as acceptance thresholds. Exact coordinate conversion
+certifies metric handling, not accuracy of every source measurement.
 Poor point/photo agreement, unusual floor support, new disconnected areas or large
 mesh errors require comparison with source bytes and actual visible results.

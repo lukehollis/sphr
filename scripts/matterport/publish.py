@@ -177,10 +177,10 @@ def make_public(scene_ids, app_origin, username, password):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--bucket', default='mused')
+    parser.add_argument('--bucket', default=os.environ.get('SPHR_PUBLISH_BUCKET'), required=not os.environ.get('SPHR_PUBLISH_BUCKET'))
     parser.add_argument('--prefix', default='sphr')
-    parser.add_argument('--origin', default='https://static.mused.com')
-    parser.add_argument('--app-origin', default='https://app.mused.com', help='HTTPS viewer/admin origin')
+    parser.add_argument('--origin', default=os.environ.get('SPHR_PUBLISH_ORIGIN'), required=not os.environ.get('SPHR_PUBLISH_ORIGIN'))
+    parser.add_argument('--app-origin', default=os.environ.get('SPHR_PUBLIC_URL'), required=not os.environ.get('SPHR_PUBLIC_URL'), help='HTTPS viewer/admin origin')
     parser.add_argument('--directory', type=Path, default=ROOT/'public/datasets/matterport')
     parser.add_argument('--slug', action='append', help='Publish selected storage slugs; preserve all other remote scenes')
     parser.add_argument('--include-demo', action='store_true')

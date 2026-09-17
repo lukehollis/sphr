@@ -20,16 +20,19 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def inspect_url(url):
+def inspect_url(url, app_origin):
     result = {'url': url}
     try:
-        with urlopen(Request(url, method='HEAD', headers={'Origin': 'https://app.mused.com'}), timeout=45) as response:
+        with urlopen(Request(url, method='HEAD', headers={'Origin': app_origin}), timeout=45) as response:
             result.update(status=response.status, size=int(response.headers.get('Content-Length', '0')),
                           contentType=response.headers.get('Content-Type'), cors=response.headers.get('Access-Control-Allow-Origin'))
         if result['size'] <= 0:
             raise ValueError('Empty asset')
-        if not result['cors']:
-            raise ValueError('Missing cross-origin access header')
+        asset_origin = urlsplit(url)
+        viewer_origin = urlsplit(app_origin)
+        cross_origin = (asset_origin.scheme, asset_origin.netloc) != (viewer_origin.scheme, viewer_origin.netloc)
+        if cross_origin and result['cors'] not in ('*', app_origin):
+            raise ValueError('Asset does not allow the configured viewer origin')
         if urlsplit(url).path.lower().endswith('.glb'):
             with urlopen(Request(url, headers={'Range': 'bytes=0-19'}), timeout=45) as response:
                 header = response.read(20)
@@ -45,7 +48,7 @@ def inspect_url(url):
                                            if item.get('uri') and not item['uri'].startswith('data:')]
             if result['externalResources']:
                 from urllib.parse import urljoin
-                result['externalChecks'] = [inspect_url(urljoin(url, value)) for value in result['externalResources']]
+                result['externalChecks'] = [inspect_url(urljoin(url, value), app_origin) for value in result['externalResources']]
                 if any('error' in item for item in result['externalChecks']):
                     raise ValueError('Unavailable external GLB resource')
     except Exception as error:
@@ -105,7 +108,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--inventory', type=Path, action='append', required=True)
+    parser.add_argument('--app-origin', required=True, help='HTTPS viewer origin used to verify CORS')
     args = parser.parse_args()
+    origin = urlsplit(args.app_origin)
+    if origin.scheme != 'https' or not origin.netloc or origin.path not in ('', '/') or origin.username or origin.query or origin.fragment:
+        parser.error('--app-origin must be an HTTPS origin without a path or credentials')
+    args.app_origin = args.app_origin.rstrip('/')
     inventory = read_inventory(args.inventory)
     entries = json.loads((args.directory / 'index.json').read_text())['spaces']
     urls_by_entry, configs = {}, {}
@@ -119,7 +127,7 @@ def main():
     urls = sorted(set().union(*urls_by_entry.values()))
     print(f'Checking {len(urls)} delivered assets for {len(entries)} entries', flush=True)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        checks = dict(zip(urls, pool.map(inspect_url, urls)))
+        checks = dict(zip(urls, pool.map(lambda url: inspect_url(url, args.app_origin), urls)))
     (args.directory / 'asset-audit.json').write_text(json.dumps(list(checks.values()), indent=2) + '\n')
     failures = [item for item in checks.values() if 'error' in item]
     for entry in entries:

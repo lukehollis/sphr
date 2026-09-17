@@ -26,18 +26,19 @@ def slugify(title):
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:100].rstrip('-') or 'space'
 
 
-def canonical_urls(value):
+def canonical_urls(value, origins=None):
     if isinstance(value, str):
-        for service in ('static', 'iiif', 'app', 'spaces', 'tours'):
-            value = value.replace(f'https://{service}.mused.org/', f'https://{service}.mused.com/')
+        for old, new in (origins or {}).items():
+            # Rewrite only complete URL origins, including URLs in authored HTML.
+            value = value.replace(old.rstrip('/') + '/', new.rstrip('/') + '/')
         if value.startswith('https://') and '<' not in value:
             url = urlsplit(value)
             value = urlunsplit((url.scheme, url.netloc, quote(url.path, safe='/%:@!$&\'()*+,;=-._~'), url.query, url.fragment))
         return value
     if isinstance(value, list):
-        return [canonical_urls(item) for item in value]
+        return [canonical_urls(item, origins) for item in value]
     if isinstance(value, dict):
-        return {key: canonical_urls(item) for key, item in value.items()}
+        return {key: canonical_urls(item, origins) for key, item in value.items()}
     return value
 
 
@@ -289,15 +290,28 @@ def main():
     parser.add_argument('--inventory', type=Path, action='append', required=True)
     parser.add_argument('--namespace', required=True, help='Stable source-system identity, unchanged across reruns')
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--origin', default='https://static.mused.com')
-    parser.add_argument('--iiif-origin', default='https://iiif.mused.com')
+    parser.add_argument('--origin', required=True, help='HTTPS origin for existing source assets')
+    parser.add_argument('--iiif-origin', required=True, help='HTTPS prefix for the image service')
+    parser.add_argument('--origin-map', type=Path, help='Private JSON object mapping old HTTPS origins to new HTTPS origins')
     parser.add_argument('--sdk-key-file', type=Path, help='Existing public Matterport Embed SDK application key')
     parser.add_argument('--native-archive', type=Path, action='append', default=[], help='Source-verified native web package for an exact hosted model')
-    parser.add_argument('--native-origin', default='https://static.mused.com/sphr/archives', help='Delivery prefix for the staged native-assets directory')
+    parser.add_argument('--native-origin', help='HTTPS delivery prefix; required when using --native-archive')
     parser.add_argument('--hosted-audit', type=Path, help='Source-bound report from audit-hosted.py; retains unavailable models with an explicit viewer message')
     parser.add_argument('--allow-unavailable-nodes', action='store_true', help='Record unavailable source nodes and omit broken navigation targets')
     args = parser.parse_args()
+    if args.native_archive and not args.native_origin:
+        parser.error('--native-archive requires --native-origin')
     source = json.loads(args.export.read_text())
+    if args.origin_map:
+        origins = json.loads(args.origin_map.read_text())
+        if not isinstance(origins, dict): parser.error('--origin-map must contain a JSON object')
+        for old, new in origins.items():
+            for value in (old, new):
+                if not isinstance(value, str): parser.error('Origin mappings must be strings')
+                url = urlsplit(value)
+                if url.scheme != 'https' or not url.netloc or url.path not in ('', '/') or url.username or url.query or url.fragment:
+                    parser.error('Origin mappings require HTTPS origins without paths or credentials')
+        source = canonical_urls(source, origins)
     inventory = read_inventory(args.inventory)
     audit = {'sourceSha256': hashlib.sha256(args.export.read_bytes()).hexdigest(), 'unavailableNodes': [], 'repairs': []}
     records = {str(record['id']): record for record in source['spaces']}
