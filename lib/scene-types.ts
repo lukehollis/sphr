@@ -8,4 +8,6 @@ export type SceneListing = {
   thumbnail: string;
   nodeCount: number;
   createdAt: string;
+  legacy?: { kind: "space" | "tour"; id: string };
+  sourceType?: string;
 };

@@ -8,6 +8,7 @@ type Props = {
   state: RuntimeState;
   hasGuidedTour: boolean;
   hasAudio: boolean;
+  canToggleView?: boolean;
   onToggleView: () => void;
   onToggleMute: () => void;
   onToggleText: () => void;
@@ -19,6 +20,7 @@ export default function HudControls({
   state,
   hasGuidedTour,
   hasAudio,
+  canToggleView = true,
   onToggleView,
   onToggleMute,
   onToggleText,
@@ -26,7 +28,7 @@ export default function HudControls({
 }: Props) {
   return (
     <>
-      {!state.guided && <div className="hud-left" aria-label="Scene controls">
+      {!state.guided && canToggleView && <div className="hud-left" aria-label="Scene controls">
         <ControlButton label={state.viewMode === "FPV" ? "Switch to orbit view" : "Switch to first-person view"} onClick={onToggleView}>
           {state.viewMode === "FPV" ? <Box size={22} aria-hidden="true" /> : <Footprints size={22} aria-hidden="true" />}
         </ControlButton>

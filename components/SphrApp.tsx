@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeState, SphrBootstrap } from "@/lib/types";
-import { SphrRuntime } from "@/lib/three/SphrRuntime";
+import { ViewerSession } from "@/lib/viewer/ViewerSession";
 import HudControls from "@/components/HudControls";
 import LoadingScreen from "@/components/LoadingScreen";
 import TourOverlay from "@/components/TourOverlay";
@@ -27,8 +27,8 @@ const initialRuntimeState: RuntimeState = {
 type Props = { configUrl?: string; preview?: { title: string; image: string } };
 
 export default function SphrApp({ configUrl, preview }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const runtimeRef = useRef<SphrRuntime | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>(initialRuntimeState);
   const [started, setStarted] = useState(false);
@@ -45,8 +45,8 @@ export default function SphrApp({ configUrl, preview }: Props) {
         if (cancelled) return;
         setBootstrap(data);
 
-        if (!canvasRef.current) return;
-        const runtime = new SphrRuntime(canvasRef.current, data, {
+        if (!viewportRef.current) return;
+        const runtime = new ViewerSession(viewportRef.current, data, {
           onState: setRuntimeState,
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
@@ -54,7 +54,7 @@ export default function SphrApp({ configUrl, preview }: Props) {
         });
         runtimeRef.current = runtime;
         if (process.env.NODE_ENV !== "production") {
-          (window as Window & { __SPHR_RUNTIME__?: SphrRuntime }).__SPHR_RUNTIME__ = runtime;
+          (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__ = runtime;
         }
         await runtime.init();
         if (cancelled) return;
@@ -80,7 +80,7 @@ export default function SphrApp({ configUrl, preview }: Props) {
     return () => {
       cancelled = true;
       if (process.env.NODE_ENV !== "production") {
-        delete (window as Window & { __SPHR_RUNTIME__?: SphrRuntime }).__SPHR_RUNTIME__;
+        delete (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__;
       }
       runtimeRef.current?.dispose();
       runtimeRef.current = null;
@@ -90,6 +90,7 @@ export default function SphrApp({ configUrl, preview }: Props) {
   const tour = useMemo(() => (bootstrap ? normalizeTour(bootstrap) : null), [bootstrap]);
   const activePoint = tour?.spaces[runtimeState.activeSpaceIndex]?.tourpoints[runtimeState.activePointIndex] ?? null;
   const activeSpace = tour?.spaces[runtimeState.activeSpaceIndex] ?? null;
+  const viewerSpace = bootstrap?.orderedSpaces?.find(space => String(space.id) === String(activeSpace?.id)) ?? bootstrap?.space;
   const isLastPoint =
     Boolean(tour) &&
     runtimeState.activeSpaceIndex === (tour?.spaces.length ?? 1) - 1 &&
@@ -97,10 +98,10 @@ export default function SphrApp({ configUrl, preview }: Props) {
 
   return (
     <main className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
-      <canvas ref={canvasRef} className="sphr-canvas" aria-label="SPHR interactive scene" />
+      <div ref={viewportRef} className="sphr-viewport" />
       <LoadingScreen
         loading={runtimeState.loading}
-        visible={!started}
+        visible={!started || !runtimeState.loading.ready}
         title={preview?.title || bootstrap?.space.title}
         image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
       />
@@ -109,10 +110,11 @@ export default function SphrApp({ configUrl, preview }: Props) {
       {started && activePoint && (
         <>
           <HudControls
-            title={bootstrap?.space.title}
+            title={tour?.hasGuidedTour ? tour.title : bootstrap?.space.title}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
             hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim()))}
+            canToggleView={!viewerSpace?.space_data.noPanos || Boolean(viewerSpace.space_data.clickNavigation || viewerSpace.space_data.splats?.length)}
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}
             onToggleText={() => runtimeRef.current?.toggleText()}

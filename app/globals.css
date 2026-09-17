@@ -83,6 +83,10 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 /* Viewer chrome stays separate from the photographic scene. */
 .sphr-root { position: fixed; inset: 0; overflow: hidden; background: var(--surface-desk); }
 .sphr-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.sphr-viewport, .sphr-viewer-stage, .sphr-embedded-viewer { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.sphr-viewer-stage { transition: opacity 180ms ease; }
+
+.sphr-embedded-annotations { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* A drafting sheet over the space's photograph, shown only while assets load. */
 .scene-load-screen { position: absolute; inset: 0; z-index: 40; isolation: isolate; display: grid; place-items: center; overflow: auto; padding: max(48px, env(safe-area-inset-top)) 32px max(48px, env(safe-area-inset-bottom)); background: #151719; color: #f5f5f5; }
 .scene-load-backdrop { position: absolute; inset: 0; z-index: -3; overflow: hidden; }

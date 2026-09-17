@@ -11,7 +11,8 @@ type Props = { params: Promise<{ id: string; slug?: string[] }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const scene = await findScene((await params).id);
   if (!scene) return { title: "Space not found", robots: { index: false, follow: false } };
-  const description = `Explore ${scene.title} in 360°, with ${scene.nodeCount} locations and an interactive dollhouse view.`;
+  const description = scene.legacy?.kind === 'tour' ? `Take a guided tour of ${scene.title}.`
+    : `Explore ${scene.title} in an interactive spatial viewer.`;
   return {
     title: `${scene.title} · SPHR`, description,
     ...(!isScenePublic(scene.sceneId) ? { robots: { index: false, follow: false } } : {}),

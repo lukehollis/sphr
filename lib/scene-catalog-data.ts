@@ -4,6 +4,7 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
   const catalog = JSON.parse(content);
   if (!Array.isArray(catalog.spaces)) throw new Error("Invalid scene catalog: expected spaces array.");
   const ids = new Set<string>();
+  const aliases = new Set<string>();
   return catalog.spaces.map((entry: SceneListing) => {
     if (!entry || !/^[a-f0-9]{12}$/.test(entry.sceneId) || ids.has(entry.sceneId)
       || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.titleSlug)
@@ -12,7 +13,7 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
     function asset(value: string, type: "config" | "thumbnail") {
       if (typeof value !== "string") throw new Error("Missing scene asset URL.");
       const end = type === "config" ? "bootstrap\\.json" : "(?:preview\\.jpg|faces/scan-\\d+/face\\d\\.jpg)";
-      const local = new RegExp(`^/datasets/matterport/[a-z0-9-]+/${end}$`);
+      const local = new RegExp(`^/datasets/(?:matterport|legacy)/[a-z0-9-]+/${end}$`);
       if (local.test(value)) return assetBase ? assetBase.replace(/\/$/, "") + value : value;
       if (assetBase) {
         const base = new URL(assetBase.replace(/\/$/, "") + "/");
@@ -25,11 +26,20 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
       throw new Error(`Invalid scene ${type} URL: ${value}`);
     }
     ids.add(entry.sceneId);
+    if (entry.legacy && (!['space', 'tour'].includes(entry.legacy.kind) || !/^[1-9][0-9]*$/.test(entry.legacy.id))) {
+      throw new Error('Invalid legacy scene identity.');
+    }
+    if (entry.legacy) {
+      const alias = `${entry.legacy.kind}:${entry.legacy.id}`;
+      if (aliases.has(alias)) throw new Error('Duplicate legacy scene identity.');
+      aliases.add(alias);
+    }
     return {
       sceneId: entry.sceneId, titleSlug: entry.titleSlug, scenePath: entry.scenePath,
       slug: entry.slug, title: entry.title, bootstrapUrl: asset(entry.bootstrapUrl, "config"),
       thumbnail: asset(entry.thumbnail, "thumbnail"), nodeCount: Number(entry.nodeCount) || 0,
-      createdAt: entry.createdAt || ""
+      createdAt: entry.createdAt || "", ...(entry.legacy ? { legacy: entry.legacy } : {}),
+      ...(entry.sourceType ? { sourceType: entry.sourceType } : {})
     };
   });
 }

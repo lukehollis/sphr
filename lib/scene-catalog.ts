@@ -15,14 +15,17 @@ export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
     if (!response.ok) throw new Error(`Scene catalog unavailable: HTTP ${response.status}`);
     return parseSceneCatalog(await response.text(), assetBase);
   }
-  let content: string;
-  try {
-    content = await readFile(path.join(process.cwd(), "public/datasets/matterport/index.json"), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-  return parseSceneCatalog(content, assetBase);
+  const catalogs = await Promise.all(['matterport', 'legacy'].map(async (root) => {
+    try {
+      return parseSceneCatalog(await readFile(path.join(process.cwd(), `public/datasets/${root}/index.json`), 'utf8'), assetBase);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }));
+  const scenes = catalogs.flat();
+  if (new Set(scenes.map(scene => scene.sceneId)).size !== scenes.length) throw new Error('Duplicate scene identity across catalogs.');
+  return scenes;
 });
 
 export const readSceneCatalog = cache(async (): Promise<SceneListing[]> => {

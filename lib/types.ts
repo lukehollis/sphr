@@ -261,6 +261,7 @@ export type SceneGraphNode = TransformConfig & {
 };
 
 export type AnnotationConfig = TransformConfig & {
+  volume?: number;
   id: string;
   type?: "annotation" | string;
   navPointId?: string;
@@ -296,6 +297,7 @@ export type SphrBootstrap = {
   tour?: SphrTour | null;
   ui?: TourUiText;
   orderedSpaces?: SphrSpace[];
+  integrations?: { matterport?: { sdkKey?: string } };
 };
 
 export type NormalizedTour = {

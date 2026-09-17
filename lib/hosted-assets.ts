@@ -3,7 +3,7 @@ export function withAssetBase<T>(value: T, base = process.env.NEXT_PUBLIC_SPHR_A
   if (!base) return value;
   const root = base.replace(/\/$/, "");
   function visit(item: unknown): unknown {
-    if (typeof item === "string") return /^\/(datasets\/matterport|demo)\//.test(item) ? root + item : item;
+    if (typeof item === "string") return /^\/(datasets\/(?:matterport|legacy)|demo)\//.test(item) ? root + item : item;
     if (Array.isArray(item)) return item.map(visit);
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, visit(child)]));
     return item;

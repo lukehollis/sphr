@@ -54,6 +54,16 @@ Runtime behavior:
 
 ## Implementation Rules
 
+- `ViewerSession` owns tour position across `orderedSpaces`. Keep navigation global;
+  a native scene, embedded Matterport scene, or standalone MODEL stop is a renderer
+  stage. A failed incoming stage must leave the previous viewer usable.
+- MODEL stops use their selected scene-graph objects, the authored camera position,
+  and the object bounds as the orbit target. Do not navigate to a retained nodeUUID
+  on a MODEL stop. Video annotations are video textures and follow the mute state.
+- For an earlier Django collection, use [the recovery workflow](../../../docs/legacy-recovery.md).
+  Preserve source identities and authored media in generated data, never runtime
+  branches for individual spaces. Matterport links still depend on their hosted models.
+
 - Prefer data changes over hard-coded point IDs.
 - If a new `extra` is reusable, implement it in a named runtime method or layer.
 - Mobile guided tours require a full-width 72px Next text button at the bottom and a

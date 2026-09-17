@@ -172,6 +172,7 @@ export function coerceBootstrap(input: SphrBootstrap): SphrBootstrap {
     const firstSpace = orderedSpaces.find((item) => String(item.id) === String(firstTourSpace.id));
     if (firstSpace) {
       return {
+        ...input,
         space: firstSpace,
         tour,
         orderedSpaces,
@@ -181,6 +182,7 @@ export function coerceBootstrap(input: SphrBootstrap): SphrBootstrap {
   }
 
   return {
+    ...input,
     space,
     tour,
     orderedSpaces,

@@ -107,7 +107,7 @@ export class SphrRuntime {
     };
   }
 
-  async init() {
+  async init(initialPointIndex?: number) {
     this.setupRendererSize();
     this.setupScene();
     this.setupControls();
@@ -117,7 +117,8 @@ export class SphrRuntime {
 
     const nodes = this.getNodes();
     const exploreEntry = !this.tour.hasGuidedTour ? this.resolveInitialNode() : null;
-    const initialLocation = (exploreEntry && this.findTourPointForNode(exploreEntry.uuid))
+    const initialLocation = (initialPointIndex === undefined ? null : { spaceIndex: 0, pointIndex: initialPointIndex })
+      || (exploreEntry && this.findTourPointForNode(exploreEntry.uuid))
       || { spaceIndex: 0, pointIndex: 0 };
     this.state.activeSpaceIndex = initialLocation.spaceIndex;
     this.state.activePointIndex = initialLocation.pointIndex;
@@ -323,6 +324,7 @@ export class SphrRuntime {
   toggleMute() {
     this.state.muted = !this.state.muted;
     this.audio.setMuted(this.state.muted);
+    this.annotations?.setMuted(this.state.muted);
     this.emitState();
   }
 
@@ -655,7 +657,7 @@ export class SphrRuntime {
   private findTourPointForNode(nodeUUID: string) {
     for (let spaceIndex = 0; spaceIndex < this.tour.spaces.length; spaceIndex += 1) {
       const space = this.tour.spaces[spaceIndex];
-      const pointIndex = space.tourpoints.findIndex((point) => point.nodeUUID === nodeUUID);
+      const pointIndex = space.tourpoints.findIndex((point) => point.nodeUUID === nodeUUID && point.targetType !== 'MODEL');
       if (pointIndex >= 0) return { spaceIndex, pointIndex };
     }
     return null;
@@ -754,8 +756,29 @@ export class SphrRuntime {
   }
 
   private poseForPoint(point: TourPoint | undefined, mode: "FPV" | "ORBIT"): CameraPose {
+    if (point?.targetType === 'MODEL') {
+      const bounds = this.sceneGraph?.getBounds();
+      const target = bounds && !bounds.isEmpty() ? bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+      const position = vectorFromLike(point.position, target.clone().add(new THREE.Vector3(4, 3, 4)));
+      if (bounds && !bounds.isEmpty()) {
+        // Preserve the authored viewing direction while fitting the object at
+        // neutral zoom. Authored zoom can still move in for a detail stop.
+        const radius = bounds.getSize(new THREE.Vector3()).length() * 0.5;
+        const halfAngle = Math.atan(Math.tan(THREE.MathUtils.degToRad(35)) * Math.min(1, this.camera.aspect));
+        const distance = radius / Math.sin(halfAngle) * 1.08;
+        const direction = position.clone().sub(target);
+        if (direction.lengthSq() === 0) direction.set(0, 0, 1);
+        if (direction.length() < distance) position.copy(target).addScaledVector(direction.normalize(), distance);
+      }
+      return { position, target, fov: THREE.MathUtils.clamp(70 - (point.zoom ?? 0), 35, 85) };
+    }
     const node = this.resolveNode(point?.nodeUUID);
     if (node) return this.poseForNode(node, mode, point);
+
+    if (mode === 'ORBIT') {
+      const bounds = this.sceneGraph?.getBounds();
+      if (bounds && !bounds.isEmpty()) return this.overviewPose(bounds);
+    }
 
     const position = vectorFromLike(
       point?.position ?? this.bootstrap.space.space_data.initialPosition ?? { x: 0, y: 1.5, z: 4 }
@@ -774,15 +797,19 @@ export class SphrRuntime {
             .map((entry) => this.nav!.getWorldFloorPosition(entry)));
       }
       if (bounds && !bounds.isEmpty()) {
-        const center = bounds.getCenter(new THREE.Vector3());
-        const radius = bounds.getSize(new THREE.Vector3()).length() * 0.5;
-        const fov = 50;
-        const fit = radius / Math.sin(THREE.MathUtils.degToRad(fov * 0.5)) / Math.min(1, this.camera.aspect);
-        return { position: center.clone().add(new THREE.Vector3(0.7, 1, 0.85).normalize().multiplyScalar(fit)), target: center, fov };
+        return this.overviewPose(bounds);
       }
     }
     const target = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
     return this.poseForTarget(target, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode);
+  }
+
+  private overviewPose(bounds: THREE.Box3): CameraPose {
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = bounds.getSize(new THREE.Vector3()).length() * 0.5;
+    const fov = 50;
+    const fit = radius / Math.sin(THREE.MathUtils.degToRad(fov * .5)) / Math.min(1, this.camera.aspect);
+    return { position: center.clone().add(new THREE.Vector3(.7, 1, .85).normalize().multiplyScalar(fit)), target: center, fov };
   }
 
   private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT") {
