@@ -16,4 +16,5 @@
 - In FPV, keep the reduced mesh hidden at rest and raycastable. Capture the outgoing panorama once and project it onto the mesh from the fixed scan origin during navigation.
 - Await incoming textures, preserve the current panorama on failure, and bound unpinned texture memory.
 - Keep scene-specific information in the data package. No bespoke runtime code for individual Matterport exports.
+- Do not commit real capture IDs, source filenames, local configurations, or batch reports. Use generic test fixtures and example paths; retain actual receipts in ignored local/external storage.
 - Verify actual browser navigation, transitions, overview, poles, stairs, dark scans, mobile controls, and the existing 3DGS demo in addition to automated checks.

@@ -33,11 +33,11 @@ uses a completed, source-bound fusion checkpoint; it does not skip checks or res
 half-integrated export. Keep source hashes
 and original bytes unchanged. Do not edit validation JSON to turn a failure into a pass.
 
-## Recorded real failure
+## Source-edge diagnosis
 
-Harvard Robotics scan 001 had an absolute edge RGB difference of 0.13072, exceeding the
-old 0.10 threshold. The source embedded image measured 0.12876 on the same edge; the
-conversion difference was 0.00196. Other camera/point evidence supported registration.
+Compare an excessive delivered edge difference with the same edge in the original
+embedded image. If both contain the difference and the conversion adds little error,
+inspect the remaining camera/point evidence before diagnosing a registration failure.
 The general repair records source baselines for every scan and checks added seam error,
 while retaining source warnings and strict failure for packages without that evidence.
 Regression cases cover inherited error, added damage, absent baseline and malformed values.

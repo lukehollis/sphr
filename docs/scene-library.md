@@ -4,10 +4,10 @@ The homepage `/` is the searchable collection. `/library` redirects there. Each 
 package gets a persistent 12-character `sceneId` and a readable slug derived from its title:
 
 ```text
-/s/9bbdea70264e/harvard-computational-robotics-group-lab
+/s/0123456789ab/example-space
 ```
 
-The ID selects the scene. `/s/9bbdea70264e` and URLs containing an older title slug redirect
+The ID selects the scene. `/s/0123456789ab` and URLs containing an older title slug redirect
 to the current canonical URL. Titles, thumbnails and descriptions populate sharing metadata.
 Unknown IDs return a real 404 with a link back to the collection. Existing `/?config=…`
 and `/?demo=garden` links continue to work.

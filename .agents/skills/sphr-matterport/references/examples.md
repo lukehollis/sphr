@@ -1,30 +1,30 @@
 # Runnable examples
 
-Run from the Next repository. Examples reference real imports; they do not create
-placeholder panoramas or substitute synthetic data for conversion.
+Run from the Next repository. Replace the example paths and title with a completed
+source export and your intended capture name. These commands run the real importer.
 
 ## Inspect a download without extraction
 
 ```sh
 python3 .agents/scripts/matterport/inspect-export.py --downloads ~/Downloads
 python3 .agents/scripts/matterport/inspect-export.py \
-  --source ~/Downloads/mp_e57_Harvard-Computational-Robotics-Group-Lab_TkQg3fZoEaE.zip \
+  --source /captures/export.zip \
   --check-crc --sha256
 ```
 
-The filename above is the real second validation capture. Replace it with the discovered
-source for other work. `inputFileSha256` hashes the supplied ZIP or E57; the converter's
-`manifest.sourceSha256` always identifies the extracted E57. The preflight never unzips
+Use the source path discovered by the inspection command. `inputFileSha256` hashes the supplied ZIP or E57; the converter's
+`manifest.sourceSha256` identifies the extracted E57 for a single-part source or
+the ordered source-part binding for a split export. The preflight never unzips
 into arbitrary archive paths or changes source bytes.
 
 ## Import and read the receipts
 
 ```sh
 npm run import:matterport -- \
-  --e57 ~/Downloads/mp_e57_Harvard-Computational-Robotics-Group-Lab_TkQg3fZoEaE.zip \
-  --slug harvard-robotics-lab --title 'Harvard Computational Robotics Group Lab'
-npm run test:matterport -- public/datasets/matterport/harvard-robotics-lab
-node .agents/scripts/matterport/report-package.mjs public/datasets/matterport/harvard-robotics-lab
+  --e57 /captures/export.zip \
+  --slug my-space --title 'My Space'
+npm run test:matterport -- public/datasets/matterport/my-space
+node .agents/scripts/matterport/report-package.mjs public/datasets/matterport/my-space
 ```
 
 `report-package.mjs` reads actual receipts and checks the current mesh hash. It reports
@@ -36,12 +36,12 @@ status. It is not a replacement for fresh `validate.py` source/image validation.
 
 Only use this when a tour is requested or as an explicitly temporary QA fixture. The
 normal import stays in exploration mode. Read actual node IDs from its bootstrap before
-choosing stops. For the real Harvard import, this is a minimal two-stop authored example:
+choosing stops. Replace these example IDs and text with the requested tour stops:
 
 ```json
 [
-  { "nodeUUID": "scan-000", "text": "Robotics lab entrance" },
-  { "nodeUUID": "scan-011", "text": "Laboratory work area" }
+  { "nodeUUID": "scan-000", "text": "Entrance" },
+  { "nodeUUID": "scan-001", "text": "Next stop" }
 ]
 ```
 
@@ -49,25 +49,25 @@ Save those user-authored stops to a local JSON file, then:
 
 ```sh
 node .agents/skills/sphr-matterport/examples/create-guided-tour.mjs \
-  --input public/datasets/matterport/harvard-robotics-lab/bootstrap.json \
+  --input public/datasets/matterport/my-space/bootstrap.json \
   --stops /path/to/authored-stops.json \
-  --out public/configs/lab-walkthrough.json --title 'Lab walkthrough'
+  --out public/configs/walkthrough.json --title 'Walkthrough'
 ```
 
 The script validates all node IDs and numeric camera values, preserves real asset URLs,
 scene graph and source camera defaults, sets `mode: "guided"`, and writes a **new** config.
 It refuses to replace the source bootstrap or an existing output. Text is supplied tour
 content, not evidence extracted from an E57. Open
-`/?config=/configs/lab-walkthrough.json` after the server recognizes the new file.
+`/?config=/configs/walkthrough.json` after the server recognizes the new file.
 
 For exhaustive visual QA, create stops from every actual node with no invented narrative:
 
 ```javascript
 // Node.js; write only to a clearly identified local QA file.
 import { readFile, writeFile } from 'node:fs/promises';
-const input = JSON.parse(await readFile('public/datasets/matterport/harvard-robotics-lab/bootstrap.json', 'utf8'));
+const input = JSON.parse(await readFile('public/datasets/matterport/my-space/bootstrap.json', 'utf8'));
 const stops = input.space.space_data.nodes.map(node => ({ nodeUUID: node.uuid }));
-await writeFile('tmp/harvard-qa-stops.json', JSON.stringify(stops, null, 2), { flag: 'wx' });
+await writeFile('tmp/capture-qa-stops.json', JSON.stringify(stops, null, 2), { flag: 'wx' });
 ```
 
 Feed that file to the same composer and use the actual Next button to visit each scan.

@@ -146,5 +146,6 @@ content. Older packages without baselines retain the strict absolute seam checks
 The comprehensive agent workflow, roles, troubleshooting and executable examples are in
 [the local Matterport skill](../.agents/skills/sphr-matterport/SKILL.md).
 
-See the [Harvard Robotics Lab capture review](matterport-harvard-robotics-lab.md) for a
-complete second-source import, measured results and the source-image seam investigation.
+Keep each real capture's import command, measured results, and image-seam investigation
+with its local migration receipts. Capture reports and generated configurations stay
+outside the distributable repository.

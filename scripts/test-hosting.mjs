@@ -5,9 +5,9 @@ import { parseSceneCatalog } from '../lib/scene-catalog-data.ts';
 import { mediaImageUrl, mediaVideoUrl } from '../lib/media.ts';
 
 const base='https://static.mused.com/sphr';
-const entry={sceneId:'bc8d61ff42cf',titleSlug:'observatory',scenePath:'/s/bc8d61ff42cf/observatory',
-  title:'Observatory',slug:'observatory',nodeCount:53,createdAt:'2026-09-16',
-  bootstrapUrl:'/datasets/matterport/observatory/bootstrap.json',thumbnail:'/datasets/matterport/observatory/preview.jpg'};
+const entry={sceneId:'aaaaaaaaaaaa',titleSlug:'example-space',scenePath:'/s/aaaaaaaaaaaa/example-space',
+  title:'Example Space',slug:'example-space',nodeCount:3,createdAt:'2026-01-01',
+  bootstrapUrl:'/datasets/matterport/example-space/bootstrap.json',thumbnail:'/datasets/matterport/example-space/preview.jpg'};
 const parse=(entries, root='')=>parseSceneCatalog(JSON.stringify({spaces:entries}), root);
 
 test('local and remote catalogs preserve stable scene links and resolve their asset roots',()=>{
@@ -27,8 +27,8 @@ test('reject foreign origins, wrong scene IDs, path escapes, and duplicate IDs',
   assert.throws(()=>parse([{...entry,scenePath:'/s/a/wrong'}],base));
 });
 test('rebase all nested runtime assets without mutating source data or camera calibration',()=>{
-  const input={space:{mesh:'/datasets/matterport/observatory/mesh/observatory-50k.glb',
-    nodes:[{faces:['/datasets/matterport/observatory/faces/scan-000/face0.jpg'],position:[1,2,3]}],
+  const input={space:{mesh:'/datasets/matterport/example-space/mesh/example-space-50k.glb',
+    nodes:[{faces:['/datasets/matterport/example-space/faces/scan-000/face0.jpg'],position:[1,2,3]}],
     splats:[{url:'/demo/garden_demo.spark.splat'}]},tour:{text:'A tour',audio:'https://audio.example/test.mp3'}};
   const output=withAssetBase(input,base);
   assert.equal(output.space.mesh,base+input.space.mesh);

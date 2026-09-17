@@ -17,6 +17,10 @@ The importer is tracked in `scripts/matterport/`. Generated packages live in
 `public/datasets/matterport/` and are ignored by Git. Raw exports stay outside `public`.
 All captures use the same calibrated pipeline and generic viewer; no per-capture
 runtime transforms, image permutations, camera-height constants, or custom UI branches.
+Keep capture-specific IDs, configurations, source filenames, and migration reports
+out of committed code and examples. Store them in ignored local records or the
+external capture store. Use generic fixtures in regression tests and parameterized
+paths in examples. GitHub changes must apply across captures.
 
 The homepage is the scene collection. Canonical links are `/s/<sceneId>/<title-slug>`;
 IDs persist in package manifests across reimports and title changes. See
