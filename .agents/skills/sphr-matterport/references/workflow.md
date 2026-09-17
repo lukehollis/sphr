@@ -141,10 +141,17 @@ and preserves that capture's storage slug and scene ID. Partial overlaps do not 
 Duplicate identities or scan GUIDs fail explicitly.
 
 For an authorized hosted publication, run `npm run scenes:publish -- --slug my-space`.
-It uploads immutable runtime assets before merging the remote catalog. On app.mused.com,
-new IDs default to Private: sign in at `/admin` and enable Public for the requested
-spaces. Preserve all other visibility settings. The public bucket remains public;
-this setting controls the website viewer. See `docs/mused-hosting.md`.
+It uploads immutable runtime assets before merging the remote catalog. New IDs
+default to Private. If the user requested public visibility, add `--make-public`
+with `SPHR_PUBLISH_ADMIN_USERNAME` and `SPHR_PUBLISH_ADMIN_PASSWORD` supplied through
+the process's secret environment; never store or print those credentials. The
+publisher enables only explicit `--slug` selections after successful asset and
+catalog publication, using an in-memory admin session. Use one capture per job to
+make each public as its upload completes. `--dry-run` performs no network actions
+and does not require credentials. The manual `/admin` visibility control also
+remains available. Preserve all other visibility settings and verify the anonymous
+URL in the actual browser. The public bucket remains public; this setting controls
+the website viewer. See `docs/mused-hosting.md`.
 
 ## 6. Handoff
 

@@ -6,12 +6,16 @@ Requires an authenticated gcloud CLI. A failed upload leaves the live catalog al
 """
 import argparse
 import hashlib
+import http.cookiejar
 import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,19 +135,72 @@ def commit_catalog(published, index, uri):
             remote, generation = latest, current_generation
 
 
+class NoAdminRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        # Credentials and the session are intended for exactly --app-origin.
+        return None
+
+
+def make_public(scene_ids, app_origin, username, password):
+    """Enable selected uploaded scenes, using a short-lived in-memory session."""
+    if not scene_ids or any(not re.fullmatch(r'[a-f0-9]{12}', value) for value in scene_ids):
+        raise ValueError('Public visibility requires valid selected scene IDs')
+    opener = urllib.request.build_opener(
+        NoAdminRedirect(), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def send(path, body, method='POST'):
+        request = urllib.request.Request(app_origin + path, data=json.dumps(body).encode(),
+            headers={'Content-Type': 'application/json', 'Origin': app_origin}, method=method)
+        try:
+            with opener.open(request, timeout=45) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(f'Admin request {path} failed (HTTP {error.code})') from None
+        if result.get('ok') is not True:
+            raise RuntimeError(f'Admin request {path} did not confirm success')
+        return result
+
+    send('/api/admin/login', {'username': username, 'password': password})
+    try:
+        for scene_id in scene_ids:
+            result = send('/api/admin/scenes/' + scene_id, {'public': True}, 'PATCH')
+            if result.get('public') is not True:
+                raise RuntimeError(f'Public visibility was not confirmed for {scene_id}')
+            print(f'Public viewer enabled: {app_origin}/s/{scene_id}', flush=True)
+    finally:
+        try:
+            send('/api/admin/logout', {})
+        except Exception:
+            # Preserve any original publication failure and never print secrets.
+            print('Admin logout failed; the temporary session will expire.', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bucket', default='mused')
     parser.add_argument('--prefix', default='sphr')
     parser.add_argument('--origin', default='https://static.mused.com')
+    parser.add_argument('--app-origin', default='https://app.mused.com', help='HTTPS viewer/admin origin')
     parser.add_argument('--directory', type=Path, default=ROOT/'public/datasets/matterport')
     parser.add_argument('--slug', action='append', help='Publish selected storage slugs; preserve all other remote scenes')
     parser.add_argument('--include-demo', action='store_true')
     parser.add_argument('--dry-run', action='store_true', help='Validate and plan locally without cloud reads or writes')
+    parser.add_argument('--make-public', action='store_true',
+                        help='After upload and catalog publication, enable selected --slug viewers using SPHR_PUBLISH_ADMIN_USERNAME and SPHR_PUBLISH_ADMIN_PASSWORD')
     args = parser.parse_args()
     origin = urlsplit(args.origin)
     if origin.scheme != 'https' or not origin.netloc or origin.path not in ('', '/') or origin.query or origin.fragment or origin.username:
         parser.error('--origin must be an HTTPS origin without a path or credentials')
+    app_origin = urlsplit(args.app_origin)
+    if app_origin.scheme != 'https' or not app_origin.netloc or app_origin.path not in ('', '/') or app_origin.query or app_origin.fragment or app_origin.username:
+        parser.error('--app-origin must be an HTTPS origin without a path or credentials')
+    args.app_origin = args.app_origin.rstrip('/')
+    username = os.environ.get('SPHR_PUBLISH_ADMIN_USERNAME')
+    password = os.environ.get('SPHR_PUBLISH_ADMIN_PASSWORD')
+    if args.make_public and not args.slug:
+        parser.error('--make-public requires explicit --slug selections')
+    if args.make_public and not args.dry_run and (not username or not password):
+        parser.error('--make-public requires SPHR_PUBLISH_ADMIN_USERNAME and SPHR_PUBLISH_ADMIN_PASSWORD in the environment')
     if not re.fullmatch(r'[a-z0-9][a-z0-9.-]+', args.bucket) or not re.fullmatch(r'[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*', args.prefix):
         parser.error('Invalid bucket or prefix')
     base_url = args.origin.rstrip('/') + '/' + args.prefix
@@ -179,9 +236,18 @@ def main():
             # Take a fresh remote snapshot after the potentially long upload.
             # The generation guard remains mandatory on every attempted switch.
             catalog = commit_catalog(published, index, catalog_uri)
+            if args.make_public:
+                try:
+                    make_public([entry['sceneId'] for entry in published], args.app_origin, username, password)
+                except Exception as error:
+                    raise RuntimeError('Assets and catalog are published, but the Public switch failed. '
+                                       'Correct the admin credentials or availability and rerun the same command. '
+                                       f'{error}') from None
         print(json.dumps({'dryRun':args.dry_run, 'published':len(published), 'catalogScenes':len(catalog['spaces']),
+                          'websiteVisibility':'public' if args.make_public and not args.dry_run else 'unchanged',
+                          'makePublic':args.make_public,
                           'catalogUrl':base_url+'/datasets/matterport/index.json',
-                          'links':['https://app.mused.com'+entry['scenePath'] for entry in published]}, indent=2))
+                          'links':[args.app_origin+entry['scenePath'] for entry in published]}, indent=2))
 
 
 if __name__ == '__main__':

@@ -197,6 +197,25 @@ Uploaded spaces are **private on app.mused.com by default**. Open `/admin`, sign
 and change a space's Visibility to Public when it should appear for visitors.
 Reimports preserve visibility because it is keyed by the persistent scene ID.
 
+For a capture that should become public automatically after publication, provide
+`SPHR_PUBLISH_ADMIN_USERNAME` and `SPHR_PUBLISH_ADMIN_PASSWORD` through your shell's
+secret environment or a secret manager, then run:
+
+```sh
+npm run scenes:publish -- --slug my-space --make-public --dry-run
+npm run scenes:publish -- --slug my-space --make-public
+```
+
+The dry run needs no admin credentials and makes no network requests. A real run
+requires explicit `--slug` selections and checks for credentials before uploading.
+It uploads and commits the catalog before enabling those selected website viewers.
+The admin session lives only in memory and is logged out afterward; redirects are
+rejected. Keep passwords out of command arguments, source files and logs. Use
+`--app-origin https://app.example.com` for another deployment. Run one capture per
+job to make each public when that capture's upload completes. If the Public switch
+fails, the command exits unsuccessfully while preserving the uploaded assets and
+catalog; correct the admin credentials or availability and rerun the command.
+
 The publisher needs Python 3.11 or newer and the Google Cloud CLI. Authenticate the
 publishing computer with `gcloud auth login` if needed. Publication
 defaults to `gs://mused/sphr` and `https://static.mused.com/sphr`. Override `--bucket`,
