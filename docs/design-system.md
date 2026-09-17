@@ -30,7 +30,11 @@ preference overrides the reference system’s text-only control guidance. Do not
 Buttons have no visible outer borders in normal, hover, or disabled states. Keep
 keyboard focus outlines and blue active indicators, and preserve control dimensions.
 
-The collection has no visible heading, counts, instructions, or footer. Keep the
+The collection has no visible heading, counts, or instructions. Its compact footer
+contains the current-year copyright linked to mused.com and Login / Sign up links
+to Mused's existing account pages. Keep it in normal collection flow and at the
+bottom of short/empty collections, with a section rule and muted text. Full-screen
+viewers retain their existing controls without a collection footer. Keep the
 search/sort controls and photographic cards. Each card contains only a linked
 thumbnail and title, without badges, location counts, mode labels, IDs, or copy-link
 controls. Preserve searching by title/ID, sorting, canonical URLs, keyboard focus,

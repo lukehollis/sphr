@@ -26,6 +26,8 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 /* Collection: the manual's annotation column and photographic plates. */
 .space-library { position: fixed; inset: 0; overflow: auto; padding: var(--space-6) var(--page-margin); }
 .library-shell { max-width: 1600px; margin: 0 auto; }
+.library-shell-with-footer { min-height: 100%; display: flex; flex-direction: column; }
+.library-shell-with-footer > .library-layout { flex: 1; align-content: start; }
 .library-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-4); }
 .library-toolbar { align-self: start; }
 .library-search-label, .library-sort { display: block; font-size: var(--size-caption); margin-bottom: var(--space-1); }
@@ -49,6 +51,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .space-card-link:hover h2 { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
 .library-empty { padding: var(--space-4) 0; border-bottom: var(--rule-section); color: var(--text-muted); }
 .library-empty h2 { font-size: var(--size-h2); line-height: var(--leading-heading); }
+.library-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-top: var(--space-6); padding-top: var(--space-2); border-top: var(--rule-section); color: var(--text-muted); font-size: var(--size-caption); }
+.library-footer p { margin: 0; }
+.library-footer nav { display: flex; gap: var(--space-3); }
+.library-footer a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; }
+.library-footer a:hover { color: var(--text-heading); text-decoration: underline; text-decoration-color: var(--accent); }
 
 /* Shared controls: solid stock, square corners, no visible borders, one blue accent. */
 .primary-action, .secondary-action, .tour-next, .tour-prev, .viewer-button, .share-link-button {

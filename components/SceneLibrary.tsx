@@ -22,9 +22,9 @@ export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
         : b.createdAt.localeCompare(a.createdAt) || a.title.localeCompare(b.title));
   }, [scenes, query, sort]);
 
-  return <main className="space-library" aria-label="Spaces">
-    <div className="library-shell">
-      <div className="library-layout">
+  return <div className="space-library">
+    <div className="library-shell library-shell-with-footer">
+      <main className="library-layout" aria-label="Spaces">
         <aside className="library-toolbar" aria-label="Filter collection">
           <label className="library-search-label" htmlFor="space-search">Search spaces</label>
           <div className="library-search"><input id="space-search" type="search" placeholder="Title or scene ID" value={query} onChange={event => setQuery(event.target.value)} />{query && <button aria-label="Clear search" onClick={() => setQuery("")}>Clear</button>}</div>
@@ -43,7 +43,14 @@ export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
           </section>
           {!filtered.length && <section className="library-empty"><p>{scenes.length ? "No spaces found." : "No public spaces."}</p>{query && <button className="share-link-button" onClick={() => setQuery("")}>Clear search</button>}</section>}
         </div>
-      </div>
+      </main>
+      <footer className="library-footer">
+        <p>© {new Date().getFullYear()} <a href="https://mused.com/">mused.com</a></p>
+        <nav aria-label="Account">
+          <a href="https://mused.com/login/">Login</a>
+          <a href="https://mused.com/sign-up/">Sign up</a>
+        </nav>
+      </footer>
     </div>
-  </main>;
+  </div>;
 }
