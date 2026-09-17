@@ -23,6 +23,7 @@ import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { PanoramaLayer } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
 import { selectNavigationTarget } from "@/lib/three/navigation";
+import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 
@@ -754,7 +755,14 @@ export class SphrRuntime {
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {
     if (mode === "ORBIT") {
-      const bounds = this.sceneGraph?.getBounds();
+      let bounds = this.sceneGraph?.getBounds();
+      if (bounds && this.nav) {
+        const nodes = this.getNodes();
+        bounds = panoramaOverviewBounds(bounds,
+          nodes.map((entry) => this.nav!.getWorldPosition(entry)),
+          nodes.filter((entry) => entry.floorPosition && !entry.floorUnobserved)
+            .map((entry) => this.nav!.getWorldFloorPosition(entry)));
+      }
       if (bounds && !bounds.isEmpty()) {
         const center = bounds.getCenter(new THREE.Vector3());
         const radius = bounds.getSize(new THREE.Vector3()).length() * 0.5;

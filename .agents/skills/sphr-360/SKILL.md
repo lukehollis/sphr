@@ -49,7 +49,11 @@ provides measured poses. Legacy `rotation` uses the old SPHR Euler path; new E57
 - Use measured floor markers, occlusion checks and heading-preserving free navigation.
 - Keep transition mesh hidden at rest but raycastable. Capture the outgoing panorama once;
   project from its fixed camera origin, not as a reflection; fade late during movement.
-- Dollhouse fits mesh bounds. Double-click surface/marker enters a nearby scan at eye level;
+- Dollhouse fits mesh bounds. If sparse distant surfaces make the mesh span more
+  than four times the measured camera span, initial framing uses the padded survey
+  bounds and includes every camera/floor. This camera-framing heuristic retains all
+  geometry for orbit/zoom; it is not a source crop or a scale correction.
+  Double-click surface/marker enters a nearby scan at eye level;
   background returns to current scan. Both returns use the same eased camera flight as
   zooming out, retaining the mesh until a late blend into the panorama. Single clicks/drags
   stay in dollhouse. OrbitControls must not clamp the camera during a flight.

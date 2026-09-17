@@ -84,7 +84,8 @@ never force through-wall connections just to produce one component.
   Reflection mapping and per-frame cube recapture are incorrect substitutes.
 - `NavigationLayer`: measured floor rings, hidden-marker exclusion and occlusion checks.
   Distant/non-neighbor moves use teleport/crossfade instead of flying through walls.
-- Dollhouse: fit mesh bounds; double-click enters a suitable scan at eye level;
+- Dollhouse: fit mesh bounds, with padded survey framing for distant fragments
+  dominating a compact camera path; retain all mesh geometry. Double-click enters a suitable scan at eye level;
   cancel stale camera tweens; single-click must not consume the first half of double-click.
 
 ## Quality interpretation
