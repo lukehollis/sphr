@@ -47,8 +47,7 @@ export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
       <footer className="library-footer">
         <p>© {new Date().getFullYear()} <a href="https://mused.com/">mused.com</a></p>
         <nav aria-label="Account">
-          <a href="https://mused.com/login/">Login</a>
-          <a href="https://mused.com/sign-up/">Sign up</a>
+          <a href="/admin">Manage spaces</a>
         </nav>
       </footer>
     </div>
