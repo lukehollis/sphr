@@ -40,12 +40,13 @@ when changing a scene's website visibility.
 
 Every space opens automatically when ready, with no intro or Start/Free Explore gate.
 Imported scans enter free exploration (`tour.tour_data.mode: "explore"`); authored
-tours start guided and alone expose guide/text toggles and Previous/Next. The top header
+tours start guided and alone expose the Guide toggle and Previous/Next. The top header
 contains the scene title and viewer controls, including a switch followed by “Guide”
 for toggling guided/free-explore mode. Do not use a lightbulb for this control.
 Do not show share/copy-link or fullscreen buttons in the viewer.
 On mobile, keep a full-width 72px Next text button at the bottom, with a small Previous
 button above it. Dollhouse stays at the bottom and is visible only in free exploration.
+Show the Next label on desktop too. Do not expose a text visibility toggle; authored copy stays visible in guided mode.
 Other viewer controls use accessible icon buttons. Show mute only
 when audio is configured; never expose the debug markers button in the viewer. Single-click a
 floor marker or nearby floor in first person to move to a reachable scan. Double-click dollhouse surfaces/markers to enter a scan;

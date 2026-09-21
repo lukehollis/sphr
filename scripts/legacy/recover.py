@@ -145,7 +145,7 @@ def attach_native_archive(folder, spaces, origin, output, audit):
 
 def recover_space(record, inventory, origin, iiif_origin, audit):
     data = canonical_urls(copy.deepcopy(record.get('space_data') or {}))
-    output = {key: record.get(key) for key in ('id', 'title', 'description', 'src', 'version')}
+    output = {key: record.get(key) for key in ('id', 'title', 'description', 'src', 'version', 'space_custom')}
     output['type'] = record.get('space_type') or 'spaces'
     for field in ('thumbnail', 'share_image', 'video', 'mesh'):
         output[field] = asset_url(record.get(field), origin)
@@ -266,7 +266,8 @@ def recover_tour(record, records, spaces, audit):
         if space not in ordered:
             ordered.append(space)
     return {'space': ordered[0], 'orderedSpaces': ordered,
-            'tour': {'id': record['id'], 'title': record['title'], 'description': record.get('description'), 'tour_data': data}}
+            'tour': {'id': record['id'], 'title': record['title'], 'description': record.get('description'),
+                     'space_custom': record.get('space_custom'), 'tour_data': data}}
 
 
 def write_json(path, data):
@@ -297,6 +298,7 @@ def main():
     parser.add_argument('--native-archive', type=Path, action='append', default=[], help='Source-verified native web package for an exact hosted model')
     parser.add_argument('--native-origin', help='HTTPS delivery prefix; required when using --native-archive')
     parser.add_argument('--hosted-audit', type=Path, help='Source-bound report from audit-hosted.py; retains unavailable models with an explicit viewer message')
+    parser.add_argument('--allow-unmigrated-customizations', action='store_true', help='Explicitly allow data recovery with unresolved source custom handlers; this does not migrate or validate those handlers')
     parser.add_argument('--allow-unavailable-nodes', action='store_true', help='Record unavailable source nodes and omit broken navigation targets')
     args = parser.parse_args()
     if args.native_archive and not args.native_origin:
@@ -314,6 +316,15 @@ def main():
         source = canonical_urls(source, origins)
     inventory = read_inventory(args.inventory)
     audit = {'sourceSha256': hashlib.sha256(args.export.read_bytes()).hexdigest(), 'unavailableNodes': [], 'repairs': []}
+    if any('space_custom' not in record for kind in ('spaces', 'tours') for record in source[kind]):
+        raise ValueError('Source export omits customization metadata; export again with the current export.sql')
+    customizations = [{'kind': kind, 'id': record['id'], 'handler': record['space_custom'], 'status': 'requires-source-review'}
+                      for kind in ('space', 'tour') for record in source[kind + 's'] if record.get('space_custom')]
+    audit['customizations'] = customizations
+    audit['customizationsComplete'] = not customizations
+    if customizations and not args.allow_unmigrated_customizations:
+        write_json(args.out / 'audit.json', audit)
+        raise ValueError('Source custom handlers need review and data-driven migration; inspect audit.json before explicitly allowing incomplete recovery')
     records = {str(record['id']): record for record in source['spaces']}
     spaces = {key: recover_space(record, inventory, args.origin, args.iiif_origin, audit) for key, record in records.items()}
     for folder in args.native_archive:

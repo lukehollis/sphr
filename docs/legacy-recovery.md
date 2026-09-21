@@ -138,3 +138,22 @@ npm run test:admin
 npm run typecheck
 npm run build
 ```
+
+## Custom source behavior
+
+The selected-content export includes `space_custom` on both spaces and tours. A
+nonempty handler identifies application code outside the database; migrating its
+JSON fields alone does not restore the experience. Recovery stops and records
+these handlers in `audit.json` before creating packages. The explicit
+`--allow-unmigrated-customizations` option permits incomplete data recovery for
+inspection, retaining the original handler metadata and the unresolved audit. It
+must never be described as a complete migration.
+
+Inspect the original handler, templates, compiled release and source maps. Account
+for text, narration, model animation, annotations, environment changes and custom
+media separately. Convert them to reusable viewer features and per-tour data;
+do not import source-specific handlers into the runtime. Compare all stop content
+and referenced media with the selected source release, then inspect actual playback.
+An audio-only source may have intentionally empty text; preserve its recordings and
+use source-backed section labels rather than inventing a transcript. A surviving
+model-only entry is not evidence that its separately published guided tour migrated.

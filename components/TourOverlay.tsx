@@ -32,7 +32,7 @@ export default function TourOverlay({ point, ui, state, isLastPoint, onPrevious,
 
   return (
     <section className={`tour-overlay text-${position}`} aria-live="polite">
-      {state.guided && state.showText && Boolean(point.text || point.secondaryText || primaryFile || mapUrl) && (
+      {state.guided && Boolean(point.text || point.secondaryText || primaryFile || mapUrl) && (
         <div className="tour-copy">
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
             <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}

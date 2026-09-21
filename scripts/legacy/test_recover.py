@@ -67,6 +67,34 @@ class RecoveryTests(unittest.TestCase):
     def recover(self, rec=None, inv=None, log=None):
         return r.recover_space(rec or record(), inv if inv is not None else inventory(), 'https://assets.example.com', 'https://images.example.com', log if log is not None else audit())
 
+    def test_cli_stops_before_assets_when_custom_behavior_is_unreviewed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); export = root / 'export.json'; inv = root / 'inventory.txt'; inv.write_text('')
+            export.write_text(json.dumps({'spaces': [{**record(), 'space_custom': 'customExperience'}], 'tours': []}))
+            argv = ['recover.py', '--export', str(export), '--inventory', str(inv), '--namespace', 'example',
+                    '--out', str(root / 'output'), '--origin', 'https://assets.example.com',
+                    '--iiif-origin', 'https://images.example.com']
+            with patch.object(sys, 'argv', argv), patch.object(r, 'recover_space') as recover:
+                with self.assertRaisesRegex(ValueError, 'Source custom handlers'):
+                    r.main()
+                recover.assert_not_called()
+            report = json.loads((root / 'output/audit.json').read_text())
+            self.assertFalse(report['customizationsComplete'])
+            self.assertEqual(report['customizations'][0]['handler'], 'customExperience')
+            export.write_text(json.dumps({'spaces': [record()], 'tours': []}))
+            with patch.object(sys, 'argv', argv):
+                with self.assertRaisesRegex(ValueError, 'export omits customization metadata'):
+                    r.main()
+
+    def test_source_custom_handler_is_not_silently_discarded(self):
+        rec = record(); rec['space_custom'] = 'authoredExperience'
+        space = self.recover(rec)
+        self.assertEqual(space['space_custom'], 'authoredExperience')
+        tour = {'id': 3, 'title': 'Example story', 'space_custom': 'customStory', 'space_ids': [1],
+                'tour_data': {'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'frame'}]}]}}
+        recovered = r.recover_tour(tour, {'1': rec}, {'1': space}, audit())
+        self.assertEqual(recovered['tour']['space_custom'], 'customStory')
+
     def test_cube_order_version_and_original_transforms(self):
         original = record()
         out = self.recover(original)
