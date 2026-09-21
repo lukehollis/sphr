@@ -70,7 +70,7 @@ asset host. Use content hashes for immutable paths, preserve GLB external resour
 and rewrite only asset URLs. Keep original source/binding receipts outside public
 directories. Check every stop's cube faces and every model/media URL, including CORS
 for the actual deployed viewer origin. YouTube embeds are documents, not video files;
-they do not require asset CORS. External video playback still requires its provider.
+they do not require asset CORS. External video playback still requires its provider. Google place/view maps retain their location, zoom and satellite mode through a keyless embed; archived API keys may be restricted to a retired domain.
 
 Inspect real entry, Next/Previous, overview and return, embedded objects and media,
 and narrow mobile layouts. A network receipt alone is not visual verification.
