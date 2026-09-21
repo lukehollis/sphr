@@ -65,6 +65,8 @@ large bottom button. This hierarchy overrides the compact icon-only treatment fo
 tour navigation. Desktop Next also has a visible text label. Do not expose a text visibility toggle;
 authored copy stays visible in guided mode.
 Scenes open directly after loading, with no intro or Start/Free Explore action.
+If the first authored stop has no copy or media, show the saved tour description
+there so removing the old start screen does not discard its introduction.
 Tourless captures open free exploration; authored tours start guided. While assets load,
 show a dark graph-paper sheet over the space's blurred thumbnail, with fine drafting
 lines, a muted gray wireframe, the scene title, and real loading progress. The loader

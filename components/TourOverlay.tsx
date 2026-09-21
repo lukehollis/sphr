@@ -7,6 +7,7 @@ import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
 type Props = {
   point: TourPoint;
   ui?: TourUiText;
+  description?: string;
   state: RuntimeState;
   isLastPoint: boolean;
   onPrevious: () => void;
@@ -25,19 +26,23 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
     : image ? <a href={image} target="_blank" rel="noopener noreferrer"><img className="tour-media" src={image} alt={file.title ?? ''} /></a> : null;
 }
 
-export default function TourOverlay({ point, ui, state, isLastPoint, onPrevious, onNext }: Props) {
+export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext }: Props) {
   const position = point.textPosition ?? "left";
   const primaryFile = point.files?.[0];
   const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps(?:\/embed\/|\?)/.test(point.mapUrl) ? point.mapUrl : '';
+  // Older tours kept their opening description in a separate start screen.
+  // Preserve that copy at an otherwise empty first stop when entering directly.
+  const text = point.text || (!point.secondaryText && !primaryFile && !mapUrl
+    && state.activeSpaceIndex === 0 && state.activePointIndex === 0 ? description : undefined);
 
   return (
     <section className={`tour-overlay text-${position}`} aria-live="polite">
-      {state.guided && Boolean(point.text || point.secondaryText || primaryFile || mapUrl) && (
+      {state.guided && Boolean(text || point.secondaryText || primaryFile || mapUrl) && (
         <div className="tour-copy">
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
             <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}
-          {point.text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: point.text }} />}
+          {text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: text }} />}
           {point.secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: point.secondaryText }} />}
         </div>
       )}

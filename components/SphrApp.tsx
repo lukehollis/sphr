@@ -131,6 +131,7 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
           />
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}
+            description={bootstrap?.tour?.description}
             ui={bootstrap?.ui}
             state={runtimeState}
             isLastPoint={isLastPoint}
