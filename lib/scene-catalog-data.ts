@@ -26,6 +26,9 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
       throw new Error(`Invalid scene ${type} URL: ${value}`);
     }
     ids.add(entry.sceneId);
+    if (entry.hasGuidedTour !== undefined && typeof entry.hasGuidedTour !== 'boolean') {
+      throw new Error('Invalid guided tour availability.');
+    }
     if (entry.legacy && (!['space', 'tour'].includes(entry.legacy.kind) || !/^[1-9][0-9]*$/.test(entry.legacy.id))) {
       throw new Error('Invalid legacy scene identity.');
     }
@@ -39,7 +42,8 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
       slug: entry.slug, title: entry.title, bootstrapUrl: asset(entry.bootstrapUrl, "config"),
       thumbnail: asset(entry.thumbnail, "thumbnail"), nodeCount: Number(entry.nodeCount) || 0,
       createdAt: entry.createdAt || "", ...(entry.legacy ? { legacy: entry.legacy } : {}),
-      ...(entry.sourceType ? { sourceType: entry.sourceType } : {})
+      ...(entry.sourceType ? { sourceType: entry.sourceType } : {}),
+      ...(entry.hasGuidedTour !== undefined ? { hasGuidedTour: entry.hasGuidedTour } : {})
     };
   });
 }

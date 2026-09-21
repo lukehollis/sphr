@@ -83,6 +83,7 @@ export type MediaFile = {
 };
 
 export type TourPoint = {
+  mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
   id?: string;

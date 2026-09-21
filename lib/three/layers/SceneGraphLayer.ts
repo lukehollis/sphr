@@ -83,10 +83,17 @@ export class SceneGraphLayer {
     return this.lookup.get(id) ?? null;
   }
 
-  getBounds() {
+  getBounds(ids?: string[]) {
     this.root.updateMatrixWorld(true);
     const box = new THREE.Box3();
-    for (const object of this.raycastObjects) box.expandByObject(object);
+    if (ids) {
+      for (const id of ids) {
+        const record = this.records.get(id);
+        if (record) box.expandByObject(record.object);
+      }
+    } else {
+      for (const object of this.raycastObjects) box.expandByObject(object);
+    }
     return box;
   }
 
