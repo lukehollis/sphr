@@ -90,6 +90,28 @@ Visibility controls access to the website viewer. Assets already hosted in a pub
 bucket remain directly accessible; a private viewer setting does not make those
 files private. Restrict asset delivery separately if your installation requires it.
 
+### Editing spaces
+
+Sign in at `/admin`, choose **Edit space**, and navigate in the live viewer. Use
+**Use current view** to select the opening panorama, direction and zoom together
+with a clean 960 × 640 thumbnail. Review the thumbnail, then **Save changes**.
+The zoom buttons also work on mobile. You can edit the title independently or
+restore the imported start view and thumbnail. The permanent ID remains stable;
+old title URLs redirect to the current title.
+
+Edits and thumbnail bytes are saved atomically in `SPHR_STATE_DIR/admin.sqlite`,
+separate from the immutable capture packages. Back up this database along with
+your account and visibility data. Catalog updates, reimports and releases retain
+edits. If a reimport removes a selected scan ID, the viewer falls back to the new
+package's default start. Concurrent saves from an older editor are rejected.
+Thumbnail delivery follows the scene's viewer visibility.
+
+For an authored native tour, this changes the first stop's camera while retaining
+its story, audio and subsequent stops. The editor stays in the opening space.
+Embedded Matterport viewers and tours that open on standalone model stops retain
+their existing camera configuration; their titles remain editable. Import the
+Matterport capture to enable native start-view and thumbnail editing.
+
 ## Debian VM deployment
 
 `scripts/deploy/vm-release.sh` builds isolated releases for a Debian x86_64 host,
