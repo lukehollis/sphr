@@ -11,6 +11,12 @@ const entry={sceneId:'aaaaaaaaaaaa',titleSlug:'example-space',scenePath:'/s/aaaa
   bootstrapUrl:'/datasets/matterport/example-space/bootstrap.json',thumbnail:'/datasets/matterport/example-space/preview.jpg'};
 const parse=(entries, root='')=>parseSceneCatalog(JSON.stringify({spaces:entries}), root);
 
+test('catalog preserves explicit guided availability independently of capture source', () => {
+  assert.equal(parse([{...entry, hasGuidedTour:true}])[0].hasGuidedTour, true);
+  assert.equal(parse([{...entry, hasGuidedTour:false}])[0].hasGuidedTour, false);
+  assert.throws(()=>parse([{...entry,hasGuidedTour:'yes'}]), /guided tour availability/);
+});
+
 test('local and remote catalogs preserve stable scene links and resolve their asset roots',()=>{
   assert.equal(parse([entry])[0].bootstrapUrl,entry.bootstrapUrl);
   assert.equal(parse([entry],base)[0].bootstrapUrl,base+entry.bootstrapUrl);

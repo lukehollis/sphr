@@ -799,7 +799,7 @@ export class SphrRuntime {
 
   private poseForPoint(point: TourPoint | undefined, mode: "FPV" | "ORBIT"): CameraPose {
     if (point?.targetType === 'MODEL') {
-      const bounds = this.sceneGraph?.getBounds();
+      const bounds = this.sceneGraph?.getBounds(point.models);
       const target = bounds && !bounds.isEmpty() ? bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
       const position = vectorFromLike(point.position, target.clone().add(new THREE.Vector3(4, 3, 4)));
       if (bounds && !bounds.isEmpty()) {
@@ -813,6 +813,15 @@ export class SphrRuntime {
         if (direction.length() < distance) position.copy(target).addScaledVector(direction.normalize(), distance);
       }
       return { position, target, fov: point.fov === undefined ? THREE.MathUtils.clamp(70 - (point.zoom ?? 0), 35, 85) : THREE.MathUtils.clamp(point.fov, 30, 110) };
+    }
+    if (mode === 'ORBIT' && point?.viewMode === 'ORBIT' && point.rotation) {
+      const bounds = this.sceneGraph?.getBounds(point.models);
+      if (bounds && !bounds.isEmpty()) {
+        const pose = this.overviewPose(bounds);
+        const distance = pose.position.distanceTo(pose.target);
+        pose.position.copy(pose.target).addScaledVector(cameraDirection(point.rotation), -distance);
+        return pose;
+      }
     }
     const node = this.resolveNode(point?.nodeUUID);
     if (node) return this.poseForNode(node, mode, point);

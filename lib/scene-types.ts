@@ -10,4 +10,5 @@ export type SceneListing = {
   createdAt: string;
   legacy?: { kind: "space" | "tour"; id: string };
   sourceType?: string;
+  hasGuidedTour?: boolean;
 };

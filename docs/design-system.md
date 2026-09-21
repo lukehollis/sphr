@@ -36,8 +36,9 @@ Without access control there is no footer. Do not hard-code a deployment's copyr
 account services or external signup links in the open-source UI. Full-screen viewers
 retain their existing controls without a collection footer. Keep the
 search/sort controls and photographic cards. Each card contains only a linked
-thumbnail and title, without badges, location counts, mode labels, IDs, or copy-link
-controls. Preserve searching by title/ID, sorting, canonical URLs, keyboard focus,
+thumbnail and title; authored stories also carry a small “Guided tour” label. An
+All / Guided tours / Spaces filter separates stories from free exploration. Avoid
+location counts, IDs, or copy-link controls. Preserve searching by title/ID, sorting, canonical URLs, keyboard focus,
 and accessible control names. Share/copy-link and fullscreen buttons are absent
 from the viewer; canonical scene URLs remain available in the address bar.
 

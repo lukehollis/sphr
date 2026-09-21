@@ -30,6 +30,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .library-shell-with-footer > .library-layout { flex: 1; align-content: start; }
 .library-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-4); }
 .library-toolbar { align-self: start; }
+.library-kind { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }
+.library-kind button { min-height: 44px; padding: 8px 12px; border: 0; background: var(--paper-tint); color: var(--text-muted); font: inherit; font-size: var(--size-caption); cursor: pointer; }
+.library-kind button[aria-pressed="true"] { background: var(--text-heading); color: var(--paper); }
+.space-card-kind { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: var(--size-label); }
+.tour-map { width: 100%; height: 220px; border: 0; margin-bottom: 16px; }
 .library-search-label, .library-sort { display: block; font-size: var(--size-caption); margin-bottom: var(--space-1); }
 .library-search { display: flex; border: var(--rule-section); background: var(--paper-tint); }
 .library-search input { min-width: 0; width: 100%; padding: 12px var(--space-1); border: 0; background: transparent; color: var(--text-heading); font-size: var(--size-caption); }
@@ -159,10 +164,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .space-library { padding: var(--space-3) var(--space-2); }
   .library-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
   .library-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-1) var(--space-2); }
-  .library-search-label { grid-column: 1; grid-row: 1; margin: 0; }
-  .library-sort { grid-column: 2; grid-row: 1; margin: 0; }
-  .library-search { grid-column: 1; grid-row: 2; }
-  .library-sort-select { grid-column: 2; grid-row: 2; }
+  .library-kind { grid-column: 1 / -1; grid-row: 1; margin-bottom: var(--space-1); }
+  .library-search-label { grid-column: 1; grid-row: 2; margin: 0; }
+  .library-sort { grid-column: 2; grid-row: 2; margin: 0; }
+  .library-search { grid-column: 1; grid-row: 3; }
+  .library-sort-select { grid-column: 2; grid-row: 3; }
   .space-grid { gap: var(--space-4); }
   .viewer-header { top: calc(16px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); flex-direction: column; align-items: stretch; gap: var(--space-1); }
   .scene-heading { font-size: var(--size-label); }
