@@ -45,7 +45,7 @@ export default function SceneLibrary({ scenes, showAdminLink = false }: { scenes
         </div>
       </main>
       {showAdminLink && <footer className="library-footer">
-        <nav aria-label="Account"><a href="/admin">Login</a></nav>
+        <nav aria-label="Account"><a href="/admin">Manage spaces</a></nav>
       </footer>}
     </div>
   </div>;

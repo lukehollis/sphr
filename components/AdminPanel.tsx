@@ -30,7 +30,6 @@ export function AdminLogin({ returnPath = "/admin" }: { returnPath?: string }) {
     <label htmlFor="password">Password</label><input id="password" name="password" type="password" autoComplete="current-password" required maxLength={256} />
     {error && <p role="alert">{error}</p>}
     <button disabled={busy} type="submit">{busy ? "Signing in…" : "Sign in"}</button>
-    <a href="/">Back to collection</a>
   </form></main>;
 }
 
@@ -68,7 +67,7 @@ export default function AdminPanel({ scenes: initial }: { scenes: ManagedScene[]
   }
   const filtered = scenes.filter(scene => `${scene.title} ${scene.sceneId}`.toLowerCase().includes(query.toLowerCase().trim()));
   return <main className="space-library admin-library"><div className="library-shell">
-    <header className="admin-header"><h1>Manage spaces</h1><nav aria-label="Admin"><a href="/">Public collection</a><button onClick={logout}>Sign out</button></nav></header>
+    <header className="admin-header"><h1>Manage spaces</h1><nav aria-label="Admin"><a href="/">Collection</a><button onClick={logout}>Sign out</button></nav></header>
     <div className="library-layout">
       <aside className="library-toolbar"><label className="library-search-label" htmlFor="admin-search">Search spaces</label><div className="library-search"><input id="admin-search" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Title or scene ID" /></div>
         <p className="admin-help">Private spaces are visible only when you’re signed in. Public spaces can be opened by anyone with the link.</p>

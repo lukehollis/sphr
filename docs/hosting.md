@@ -75,9 +75,13 @@ SPHR_ACCESS_CONTROL=1
 SPHR_STATE_DIR=/var/lib/sphr
 ```
 
-New scene IDs are private when access control is enabled. `/admin` supports preview,
-Public/Private settings, password changes and logout. The collection footer then
-shows a local Login link; there is no external account service or default signup.
+New scene IDs are private when access control is enabled. The collection at `/`
+requires an admin session and redirects anonymous visitors to sign in before
+loading any scene listings. Signing in returns visitors to the collection.
+Public scenes remain accessible directly through their canonical links; private
+scenes still require an admin session. `/admin` supports preview, Public/Private
+settings, password changes and logout. The collection footer links to Manage spaces;
+there is no external account service or default signup.
 Without access control, the collection has no footer and lists all catalog entries.
 
 Initialize the single admin account with `scripts/deploy/admin-init.mjs`, Node 24,

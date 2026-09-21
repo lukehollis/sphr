@@ -18,5 +18,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     if (!(await isAdmin())) redirect("/admin/login");
   }
   if (params.config || params.demo !== undefined) return <SphrApp />;
+  // The collection is an admin index; public scenes remain reachable by their URLs.
+  if (accessControlled() && !(await isAdmin())) redirect("/admin/login?next=%2F");
   return <SceneLibrary scenes={await readSceneCatalog()} showAdminLink={accessControlled()} />;
 }
