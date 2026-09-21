@@ -113,6 +113,22 @@ host, run `nginx -t`, then reload Nginx. The optional `sphr-reload-nginx.sh` Cer
 hook validates and reloads Nginx after renewal. Domain redirect rules belong to the
 deployment's DNS/proxy configuration, not the viewer code.
 
+## Optional Google Analytics
+
+To send collection and viewer traffic to your own GA4 property, add its web-stream
+measurement ID to the build environment and rebuild:
+
+```dotenv
+NEXT_PUBLIC_SPHR_GOOGLE_ANALYTICS_ID=G-YOURMEASUREMENTID
+```
+
+Analytics is disabled when this setting is absent or invalid. The tag loads after
+the interface becomes interactive and is omitted on admin and login pages. Keep
+the real property ID in the deployment environment, outside Git. The standard
+Google tag sends the initial page view; enable history-based page views in the
+GA4 stream's Enhanced Measurement settings for client-side navigation. Do not add
+a second manual page-view handler alongside automatic history tracking.
+
 ## Optional IIIF and legacy media
 
 For older image-server scenes, configure public build settings:
