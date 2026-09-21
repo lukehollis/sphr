@@ -44,7 +44,7 @@ pnpm-debug.log*
 # large local/migrated assets
 /public/datasets/
 /public/configs/
-/public/_qa-*.json
+/public/_qa-*
 /public/demo/*.spark.splat
 
 # generated verification artifacts
