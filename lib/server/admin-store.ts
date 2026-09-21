@@ -3,6 +3,7 @@ import { mkdirSync, chmodSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
+import type { SceneEdits, StartView } from "../scene-edits";
 
 const scrypt = promisify(scryptCallback);
 const lifetime = 8 * 60 * 60 * 1000;
@@ -24,8 +25,47 @@ function db() {
     CREATE TABLE IF NOT EXISTS visibility (scene TEXT PRIMARY KEY, public INTEGER NOT NULL CHECK(public IN (0,1)));
     CREATE TABLE IF NOT EXISTS login_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, resets INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, scene TEXT NOT NULL, public INTEGER NOT NULL, changed TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS scene_edits (scene TEXT PRIMARY KEY, title TEXT, start_view TEXT, thumbnail BLOB, thumbnail_version TEXT, revision INTEGER NOT NULL, changed TEXT NOT NULL);
   `);
   return database;
+}
+
+type EditRow = { scene: string; title: string | null; start_view: string | null; thumbnail_version: string | null; revision: number };
+function editsFromRow(row: EditRow): SceneEdits {
+  return { title: row.title, startView: row.start_view ? JSON.parse(row.start_view) : null,
+    thumbnailVersion: row.thumbnail_version, revision: row.revision };
+}
+export function readSceneEdits(): Map<string, SceneEdits> {
+  if (!process.env.SPHR_STATE_DIR) return new Map();
+  const rows = db().prepare('SELECT scene, title, start_view, thumbnail_version, revision FROM scene_edits').all() as EditRow[];
+  return new Map(rows.map(row => [row.scene, editsFromRow(row)]));
+}
+
+export class EditConflict extends Error {}
+export function saveSceneEdits(scene: string, revision: number, title: string | null,
+  capture?: { view: StartView; thumbnail: Buffer } | null) {
+  if (!/^[a-f0-9]{12}$/.test(scene) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Invalid edit.');
+  const connection = db();
+  connection.exec('BEGIN IMMEDIATE');
+  try {
+    const row = connection.prepare('SELECT revision FROM scene_edits WHERE scene=?').get(scene) as { revision: number } | undefined;
+    if ((row?.revision ?? 0) !== revision) throw new EditConflict('This space was edited elsewhere. Reload before saving.');
+    connection.prepare(`INSERT INTO scene_edits(scene, title, revision, changed) VALUES (?, ?, ?, ?)
+      ON CONFLICT(scene) DO UPDATE SET title=excluded.title, revision=excluded.revision, changed=excluded.changed`)
+      .run(scene, title, revision + 1, new Date().toISOString());
+    if (capture !== undefined) {
+      connection.prepare('UPDATE scene_edits SET start_view=?, thumbnail=?, thumbnail_version=? WHERE scene=?').run(
+        capture ? JSON.stringify(capture.view) : null, capture?.thumbnail ?? null,
+        capture ? createHash('sha256').update(capture.thumbnail).digest('hex').slice(0, 16) : null, scene);
+    }
+    connection.exec('COMMIT');
+  } catch (error) { connection.exec('ROLLBACK'); throw error; }
+  return readSceneEdits().get(scene)!;
+}
+
+export function readSceneThumbnail(scene: string): Uint8Array | undefined {
+  if (!process.env.SPHR_STATE_DIR) return undefined;
+  return (db().prepare('SELECT thumbnail FROM scene_edits WHERE scene=?').get(scene) as { thumbnail: Uint8Array | null } | undefined)?.thumbnail ?? undefined;
 }
 
 export async function hashPassword(password: string) {

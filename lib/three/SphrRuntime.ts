@@ -26,6 +26,7 @@ import { selectNavigationTarget } from "@/lib/three/navigation";
 import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
+import type { StartView } from '@/lib/scene-edits';
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -116,7 +117,7 @@ export class SphrRuntime {
     this.attachEvents();
 
     const nodes = this.getNodes();
-    const exploreEntry = !this.tour.hasGuidedTour ? this.resolveInitialNode() : null;
+    const exploreEntry = !this.tour.hasGuidedTour && !this.bootstrap.space.space_data.noPanos ? this.resolveInitialNode() : null;
     const initialLocation = (initialPointIndex === undefined ? null : { spaceIndex: 0, pointIndex: initialPointIndex })
       || (exploreEntry && this.findTourPointForNode(exploreEntry.uuid))
       || { spaceIndex: 0, pointIndex: 0 };
@@ -598,6 +599,47 @@ export class SphrRuntime {
   navigateNode(uuid: string) {
     const node = this.resolveNode(uuid);
     if (node) void this.navigateToNode(node);
+  }
+
+  adjustFieldOfView(delta: number) {
+    if (this.state.viewMode !== 'FPV' || this.isNavigating) return;
+    this.camera.fov = THREE.MathUtils.clamp(this.camera.fov + delta, 30, 110);
+    this.camera.updateProjectionMatrix();
+  }
+
+  captureStartView(): { view: StartView; thumbnail: string } {
+    if (!this.state.loading.ready || this.isNavigating || this.cameraTween || this.activePointerId !== null) {
+      throw new Error('Wait for the camera to stop moving, then capture again.');
+    }
+    if (this.state.viewMode !== 'FPV') throw new Error('Enter a panorama before setting the start view.');
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    const view: StartView = {
+      ...(!this.bootstrap.space.space_data.noPanos && this.currentNode ? { nodeId: this.currentNode.uuid } : {}),
+      position: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
+      rotation: { azimuth: THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)),
+        polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1))) },
+      fov: this.camera.fov
+    };
+    const output = document.createElement('canvas');
+    output.width = 960; output.height = 640;
+    const context = output.getContext('2d');
+    if (!context) throw new Error('Unable to create the thumbnail.');
+    const hidden = [this.nav?.group, this.scene.getObjectByName('annotations')].filter(Boolean) as THREE.Object3D[];
+    const visibility = hidden.map(object => object.visible);
+    try {
+      hidden.forEach(object => { object.visible = false; });
+      const camera = this.camera.clone();
+      camera.aspect = 960 / 640;
+      camera.updateProjectionMatrix();
+      // Read synchronously after rendering; no preserveDrawingBuffer cost during exploration.
+      this.renderer.render(this.scene, camera);
+      context.fillStyle = '#111'; context.fillRect(0, 0, 960, 640);
+      context.drawImage(this.canvas, 0, 0, 960, 640);
+      return { view, thumbnail: output.toDataURL('image/jpeg', .88) };
+    } finally {
+      hidden.forEach((object, index) => { object.visible = visibility[index]; });
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   private async navigateToNode(node: NodeData) {

@@ -82,6 +82,7 @@ export default function AdminPanel({ scenes: initial }: { scenes: ManagedScene[]
       <div className="library-exhibit"><div className="admin-feedback" aria-live="polite">{message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}</div>
         <section className="space-grid" aria-label="Managed spaces">{filtered.map(scene => <article className="space-card" key={scene.sceneId}>
           <a className="space-card-link" href={scene.scenePath} aria-label={`Open ${scene.title}`}><div className="scene-thumbnail"><img src={scene.thumbnail} alt="" loading="lazy" width={960} height={640} /></div><div className="space-card-copy"><h2>{scene.title}</h2></div></a>
+          <div className="admin-edit"><a href={`/admin/scenes/${scene.sceneId}`}>Edit space</a></div>
           <div className="admin-visibility"><label htmlFor={`visibility-${scene.sceneId}`}>Visibility</label><select id={`visibility-${scene.sceneId}`} aria-label={`Visibility for ${scene.title}`} value={scene.public ? "public" : "private"} disabled={Boolean(busy)} onChange={event => visibility(scene, event.target.value === "public")}><option value="private">Private</option><option value="public">Public</option></select></div>
         </article>)}</section>
         {!filtered.length && <p className="library-empty">No spaces found.</p>}

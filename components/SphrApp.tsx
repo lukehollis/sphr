@@ -7,6 +7,7 @@ import { ViewerSession } from "@/lib/viewer/ViewerSession";
 import HudControls from "@/components/HudControls";
 import LoadingScreen from "@/components/LoadingScreen";
 import TourOverlay from "@/components/TourOverlay";
+import { applySceneEdits, editorBootstrap, startViewEditingIssue, type SceneEdits } from '@/lib/scene-edits';
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -24,9 +25,12 @@ const initialRuntimeState: RuntimeState = {
   navigating: false
 };
 
-type Props = { configUrl?: string; preview?: { title: string; image: string } };
+type Props = { configUrl?: string; preview?: { title: string; image: string };
+  edits?: Pick<SceneEdits, 'title' | 'startView'>;
+  editor?: { onReady: (session: ViewerSession | null, issue: string | null) => void; onState: (state: RuntimeState) => void };
+};
 
-export default function SphrApp({ configUrl, preview }: Props) {
+export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -41,13 +45,16 @@ export default function SphrApp({ configUrl, preview }: Props) {
 
     async function boot() {
       try {
-        const data = await loadBootstrapData(configUrl);
+        const source = await loadBootstrapData(configUrl);
+        const edited = edits ? applySceneEdits(source, edits) : source;
+        const issue = editor ? startViewEditingIssue(edited) : null;
+        const data = editor ? editorBootstrap(edited) : edited;
         if (cancelled) return;
         setBootstrap(data);
 
         if (!viewportRef.current) return;
         const runtime = new ViewerSession(viewportRef.current, data, {
-          onState: setRuntimeState,
+          onState: state => { setRuntimeState(state); editor?.onState(state); },
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
           }
@@ -60,9 +67,11 @@ export default function SphrApp({ configUrl, preview }: Props) {
         if (cancelled) return;
         runtime.start(normalizeTour(data).hasGuidedTour);
         setStarted(true);
+        editor?.onReady(runtime, issue);
       } catch (error) {
         if (cancelled) return;
         console.error(error);
+        editor?.onReady(null, error instanceof Error ? error.message : 'Unable to load scene.');
         setRuntimeState((current) => ({
           ...current,
           loading: {
@@ -79,13 +88,14 @@ export default function SphrApp({ configUrl, preview }: Props) {
 
     return () => {
       cancelled = true;
+      editor?.onReady(null, null);
       if (process.env.NODE_ENV !== "production") {
         delete (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__;
       }
       runtimeRef.current?.dispose();
       runtimeRef.current = null;
     };
-  }, [configUrl]);
+  }, [configUrl, edits, editor]);
 
   const tour = useMemo(() => (bootstrap ? normalizeTour(bootstrap) : null), [bootstrap]);
   const activePoint = tour?.spaces[runtimeState.activeSpaceIndex]?.tourpoints[runtimeState.activePointIndex] ?? null;
@@ -110,7 +120,7 @@ export default function SphrApp({ configUrl, preview }: Props) {
       {started && activePoint && (
         <>
           <HudControls
-            title={tour?.hasGuidedTour ? tour.title : bootstrap?.space.title}
+            title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
             hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim()))}
