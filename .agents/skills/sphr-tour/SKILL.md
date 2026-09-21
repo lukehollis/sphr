@@ -63,6 +63,11 @@ Runtime behavior:
 - For an earlier Django collection, use [the recovery workflow](../../../docs/legacy-recovery.md).
   Preserve source identities and authored media in generated data, never runtime
   branches for individual spaces. Matterport links still depend on their hosted models.
+- For static legacy releases, use [compiled tour migration](../../../docs/compiled-tour-migration.md).
+  Extract literal story data without executing archived bundles, select the latest
+  complete release, bind original scan identities exactly, and preserve embedded
+  model selections, media and visibility schedules. Story bundles alone do not
+  contain the hosted panoramas. Mark authored catalog entries with `hasGuidedTour`.
 
 - Prefer data changes over hard-coded point IDs.
 - If a new `extra` is reusable, implement it in a named runtime method or layer.
