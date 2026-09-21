@@ -49,7 +49,7 @@ the same square dark surfaces, Helvetica, white action buttons and blue focus ou
 Viewer controls use compact 44px icon buttons. Show mute only when the normalized
 scene/tour audio configuration contains a nonempty audio URL. Do not expose a markers
 or debug button in the viewer. Put viewer settings (guide/free-explore toggle, optional
-mute and text) in the top header. Omit the settings row when none of those controls
+mute) in the top header. Omit the settings row when none of those controls
 are available. The guide control is a switch
 to the left of the visible label “Guide”, blue when on, with `role="switch"` and
 `aria-checked`; do not replace it with a lightbulb icon. On mobile, the title has its own
@@ -62,7 +62,8 @@ background and black text, with neutral hover/disabled states; never use the acc
 color as its fill. Keep both clear of the
 tour copy and device safe areas. The final Continue exploring action uses the same
 large bottom button. This hierarchy overrides the compact icon-only treatment for
-tour navigation. Desktop tour navigation can remain compact.
+tour navigation. Desktop Next also has a visible text label. Do not expose a text visibility toggle;
+authored copy stays visible in guided mode.
 Scenes open directly after loading, with no intro or Start/Free Explore action.
 Tourless captures open free exploration; authored tours start guided. While assets load,
 show a dark graph-paper sheet over the space's blurred thumbnail, with fine drafting
