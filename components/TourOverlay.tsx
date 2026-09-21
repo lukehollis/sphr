@@ -15,8 +15,9 @@ type Props = {
 
 function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) {
   if (file.url && /^https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/[\w-]+(?:\?.*)?$/.test(file.url)) {
-    return <iframe className="tour-map" src={file.url} title={file.title || 'Tour video'}
-      referrerPolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture" />;
+    return <div><iframe className="tour-map" src={file.url} title={file.title || 'Tour video'}
+      referrerPolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture" />
+      <a className="tour-media-link" href={file.url.replace('/embed/', '/watch?v=')} target="_blank" rel="noopener noreferrer">Watch video</a></div>;
   }
   const video = (file.mime_type ?? file.mimeType ?? '').includes('video') ? mediaVideoUrl(file) : '';
   const image = video ? '' : mediaImageUrl(file, '900,');
@@ -27,13 +28,14 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
 export default function TourOverlay({ point, ui, state, isLastPoint, onPrevious, onNext }: Props) {
   const position = point.textPosition ?? "left";
   const primaryFile = point.files?.[0];
-  const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps\/embed\//.test(point.mapUrl) ? point.mapUrl : '';
+  const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps(?:\/embed\/|\?)/.test(point.mapUrl) ? point.mapUrl : '';
 
   return (
     <section className={`tour-overlay text-${position}`} aria-live="polite">
       {state.guided && state.showText && Boolean(point.text || point.secondaryText || primaryFile || mapUrl) && (
         <div className="tour-copy">
-          {mapUrl && <iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-popups" />}
+          {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
+            <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}
           {point.text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: point.text }} />}
           {point.secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: point.secondaryText }} />}

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 import json
 import math
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 
 class TourHtml(HTMLParser):
@@ -52,6 +52,21 @@ def clean_html(value):
     parser = TourHtml()
     parser.feed(value or '')
     return ''.join(parser.parts)
+
+
+def portable_map(value):
+    """Retain the map location without an archived domain-restricted API key."""
+    parsed = urlsplit(value)
+    if parsed.scheme != 'https' or parsed.hostname not in ('google.com', 'www.google.com') or not parsed.path.startswith('/maps'):
+        raise ValueError('Unsupported embedded map provider')
+    query = parse_qs(parsed.query)
+    location = query.get('q', query.get('center', ['']))[0]
+    if not location:
+        raise ValueError('Embedded map is missing its location')
+    return 'https://www.google.com/maps?' + urlencode({
+        'q': location, 'z': query.get('zoom', query.get('z', ['12']))[0],
+        't': 'k' if query.get('maptype', [''])[0] == 'satellite' or query.get('t', [''])[0] == 'k' else 'm',
+        'output': 'embed'})
 
 
 def convert(source, native, binding):
@@ -124,8 +139,10 @@ def convert(source, native, binding):
         if original.get('transition') == 'INSTANT':
             point['transition'] = 'instant'
         if original.get('map'):
-            point['mapUrl'] = original['map']
+            point['mapUrl'] = portable_map(original['map'])
         point.update(deepcopy(binding.get('pointOverrides', {}).get(str(index), {})))
+        if point.get('nodeUUID') not in by_id or any(value not in graph_ids for value in point.get('models', [])) or any(value not in annotation_ids for value in point.get('annotations', [])):
+            raise ValueError('Stop override references an undefined scan, model or annotation')
         points.append(point)
         receipt.append({'stop': index + 1, 'sourceScan': sweep, 'node': aliases[sweep], 'mode': mode})
     bootstrap['tour'] = {'id': binding['tourId'], 'title': binding['title'], 'tour_data': {

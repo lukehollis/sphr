@@ -34,6 +34,7 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .library-kind button { min-height: 44px; padding: 8px 12px; border: 0; background: var(--paper-tint); color: var(--text-muted); font: inherit; font-size: var(--size-caption); cursor: pointer; }
 .library-kind button[aria-pressed="true"] { background: var(--text-heading); color: var(--paper); }
 .space-card-kind { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: var(--size-label); }
+.tour-media-link { display: block; margin-bottom: 16px; font-size: var(--size-caption); }
 .tour-map { width: 100%; height: 220px; border: 0; margin-bottom: 16px; }
 .library-search-label, .library-sort { display: block; font-size: var(--size-caption); margin-bottom: var(--space-1); }
 .library-search { display: flex; border: var(--rule-section); background: var(--paper-tint); }

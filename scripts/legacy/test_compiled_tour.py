@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from compiled_tour import clean_html, convert
+from compiled_tour import clean_html, convert, portable_map
 
 
 class CompiledTourTests(unittest.TestCase):
@@ -30,6 +30,19 @@ class CompiledTourTests(unittest.TestCase):
         self.assertEqual(points[1]['models'], ['surface', 'reconstruction'])
         self.assertEqual(points[0]['files'][0]['url'], 'https://assets.example/painting.jpg')
         self.assertEqual(len(receipt['stops']), 2)
+
+    def test_embedded_map_preserves_location_without_archived_credentials(self):
+        result = portable_map('https://www.google.com/maps/embed/v1/place?key=old-key&q=1.25,-2.5&zoom=7&maptype=satellite')
+        self.assertIn('q=1.25%2C-2.5', result)
+        self.assertIn('z=7&t=k&output=embed', result)
+        self.assertNotIn('key', result)
+        with self.assertRaisesRegex(ValueError, 'provider'):
+            portable_map('https://example.com/maps?q=1,2')
+
+    def test_overrides_cannot_bypass_identity_validation(self):
+        self.binding['pointOverrides'] = {'0': {'nodeUUID': 'missing'}}
+        with self.assertRaisesRegex(ValueError, 'undefined scan'):
+            convert(self.source, self.native, self.binding)
 
     def test_missing_scans_are_never_replaced_by_nearest_scan(self):
         self.source['points'][0]['sweep'] = 'unrelated-guid'
