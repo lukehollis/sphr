@@ -62,7 +62,7 @@ def write_matterport_index(matterport_dir):
         if manifest_path.parent.name.startswith("."):
             continue
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") not in {"sphr-matterport-e57-v1", "sphr-matterport-e57-v2"}:
+        if manifest.get("schema") not in {"sphr-matterport-e57-v1", "sphr-matterport-e57-v2", "sphr-matterport-web-v1"}:
             continue
         if not (manifest_path.parent / "bootstrap.json").is_file():
             continue
