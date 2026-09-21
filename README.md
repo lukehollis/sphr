@@ -1,5 +1,6 @@
 ![SPHR logo](https://github.com/user-attachments/assets/bcc6126e-4c6d-48ec-ac76-7018d6149043)
 
+[![Live version](https://img.shields.io/badge/Live_version-spacery.dev-e03c31)](https://spacery.dev/)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=111)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)
@@ -8,7 +9,9 @@
 
 # SPHR
 
-SPHR is a hackable web runtime for spatial tours, digital twins, and browser-native 3D scenes.
+SPHR is an open source 3D space viewer you can host yourself. It is built for lidar scans, 3D Gaussian Splatting (3DGS) captures, and 360 image or video tours, and it runs entirely in the browser. Clone it, point it at your own scans, and serve tours from your own domain.
+
+If you would rather not run servers, [Spacery](https://spacery.dev/) offers paid hosting built on this same viewer. The live version at [spacery.dev](https://spacery.dev/) is the quickest way to see SPHR in action.
 
 This branch is the Next.js + Three.js migration. It removes the old separate backend requirement and ships as a client-rendered viewer that can load a default demo, a remote JSON config, or embedded bootstrap data from a host page.
 
