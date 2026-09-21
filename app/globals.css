@@ -208,6 +208,41 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .admin-visibility select { border: 0; border-radius: 0; background: #282828; color: #f5f3ee; min-height: 44px; padding: 8px 12px; font: inherit; }
 .admin-library :focus-visible, .admin-login :focus-visible { outline: 2px solid #0098db; outline-offset: 3px; }
 .admin-library .library-search:focus-within { outline: 2px solid #0098db; }
+.admin-edit { padding: 0 24px 16px; }
+.admin-edit a { display: flex; align-items: center; justify-content: center; min-height: 44px; background: #282828; color: #f5f3ee; font-size: 14px; text-decoration: none; }
+.space-editor { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100dvh; background: #111; color: #f5f3ee; }
+.space-editor-view { position: relative; min-width: 0; min-height: 0; }
+.space-editor .sphr-root { position: absolute; }
+.space-editor-panel { display: flex; flex-direction: column; overflow: hidden; padding: 24px; border-left: 1px solid #383838; }
+.editor-fields { min-height: 0; overflow-y: auto; flex: 1; }
+.editor-actions { flex: none; display: grid; gap: 12px; padding-top: 12px; }
+.space-editor-panel nav { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.space-editor-panel a { color: inherit; display: inline-flex; align-items: center; min-height: 44px; }
+.space-editor-panel h1 { font-size: 24px; font-weight: 400; margin: 24px 0; }
+.space-editor-panel label { display: block; font-size: 14px; margin-bottom: 8px; }
+.space-editor-panel input { width: 100%; min-height: 44px; padding: 12px; border: 1px solid #555; border-radius: 0; background: #222; color: inherit; font: inherit; }
+.editor-help { margin: 20px 0 16px; color: #bbb; font-size: 14px; line-height: 1.5; }
+.space-editor button { border: 0; border-radius: 0; min-height: 44px; padding: 12px; font: inherit; cursor: pointer; }
+.space-editor button:disabled { opacity: .45; cursor: default; }
+.editor-capture { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; background: #303030; color: #f5f3ee; }
+.editor-preview { margin: 20px 0; }
+.editor-preview img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; }
+.editor-preview figcaption { margin-top: 8px; font-size: 12px; color: #bbb; }
+.editor-feedback { font-size: 14px; line-height: 1.5; }
+.editor-feedback [role=alert] { border-left: 3px solid #0098db; padding-left: 12px; }
+.editor-save { width: 100%; background: #f5f3ee; color: #111; }
+.editor-reset { width: 100%; margin-top: 12px; background: transparent; color: #bbb; font-size: 12px !important; }
+.editor-zoom { position: absolute; z-index: 25; bottom: 24px; right: 24px; display: flex; gap: 2px; }
+.editor-zoom button { display: grid; place-items: center; width: 44px; background: #222; color: #f5f3ee; }
+.space-editor :focus-visible { outline: 2px solid #0098db; outline-offset: 3px; }
+@media (max-width: 700px) {
+  .space-editor { grid-template-columns: 1fr; grid-template-rows: minmax(240px, 1fr) auto; }
+  .space-editor-panel { border-left: 0; border-top: 1px solid #383838; padding: 12px 20px max(16px, env(safe-area-inset-bottom)); height: 48dvh; }
+  .space-editor-panel h1 { font-size: 20px; margin: 12px 0; }
+  .editor-preview { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+  .editor-preview img { width: 120px; }
+  .editor-zoom { right: 16px; bottom: 16px; }
+}
 @media (max-width: 740px) {
   .admin-library .library-toolbar { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
   .admin-header { flex-direction: column; align-items: flex-start; gap: 16px; }

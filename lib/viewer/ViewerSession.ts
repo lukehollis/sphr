@@ -193,6 +193,11 @@ export class ViewerSession {
   getState() { return this.state; }
   getDebugSnapshot() { return this.active?.three?.getDebugSnapshot() ?? this.state; }
   navigateNode(id: string) { this.active?.three?.navigateNode(id); }
+  adjustFieldOfView(delta: number) { this.active?.three?.adjustFieldOfView(delta); }
+  captureStartView() {
+    if (this.switching || this.state.navigating || !this.active?.three) throw new Error('Wait for the native viewer to load.');
+    return this.active.three.captureStartView();
+  }
 
   dispose() {
     this.disposed = true;

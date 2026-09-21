@@ -12,7 +12,7 @@ export function sameOrigin(request: Request) {
   return request.headers.get("origin") === new URL(expected).origin;
 }
 
-export async function readAdminBody(request: Request) {
+export async function readAdminBody(request: Request, maxBytes = 4096) {
   if (!sameOrigin(request)) throw new Error("Invalid origin");
   if (!request.headers.get("content-type")?.startsWith("application/json")) throw new Error("Invalid content type");
   const reader = request.body?.getReader();
@@ -23,7 +23,7 @@ export async function readAdminBody(request: Request) {
     const { done, value } = await reader.read();
     if (done) break;
     length += value.length;
-    if (length > 4096) { await reader.cancel(); throw new Error("Body too large"); }
+    if (length > maxBytes) { await reader.cancel(); throw new Error("Body too large"); }
     chunks.push(value);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));

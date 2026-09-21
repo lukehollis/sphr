@@ -3,11 +3,12 @@ import path from "node:path";
 import { cache } from "react";
 import type { SceneListing } from "@/lib/scene-types";
 import { parseSceneCatalog } from "./scene-catalog-data";
-import { isScenePublic } from "./server/admin-store";
+import { isScenePublic, readSceneEdits } from "./server/admin-store";
+import { editedListing } from "./scene-edits";
 import { isAdmin } from "./server/auth";
 
 // Request-scoped caching: imports become visible without rebuilding the application.
-export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
+export const readSourceScenes = cache(async (): Promise<SceneListing[]> => {
   const assetBase = process.env.SPHR_ASSET_BASE_URL || "";
   const catalogUrl = process.env.SPHR_CATALOG_URL;
   if (catalogUrl) {
@@ -26,6 +27,11 @@ export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
   const scenes = catalogs.flat();
   if (new Set(scenes.map(scene => scene.sceneId)).size !== scenes.length) throw new Error('Duplicate scene identity across catalogs.');
   return scenes;
+});
+
+export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
+  const edits = readSceneEdits();
+  return (await readSourceScenes()).map(scene => editedListing(scene, edits.get(scene.sceneId)));
 });
 
 export const readSceneCatalog = cache(async (): Promise<SceneListing[]> => {
