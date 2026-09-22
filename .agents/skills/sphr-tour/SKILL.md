@@ -71,6 +71,10 @@ Runtime behavior:
   contain the hosted panoramas. Mark authored catalog entries with `hasGuidedTour`.
 
 - Prefer data changes over hard-coded point IDs.
+- HARD GATE: Next itself is always at the bottom center of the viewport, including
+  transitions and the final Continue exploring action. Center the Next button,
+  not the combined Previous/Next group. Verify actual rendered bounds at desktop,
+  breakpoint, and 320px mobile widths before deploying.
 - If a new `extra` is reusable, implement it in a named runtime method or layer.
 - Mobile guided tours require a full-width 72px Next text button at the bottom and a
   small Previous button above it. Next is white with black text; accents are `#0098db` blue. Reserve space for both below the tour copy. Keep
