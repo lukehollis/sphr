@@ -8,10 +8,18 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from catalog import write_matterport_index
-from web_archive import fields, load_dam, local_asset, pano_quaternion, select_skybox
+from web_archive import fields, load_dam, local_asset, pano_quaternion, select_skybox, source_neighbors
 
 
 class WebArchiveTests(unittest.TestCase):
+    def test_unavailable_source_neighbors_require_explicit_recorded_omission(self):
+        location = {'neighbors': ['present', 'absent']}
+        with self.assertRaisesRegex(ValueError, 'unavailable locations'):
+            source_neighbors(location, {'present': 'scan'})
+        self.assertEqual(source_neighbors(location, {'present': 'scan'}, True), (['scan'], ['absent']))
+        self.assertEqual(source_neighbors({'neighbors': ['present']}, {'present': 'scan'}), (['scan'], []))
+        self.assertEqual(location['neighbors'], ['present', 'absent'])
+
     def test_truncated_wire_records_are_rejected(self):
         for data in [b"\x80", b"\x0a\x05x", b"\x0d\x01", b"\x00"]:
             with self.subTest(data=data), self.assertRaises(ValueError):

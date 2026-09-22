@@ -37,6 +37,14 @@ edges per node before swapping the staged package into place. Existing scene IDs
 A failed staging directory is retained for diagnosis; resolve or move it before retrying.
 The catalog supports mixed E57 and viewer archive packages.
 
+Some source navigation graphs reference locations absent from their published model.
+The importer stops by default. After reviewing the original prefetch, explicitly use
+`--allow-unavailable-neighbors` to omit only those impossible edges. Every available
+panorama and all existing edges between available scans remain unchanged. The missing
+target IDs are retained in the nodes, manifest and source-bound validation receipt.
+No substitute panorama or through-wall connection is created. Missing actual images,
+camera poses or mesh assets still fail conversion.
+
 ```sh
 npm run import:matterport-web -- \
   --validate public/datasets/matterport/my-space \

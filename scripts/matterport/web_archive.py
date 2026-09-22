@@ -247,6 +247,13 @@ def graph_components(nodes):
     return sorted(result, key=len, reverse=True)
 
 
+def source_neighbors(location, id_map, allow_unavailable=False):
+    missing = sorted({key for key in location['neighbors'] if key not in id_map})
+    if missing and not allow_unavailable:
+        raise ValueError('Source navigation references unavailable locations; inspect the source before using --allow-unavailable-neighbors')
+    return [id_map[key] for key in location['neighbors'] if key in id_map], missing
+
+
 def validate_package(folder, archive=None):
     manifest = json.loads((folder / "manifest.json").read_text())
     bootstrap = json.loads((folder / "bootstrap.json").read_text())
@@ -299,7 +306,8 @@ def validate_package(folder, archive=None):
             if (actual.inv() * expected).magnitude() > 1e-7:
                 raise ValueError("Source orientation mismatch")
             id_map = {v["id"]: v["pano"]["sweepUuid"] for v in source_by_uuid.values()}
-            if set(node["neighbors"]) != {id_map[n] for n in loc["neighbors"]}:
+            neighbors, missing = source_neighbors(loc, id_map, bool(manifest.get('allowUnavailableNeighbors')))
+            if set(node["neighbors"]) != set(neighbors) or node.get('unavailableNeighborIds', []) != missing:
                 raise ValueError("Source navigation graph changed")
             box, _ = select_skybox(loc["pano"])
             for face, url in enumerate(node["faces"]):
@@ -326,14 +334,18 @@ def validate_package(folder, archive=None):
                     or not np.allclose(geometry.visual.uv, chunk["uv"], atol=1e-7)):
                 raise ValueError("GLB geometry/UVs differ from the source DAM")
     components = graph_components(nodes)
+    unavailable = [{'sourceLocationId': node['sourceLocationId'], 'unavailableIds': node['unavailableNeighborIds']}
+                   for node in nodes if node.get('unavailableNeighborIds')]
+    if unavailable != manifest.get('unavailableNeighbors', []):
+        raise ValueError('Unavailable navigation receipt changed')
     return {"schema": "sphr-matterport-web-validation-v1", "valid": True,
             "sourceVerified": archive is not None, "nodes": len(nodes), "faces": len(nodes) * 6,
             "triangles": triangles, "graphComponents": components, "seams": seam_reports,
             "registration": "Source viewer camera transforms; no E57 point/photo calibration available",
-            "rawDepthAvailable": False}
+            "rawDepthAvailable": False, "unavailableNeighbors": unavailable}
 
 
-def convert(archive, slug, title, public_root):
+def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False):
     # Reuse the established exploration/transition envelope, with no runtime fork.
     from converter import build_bootstrap
 
@@ -346,6 +358,7 @@ def convert(archive, slug, title, public_root):
     id_map = {loc["id"]: loc["pano"]["sweepUuid"] for loc in locations}
     if len(id_map) != len(locations) or len(set(id_map.values())) != len(locations):
         raise ValueError("Duplicate source panorama identity")
+    navigation = {loc['id']: source_neighbors(loc, id_map, allow_unavailable_neighbors) for loc in locations}
     directory = public_root / "datasets/matterport"
     directory.mkdir(parents=True, exist_ok=True)
     final = directory / slug
@@ -377,7 +390,8 @@ def convert(archive, slug, title, public_root):
         nodes.append({"uuid": pano["sweepUuid"], "index": loc["index"], "label": pano.get("label", str(loc["index"])),
                       "position": position(pano["position"]), "floorPosition": position(loc["position"]),
                       "quaternion": pano_quaternion(pano["rotation"]),
-                      "neighbors": [id_map[n] for n in loc["neighbors"]], "faces": faces,
+                      "neighbors": navigation[loc['id']][0], "faces": faces,
+                      **({'unavailableNeighborIds': navigation[loc['id']][1]} if navigation[loc['id']][1] else {}),
                       "resolution": box["resolution"], "sourceDimensions": list(dimensions),
                       "sourceLocationId": loc["id"], "sourceFloorId": loc.get("floor", {}).get("id")})
     mesh_path = f"mesh/{slug}.glb"
@@ -419,6 +433,11 @@ def convert(archive, slug, title, public_root):
                                 "Panoramas retain the highest available viewer resolution"],
                 "assets": [{"path": str(p.relative_to(stage)), "bytes": p.stat().st_size, "sha256": digest(p)}
                            for p in sorted(stage.rglob("*")) if p.is_file()]}
+    if any(missing for _, missing in navigation.values()):
+        manifest['allowUnavailableNeighbors'] = True
+        manifest['unavailableNeighbors'] = [{'sourceLocationId': key, 'unavailableIds': missing}
+                                            for key, (_, missing) in navigation.items() if missing]
+        manifest['limitations'].append('Source edges to unavailable locations are recorded and excluded; no replacement edges are invented')
     old = json.loads((final / "manifest.json").read_text()) if (final / "manifest.json").exists() else None
     if old and (old.get("schema") != SCHEMA or old.get("modelId") != model["id"]):
         raise ValueError("Existing slug belongs to a different source")
@@ -442,10 +461,11 @@ if __name__ == "__main__":
     parser.add_argument("--title")
     parser.add_argument("--public-root", type=Path, default=Path(__file__).resolve().parents[2] / "public")
     parser.add_argument("--validate", type=Path, help="Validate an existing package; optionally bind --archive")
+    parser.add_argument("--allow-unavailable-neighbors", action="store_true", help="Record source edges whose target locations are absent; never invent replacement scans or connections")
     args = parser.parse_args()
     if args.validate:
         print(json.dumps(validate_package(args.validate.resolve(), args.archive.resolve() if args.archive else None), indent=2))
     else:
         if not args.archive or not args.slug:
             parser.error("Conversion requires --archive and --slug")
-        print(json.dumps(convert(args.archive.resolve(), args.slug, args.title, args.public_root.resolve()), indent=2))
+        print(json.dumps(convert(args.archive.resolve(), args.slug, args.title, args.public_root.resolve(), args.allow_unavailable_neighbors), indent=2))
