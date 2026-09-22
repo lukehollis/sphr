@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { ChevronLeft, ChevronRight, Footprints } from "lucide-react";
 import type { RuntimeState, TourPoint, TourUiText } from "@/lib/types";
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
+import { sanitizeTourHtml } from "@/lib/tour-html";
 
 type Props = {
   point: TourPoint;
@@ -28,6 +30,8 @@ export default function TourOverlay({ point, ui, state, isLastPoint, onPrevious,
   const position = point.textPosition ?? "left";
   const primaryFile = point.files?.[0];
   const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps\/embed\//.test(point.mapUrl) ? point.mapUrl : '';
+  const text = useMemo(() => sanitizeTourHtml(point.text), [point.text]);
+  const secondaryText = useMemo(() => sanitizeTourHtml(point.secondaryText), [point.secondaryText]);
 
   return (
     <section className={`tour-overlay text-${position}`} aria-live="polite">
@@ -35,8 +39,8 @@ export default function TourOverlay({ point, ui, state, isLastPoint, onPrevious,
         <div className="tour-copy">
           {mapUrl && <iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-popups" />}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}
-          {point.text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: point.text }} />}
-          {point.secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: point.secondaryText }} />}
+          {text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: text }} />}
+          {secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: secondaryText }} />}
         </div>
       )}
       {state.guided && (

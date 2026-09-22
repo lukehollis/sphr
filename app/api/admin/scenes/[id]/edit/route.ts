@@ -1,11 +1,13 @@
 import { readSourceScenes } from '@/lib/scene-catalog';
 import { editedListing, validateStartView } from '@/lib/scene-edits';
 import { EditConflict, saveSceneEdits } from '@/lib/server/admin-store';
-import { adminResponse, isAdmin, readAdminBody } from '@/lib/server/auth';
+import { adminResponse, readAdminBody } from '@/lib/server/auth';
+import { canManageScene } from '@/lib/server/accounts';
 import { decodeThumbnail, readSceneBootstrap } from '@/lib/server/scene-editor';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await isAdmin())) return adminResponse({ error: 'Sign in to continue.' }, 401);
+  const { id } = await params;
+  if (!(await canManageScene(id))) return adminResponse({ error: 'Sign in to continue.' }, 401);
   let body;
   try { body = await readAdminBody(request, 1024 * 1024); }
   catch { return adminResponse({ error: 'Invalid request or thumbnail too large.' }, 400); }
@@ -13,7 +15,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     || !body.title.trim() || body.title.length > 200 || /[\u0000-\u001f\u007f]/.test(body.title)) {
     return adminResponse({ error: 'Enter a title of 1–200 characters.' }, 400);
   }
-  const { id } = await params;
   const scene = (await readSourceScenes()).find(scene => scene.sceneId === id);
   if (!scene) return adminResponse({ error: 'Space not found.' }, 404);
   try {

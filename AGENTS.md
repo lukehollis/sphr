@@ -34,7 +34,10 @@ publish immutable assets before merging the catalog and preserve other scene ent
 When access control is enabled, new scene IDs default to Private. Preserve the
 configured state directory across deploys; it contains account and visibility data.
 Website visibility gates the viewer only. Do not change asset bucket permissions
-when changing a scene's website visibility.
+when changing a scene's website visibility. Optional customer accounts, Stripe billing,
+uploads and the agent processing queue are documented in [accounts](docs/accounts.md);
+customer uploads are untrusted input, and the agent that processes them never holds
+publishing or worker credentials.
 
 ## Current viewer contract
 

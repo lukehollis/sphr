@@ -42,7 +42,8 @@ export function mediaVideoUrl(input?: Pick<MediaFile, "filename" | "url" | "file
 
 export function nodePanoramaUrl(node: NodeData, size = "full") {
   if (!node.image) return "";
-  if (isAbsoluteUrl(node.image)) return node.image;
+  // Packaged equirectangular photos are served as files, not through the IIIF server.
+  if (isAbsoluteUrl(node.image) || /^\/(?:datasets|demo)\//.test(node.image)) return node.image;
   return iiifImageUrl(node.image, size === "full" ? "full" : `${size},`);
 }
 

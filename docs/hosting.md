@@ -80,8 +80,9 @@ requires an admin session and redirects anonymous visitors to sign in before
 loading any scene listings. Signing in returns visitors to the collection.
 Public scenes remain accessible directly through their canonical links; private
 scenes still require an admin session. `/admin` supports preview, Public/Private
-settings, password changes and logout. The collection footer links to Manage spaces;
-there is no external account service or default signup.
+settings, password changes and logout. The collection footer links to Manage spaces.
+There is no external account service, and signup is off by default; optional customer
+accounts, per-space billing and hosted processing are described in [accounts](accounts.md).
 Without access control, the collection has no footer and lists all catalog entries.
 
 Initialize the single admin account with `scripts/deploy/admin-init.mjs`, Node 24,

@@ -6,6 +6,9 @@ import { parseSceneCatalog } from "./scene-catalog-data";
 import { isScenePublic, readSceneEdits } from "./server/admin-store";
 import { editedListing } from "./scene-edits";
 import { isAdmin } from "./server/auth";
+import { accountsEnabled, sceneAccess } from "./server/accounts";
+import { readCustomerListings } from "./server/accounts-store";
+import { customerAssetBase } from "./server/worker";
 
 // Request-scoped caching: imports become visible without rebuilding the application.
 export const readSourceScenes = cache(async (): Promise<SceneListing[]> => {
@@ -14,7 +17,7 @@ export const readSourceScenes = cache(async (): Promise<SceneListing[]> => {
   if (catalogUrl) {
     const response = await fetch(catalogUrl, { cache: "no-store", signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error(`Scene catalog unavailable: HTTP ${response.status}`);
-    return parseSceneCatalog(await response.text(), assetBase);
+    return withCustomerScenes(parseSceneCatalog(await response.text(), assetBase));
   }
   const catalogs = await Promise.all(['matterport', 'legacy'].map(async (root) => {
     try {
@@ -26,8 +29,19 @@ export const readSourceScenes = cache(async (): Promise<SceneListing[]> => {
   }));
   const scenes = catalogs.flat();
   if (new Set(scenes.map(scene => scene.sceneId)).size !== scenes.length) throw new Error('Duplicate scene identity across catalogs.');
-  return scenes;
+  return withCustomerScenes(scenes);
 });
+
+/** Hosted customer spaces are listed from the application database, never the public catalog. */
+function withCustomerScenes(scenes: SceneListing[]) {
+  if (!accountsEnabled()) return scenes;
+  const ids = new Set(scenes.map(scene => scene.sceneId));
+  const customer = readCustomerListings().flatMap(listing => {
+    try { return parseSceneCatalog(JSON.stringify({ spaces: [listing] }), customerAssetBase()); }
+    catch (error) { console.error('Skipping an invalid customer listing:', error instanceof Error ? error.message : error); return []; }
+  }).filter(scene => !ids.has(scene.sceneId));
+  return [...scenes, ...customer];
+}
 
 export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
   const edits = readSceneEdits();
@@ -36,12 +50,13 @@ export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
 
 export const readSceneCatalog = cache(async (): Promise<SceneListing[]> => {
   const scenes = await readAllScenes();
-  const admin = await isAdmin();
-  return scenes.filter(scene => admin || isScenePublic(scene.sceneId));
+  if (await isAdmin()) return scenes;
+  const allowed = await Promise.all(scenes.map(async scene => isScenePublic(scene.sceneId) && await sceneAccess(scene.sceneId) === "allowed"));
+  return scenes.filter((_scene, index) => allowed[index]);
 });
 
 export async function findScene(id: string) {
   if (!/^[a-f0-9]{12}$/.test(id)) return undefined;
-  if (!isScenePublic(id) && !(await isAdmin())) return undefined;
+  if (await sceneAccess(id) !== "allowed") return undefined;
   return (await readAllScenes()).find(scene => scene.sceneId === id);
 }
