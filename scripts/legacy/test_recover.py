@@ -18,6 +18,9 @@ hosted_spec.loader.exec_module(hosted)
 validation_spec = importlib.util.spec_from_file_location('recovery_validation', Path(__file__).with_name('validate.py'))
 validation = importlib.util.module_from_spec(validation_spec)
 validation_spec.loader.exec_module(validation)
+publish_spec = importlib.util.spec_from_file_location('recovery_publish', Path(__file__).with_name('publish.py'))
+publisher = importlib.util.module_from_spec(publish_spec)
+publish_spec.loader.exec_module(publisher)
 
 
 def record(id=1):
@@ -37,6 +40,51 @@ def audit():
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_hosted_entries_cannot_validate_or_publish(self):
+        for space in [
+            {'type': 'matterport', 'space_data': {}},
+            {'type': 'spaces', 'src': 'https://my.matterport.com/show/?m=Example', 'space_data': {}},
+        ]:
+            for bootstrap in [
+                {'space': space},
+                {'space': {'type': 'spaces', 'space_data': {}}, 'orderedSpaces': [space]},
+            ]:
+                with self.assertRaisesRegex(ValueError, 'native capture'):
+                    validation.required_urls(bootstrap, {})
+                with self.assertRaisesRegex(ValueError, 'native capture'):
+                    r.assert_native_bootstrap(bootstrap)
+
+    def test_publisher_rejects_even_hash_validated_hosted_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); folder = root / 'space-1'; folder.mkdir()
+            entry = {'sceneId': '111111111111'}
+            (folder / 'bootstrap.json').write_text(json.dumps({'space': {'type': 'spaces'},
+                'orderedSpaces': [{'type': 'matterport', 'src': 'https://my.matterport.com/show/?m=Example'}]}))
+            (folder / 'preview.jpg').write_bytes(b'preview')
+            (folder / 'manifest.json').write_text(json.dumps(entry))
+            files = {name: publisher.common.digest(folder / name) for name in ('bootstrap.json', 'preview.jpg')}
+            (folder / 'validation.json').write_text(json.dumps({'passed': True, 'files': files}))
+            with self.assertRaisesRegex(ValueError, 'native capture'):
+                publisher.stage_scene(folder, entry, 'https://assets.example.com', root / 'stage')
+            self.assertFalse(list((root / 'stage').rglob('bootstrap.json')))
+
+    def test_cli_audits_hosted_sources_without_generating_embed_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); export = root / 'export.json'; inv = root / 'inventory.txt'; inv.write_text('')
+            source = {**record(), 'space_custom': '', 'space_type': 'matterport',
+                      'src': 'https://my.matterport.com/show/?m=Example', 'space_data': {}}
+            export.write_text(json.dumps({'spaces': [source], 'tours': []}))
+            argv = ['recover.py', '--export', str(export), '--inventory', str(inv), '--namespace', 'example',
+                    '--out', str(root / 'output'), '--origin', 'https://assets.example.com',
+                    '--iiif-origin', 'https://images.example.com']
+            with patch.object(sys, 'argv', argv), patch.object(r, 'prepare_preview') as preview:
+                with self.assertRaisesRegex(ValueError, 'Native captures are required'):
+                    r.main()
+                preview.assert_not_called()
+            self.assertFalse(list((root / 'output').rglob('bootstrap.json')))
+            report = json.loads((root / 'output/audit.json').read_text())
+            self.assertEqual(report['pendingNativeCaptures'][0]['id'], 1)
+
     def test_asset_cors_is_checked_for_the_selected_viewer(self):
         viewer = 'https://viewer.example.com'
         for asset, cors, expected in [
@@ -66,6 +114,34 @@ class RecoveryTests(unittest.TestCase):
 
     def recover(self, rec=None, inv=None, log=None):
         return r.recover_space(rec or record(), inv if inv is not None else inventory(), 'https://assets.example.com', 'https://images.example.com', log if log is not None else audit())
+
+    def test_cli_stops_before_assets_when_custom_behavior_is_unreviewed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); export = root / 'export.json'; inv = root / 'inventory.txt'; inv.write_text('')
+            export.write_text(json.dumps({'spaces': [{**record(), 'space_custom': 'customExperience'}], 'tours': []}))
+            argv = ['recover.py', '--export', str(export), '--inventory', str(inv), '--namespace', 'example',
+                    '--out', str(root / 'output'), '--origin', 'https://assets.example.com',
+                    '--iiif-origin', 'https://images.example.com']
+            with patch.object(sys, 'argv', argv), patch.object(r, 'recover_space') as recover:
+                with self.assertRaisesRegex(ValueError, 'Source custom handlers'):
+                    r.main()
+                recover.assert_not_called()
+            report = json.loads((root / 'output/audit.json').read_text())
+            self.assertFalse(report['customizationsComplete'])
+            self.assertEqual(report['customizations'][0]['handler'], 'customExperience')
+            export.write_text(json.dumps({'spaces': [record()], 'tours': []}))
+            with patch.object(sys, 'argv', argv):
+                with self.assertRaisesRegex(ValueError, 'export omits customization metadata'):
+                    r.main()
+
+    def test_source_custom_handler_is_not_silently_discarded(self):
+        rec = record(); rec['space_custom'] = 'authoredExperience'
+        space = self.recover(rec)
+        self.assertEqual(space['space_custom'], 'authoredExperience')
+        tour = {'id': 3, 'title': 'Example story', 'space_custom': 'customStory', 'space_ids': [1],
+                'tour_data': {'spaces': [{'id': 1, 'tourpoints': [{'nodeUUID': 'frame'}]}]}}
+        recovered = r.recover_tour(tour, {'1': rec}, {'1': space}, audit())
+        self.assertEqual(recovered['tour']['space_custom'], 'customStory')
 
     def test_cube_order_version_and_original_transforms(self):
         original = record()

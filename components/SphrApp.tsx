@@ -127,11 +127,11 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
             canToggleView={!viewerSpace?.space_data.noPanos || Boolean(viewerSpace.space_data.clickNavigation || viewerSpace.space_data.splats?.length)}
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}
-            onToggleText={() => runtimeRef.current?.toggleText()}
             onToggleGuide={() => runtimeRef.current?.start(!runtimeState.guided)}
           />
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}
+            description={bootstrap?.tour?.description}
             ui={bootstrap?.ui}
             state={runtimeState}
             isLastPoint={isLastPoint}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Footprints, Volume2, VolumeX, Captions, CaptionsOff } from "lucide-react";
+import { Box, Footprints, Volume2, VolumeX } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
 
 type Props = {
@@ -11,7 +11,6 @@ type Props = {
   canToggleView?: boolean;
   onToggleView: () => void;
   onToggleMute: () => void;
-  onToggleText: () => void;
   onToggleGuide: () => void;
 };
 
@@ -23,7 +22,6 @@ export default function HudControls({
   canToggleView = true,
   onToggleView,
   onToggleMute,
-  onToggleText,
   onToggleGuide
 }: Props) {
   return (
@@ -42,9 +40,6 @@ export default function HudControls({
           </button>}
           {hasAudio && <ControlButton label={state.muted ? "Unmute audio" : "Mute audio"} onClick={onToggleMute}>
             {state.muted ? <VolumeX size={22} aria-hidden="true" /> : <Volume2 size={22} aria-hidden="true" />}
-          </ControlButton>}
-          {hasGuidedTour && <ControlButton label={state.showText ? "Hide text" : "Show text"} onClick={onToggleText} active={state.showText}>
-            {state.showText ? <CaptionsOff size={22} aria-hidden="true" /> : <Captions size={22} aria-hidden="true" />}
           </ControlButton>}
         </div>}
       </header>

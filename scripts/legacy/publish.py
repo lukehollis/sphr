@@ -3,7 +3,7 @@
 
 References to existing images, meshes, audio and video remain on their asset host.
 Only validated runtime bootstraps and JPEG previews are uploaded. Source exports,
-SDK key files, inventories, manifests and audit reports stay local.
+Inventories, manifests and audit reports stay local.
 """
 import argparse
 import hashlib
@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+from recover import assert_native_bootstrap
 from urllib.parse import urlsplit
 
 spec = importlib.util.spec_from_file_location('scene_publish', Path(__file__).resolve().parents[1] / 'matterport/publish.py')
@@ -35,6 +36,7 @@ def stage_scene(folder, entry, base, stage):
     output = stage / relative
     output.mkdir(parents=True, exist_ok=True)
     bootstrap = json.loads((folder / 'bootstrap.json').read_text())
+    assert_native_bootstrap(bootstrap)
     bootstrap.setdefault('ui', {})['loadingImage'] = destination + '/preview.jpg'
     (output / 'bootstrap.json').write_text(json.dumps(bootstrap, ensure_ascii=False, indent=2) + '\n')
     shutil.copyfile(folder / 'preview.jpg', output / 'preview.jpg')
