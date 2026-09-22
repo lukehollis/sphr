@@ -91,7 +91,8 @@ export function startCheckout(user: User, origin: string): Promise<CheckoutStart
 
 export async function portalUrl(user: User, origin: string) {
   const customer = await ensureCustomer(user);
-  return (await stripe().billingPortal.sessions.create({ customer, return_url: `${origin}/account` })).url;
+  const configuration = env("SPHR_STRIPE_PORTAL_CONFIGURATION");
+  return (await stripe().billingPortal.sessions.create({ customer, return_url: `${origin}/account`, ...(configuration ? { configuration } : {}) })).url;
 }
 
 /** Applies a finished Checkout. Called by the webhook and when the customer returns, whichever is first. */
