@@ -17,8 +17,11 @@ if (!Number.isInteger(amount) || amount < 50) { console.error('--amount is in th
 const stripe = new Stripe(key);
 const mode = key.includes('_live_') ? 'live' : 'test';
 
+// "Website Hosting": required by Stripe Managed Payments and used by Stripe Tax.
+const taxCode = 'txcd_10701100';
 let product = (await stripe.products.list({ limit: 100, active: true })).data.find(item => item.metadata?.sphr === 'space-hosting');
-product ??= await stripe.products.create({ name: 'Space hosting', description: 'Hosting for one space.', metadata: { sphr: 'space-hosting' } });
+product ??= await stripe.products.create({ name: 'Space hosting', description: 'Hosting for one space.', tax_code: taxCode, metadata: { sphr: 'space-hosting' } });
+if ((typeof product.tax_code === 'string' ? product.tax_code : product.tax_code?.id) !== taxCode) product = await stripe.products.update(product.id, { tax_code: taxCode });
 
 const lookup = `sphr-space-${interval}-${currency}-${amount}`;
 let price = (await stripe.prices.list({ lookup_keys: [lookup], active: true, limit: 1 })).data[0];
