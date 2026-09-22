@@ -215,3 +215,101 @@ export function parseRotation(value) {
   if (parts.length !== 3 || parts.some(Number.isNaN)) fail('--rotation takes three angles in degrees, e.g. 180,0,0');
   return parts;
 }
+
+/**
+ * Points in the dense body of a capture. Gaussian splat trainers leave stray floaters and a
+ * sparse far background; framing and leveling use only well-supported regions.
+ */
+export function denseCore(positions, keepFraction = 0.6) {
+  const count = positions.length / 3;
+  const percentile = (offset, q) => {
+    const values = new Float32Array(count);
+    for (let index = 0; index < count; index++) values[index] = positions[index * 3 + offset];
+    values.sort();
+    return values[Math.min(count - 1, Math.floor(count * q))];
+  };
+  const low = [0, 1, 2].map(axis => percentile(axis, 0.01)), high = [0, 1, 2].map(axis => percentile(axis, 0.99));
+  const size = Math.max(...high.map((value, axis) => value - low[axis])) / 48 || 1;
+  const cells = 49, counts = new Uint32Array(cells ** 3), keys = new Int32Array(count).fill(-1);
+  for (let index = 0; index < count; index++) {
+    const cell = [0, 1, 2].map(axis => Math.floor((positions[index * 3 + axis] - low[axis]) / size));
+    if (cell.some(value => value < 0 || value >= cells)) continue;
+    keys[index] = cell[0] + cell[1] * cells + cell[2] * cells * cells;
+    counts[keys[index]]++;
+  }
+  const densities = Array.from(keys).filter(key => key >= 0).map(key => counts[key]).sort((a, b) => a - b);
+  const threshold = densities[Math.floor(densities.length * (1 - keepFraction))] ?? 0;
+  const kept = [];
+  for (let index = 0; index < count; index++) {
+    if (keys[index] >= 0 && counts[keys[index]] >= threshold) kept.push(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+  }
+  return kept.length >= 300 ? Float32Array.from(kept) : positions;
+}
+
+/** Euler angles (radians, XYZ order as the viewer applies them) of the shortest rotation taking `up` to +Y. */
+function eulerTurningToUp([ux, uy, uz]) {
+  let axis = [-uz, 0, ux]; // up × Y
+  let angle = Math.acos(Math.max(-1, Math.min(1, uy)));
+  const length = Math.hypot(...axis);
+  if (length < 1e-9) axis = [1, 0, 0]; else axis = axis.map(value => value / length);
+  const [x, y, z] = axis, c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
+  const m = [[t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+    [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+    [t * x * z - s * y, t * y * z + s * x, t * z * z + c]];
+  const ry = Math.asin(Math.max(-1, Math.min(1, m[0][2])));
+  return Math.abs(m[0][2]) < 0.9999999
+    ? [Math.atan2(-m[1][2], m[2][2]), ry, Math.atan2(-m[0][1], m[0][0])]
+    : [Math.atan2(m[2][1], m[1][1]), ry, 0];
+}
+
+/**
+ * Levels a capture: finds the dominant ground plane in its dense core and returns the
+ * rotation that makes it horizontal. Up is the side the scene extends into (trees, walls,
+ * furniture); the other side of a ground holds only a thin layer of noise. Returns null
+ * when no clear ground exists (a single object, for example).
+ */
+export function levelRotation(positions) {
+  const core = denseCore(positions);
+  const count = core.length / 3;
+  if (count < 1000) return null;
+  let seed = 7;
+  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const step = Math.max(1, Math.floor(count / 40000));
+  let extent = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    let low = Infinity, high = -Infinity;
+    for (let index = axis; index < core.length; index += 3 * step) { low = Math.min(low, core[index]); high = Math.max(high, core[index]); }
+    extent = Math.max(extent, high - low);
+  }
+  const tolerance = extent * 0.01;
+  let best = { inliers: 0, normal: null, origin: null };
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const [a, b, c] = [0, 1, 2].map(() => Math.floor(random() * count) * 3);
+    const u = [core[b] - core[a], core[b + 1] - core[a + 1], core[b + 2] - core[a + 2]];
+    const v = [core[c] - core[a], core[c + 1] - core[a + 1], core[c + 2] - core[a + 2]];
+    let normal = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const length = Math.hypot(...normal);
+    if (length < 1e-9) continue;
+    normal = normal.map(value => value / length);
+    let inliers = 0;
+    for (let index = 0; index < core.length; index += 3 * step) {
+      const distance = (core[index] - core[a]) * normal[0] + (core[index + 1] - core[a + 1]) * normal[1] + (core[index + 2] - core[a + 2]) * normal[2];
+      if (Math.abs(distance) < tolerance) inliers++;
+    }
+    if (inliers > best.inliers) best = { inliers, normal, origin: [core[a], core[a + 1], core[a + 2]] };
+  }
+  const sampled = Math.ceil(count / step);
+  if (!best.normal || best.inliers / sampled < 0.12) return null;
+  // Compare how far the scene reaches on each side of the plane.
+  const above = [], below = [];
+  const all = positions.length / 3, stride = Math.max(1, Math.floor(all / 100000));
+  for (let index = 0; index < positions.length; index += 3 * stride) {
+    const distance = (positions[index] - best.origin[0]) * best.normal[0] + (positions[index + 1] - best.origin[1]) * best.normal[1]
+      + (positions[index + 2] - best.origin[2]) * best.normal[2];
+    if (distance > tolerance) above.push(distance); else if (distance < -tolerance) below.push(-distance);
+  }
+  const p90 = values => values.length ? values.sort((x, y) => x - y)[Math.floor(values.length * 0.9)] : 0;
+  const up = p90(above) >= p90(below) ? best.normal : best.normal.map(value => -value);
+  if (up[1] > Math.cos(2 * Math.PI / 180)) return { rotation: [0, 0, 0], up, ground: best.inliers / sampled };
+  return { rotation: eulerTurningToUp(up), up, ground: best.inliers / sampled };
+}

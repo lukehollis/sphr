@@ -1,20 +1,24 @@
 // Packages a splat file (from a trainer, or converted from a point cloud) as an SPHR space.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { bounds, freshFolder, orbitCamera, pointPreview, rotatePositions, startPoint, titlePreview, writePackage } from './common.mjs';
+import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, titlePreview, writePackage } from './common.mjs';
 import { sampleSplats } from './splat-reader.mjs';
 
-export async function packageSplat(input, id, { rotation = [0, 0, 0], interior = false, elevation, distance, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
+export async function packageSplat(input, id, { rotation, level = false, interior = false, elevation, distance, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
   const extension = path.extname(input).slice(1).toLowerCase();
   freshFolder(id.folder);
   mkdirSync(path.join(id.folder, 'splat'));
   const file = `splat/scene.${extension}`;
   copyFileSync(input, path.join(id.folder, file));
   const sample = sampleSplats(input);
-  let camera, box = null;
+  let camera, box = null, leveled = null;
+  // An explicit rotation wins; otherwise splats are leveled on their ground plane when one exists.
+  if (!rotation && level && sample?.positions.length) leveled = levelRotation(sample.positions);
+  rotation ??= leveled?.rotation ?? [0, 0, 0];
   if (sample?.positions.length) {
     rotatePositions(sample.positions, rotation);
-    box = bounds(sample.positions);
+    // Frame the dense body of the capture, not stray floaters or far background.
+    box = bounds(denseCore(sample.positions));
     camera = interior
       ? { position: { ...box.median }, rotation: { azimuth: 0, polar: 0 }, target: box.median }
       : orbitCamera(box, { ...(elevation !== undefined ? { elevation } : {}), ...(distance !== undefined ? { distance } : {}) });
@@ -31,6 +35,8 @@ export async function packageSplat(input, id, { rotation = [0, 0, 0], interior =
     tour: { title: id.title, tour_data: { mode: 'explore', spaces: [{ id: id.sceneId, title: id.title, tourpoints: [startPoint(camera)] }] } }
   };
   const manifest = await writePackage({ id, kind, bootstrap, inputs, tool,
-    notes: { ...notes, splats: sample?.total ?? null, rotationDegrees: rotation.map(value => Math.round(value * 180 / Math.PI)), bounds: box } });
-  return { folder: id.folder, preview: path.join(id.folder, 'preview.jpg'), files: manifest.files.length, splats: sample?.total ?? 'unknown', camera };
+    notes: { ...notes, splats: sample?.total ?? null, rotationDegrees: rotation.map(value => Math.round(value * 180 / Math.PI)),
+      leveled: leveled ? { ground: Number(leveled.ground.toFixed(3)) } : null, bounds: box } });
+  return { folder: id.folder, preview: path.join(id.folder, 'preview.jpg'), files: manifest.files.length, splats: sample?.total ?? 'unknown',
+    rotationDegrees: rotation.map(value => Math.round(value * 180 / Math.PI)), leveled: Boolean(leveled && leveled.rotation.some(Boolean)), camera };
 }
