@@ -2,13 +2,14 @@
 
 The recovery tools move the original collection into the current catalog without
 copying its existing panorama and mesh storage. Native panoramas use the SPHR
-viewer. Matterport-linked records use their original hosted model through the
-Embed SDK; restoring those links does not make their geometry self-hosted. To
-remove that dependency, import the owner's E57 export through the normal pipeline.
+viewer. Matterport-linked records are source inventory only. Recovery, validation
+and publication reject them until their assets have been converted to a native
+package. Import the owner's E57 export or an authorized viewer archive; never use
+an embedded Matterport viewer as a migration result.
 
 ## Export, prepare and validate
 
-Keep the source export, inventories, SDK key file, generated packages and receipts
+Keep the source export, inventories, generated packages and receipts
 in the external capture store or ignored local directories. None belongs in Git.
 Use a stable `--namespace`; it is part of the permanent scene identity.
 
@@ -23,7 +24,6 @@ python3 scripts/legacy/recover.py \
   --namespace original-collection \
   --origin https://static.example.com \
   --iiif-origin https://iiif.example.com \
-  --sdk-key-file /captures/recovery/public-embed-key \
   --out /captures/recovery/packages
 python3 scripts/legacy/validate.py \
   --directory /captures/recovery/packages \
@@ -33,9 +33,8 @@ python3 scripts/legacy/validate.py \
 ```
 
 Python 3.11+, Pillow, and an authenticated Google Cloud CLI are required. The SQL
-is read-only and exports selected content fields, not account records. The Embed
-SDK uses a public client application key whose allowed domains must include the
-viewer origin. Keep SDK secrets and backend API credentials out of bootstraps.
+is read-only and exports selected content fields, not account records. Recovery
+needs no Embed SDK key and the runtime contains no hosted Matterport renderer.
 
 If source domains changed, supply `--origin-map /captures/recovery/origins.json`.
 This private JSON object maps complete old HTTPS origins to new HTTPS origins;
@@ -71,11 +70,12 @@ python3 scripts/legacy/audit-hosted.py --export /captures/recovery/source.json -
 ```
 
 The report checks the model's public prefetch and every authored v1/v2 sweep
-reference. Pass it to preparation with `--hosted-audit`; unavailable sources retain
-their identities and previews, and show an explicit message instead of waiting for
-an SDK timeout. Network errors stay unresolved, rather than being classified as
-missing models. Inspect actual embeds too: an HTTP prefetch is not an SDK playback
-test. Restore source access or provide an archive, then audit and prepare again.
+reference. It assesses source availability only, not a completed migration.
+Preparation records unresolved hosted sources in `audit.json` and stops before
+writing runtime packages. Supply native archives for those records or select a
+source subset whose native captures are ready; keep excluded records in the
+operator's pending inventory with their original identities. An unavailable source
+requires an E57 or archived native assets. There is no embed fallback.
 
 An existing source-verified `sphr-matterport-web-v1` package can replace its exact
 Matterport model using `--native-archive /captures/native-package` during preparation.
@@ -120,9 +120,9 @@ IDs; it does not change access to existing scenes or their public bucket assets.
 
 ## Viewer checks
 
-- Open native panorama, mesh-only and Matterport-linked records automatically.
+- Open native panorama and mesh-only records automatically; reject hosted configurations.
 - Inspect face orientation and mesh alignment; navigate by click and dollhouse entry.
-- Check native → object → native and native ↔ Matterport tour transitions,
+- Check native → object → native and native ↔ native tour transitions,
   Previous across a space boundary, and failure recovery without losing the current viewer.
 - Inspect video overlays, audio/mute, caption text and object framing.
 - Test the mobile header and bottom Next/Previous controls with long original text.

@@ -27,7 +27,6 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
 }
 
 export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext }: Props) {
-  const position = point.textPosition ?? "left";
   const primaryFile = point.files?.[0];
   const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps(?:\/embed\/|\?)/.test(point.mapUrl) ? point.mapUrl : '';
   // Older tours kept their opening description in a separate start screen.
@@ -36,7 +35,7 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
     && state.activeSpaceIndex === 0 && state.activePointIndex === 0 ? description : undefined);
 
   return (
-    <section className={`tour-overlay text-${position}`} aria-live="polite">
+    <section className="tour-overlay" aria-live="polite">
       {state.guided && Boolean(text || point.secondaryText || primaryFile || mapUrl) && (
         <div className="tour-copy">
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />

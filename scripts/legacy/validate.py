@@ -13,7 +13,7 @@ from pathlib import Path
 import struct
 from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
-from recover import read_inventory
+from recover import read_inventory, assert_native_bootstrap
 
 
 def digest(path):
@@ -57,6 +57,7 @@ def inspect_url(url, app_origin):
 
 
 def required_urls(bootstrap, inventory):
+    assert_native_bootstrap(bootstrap)
     urls = set()
     spaces = bootstrap.get('orderedSpaces', [bootstrap['space']])
     spaces_by_id = {str(space['id']): space for space in spaces}

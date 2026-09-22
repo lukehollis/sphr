@@ -1,11 +1,10 @@
 import { normalizeTour } from '@/lib/bootstrap';
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from '@/lib/types';
 import { SphrRuntime } from '@/lib/three/SphrRuntime';
-import { AudioController } from '@/lib/three/AudioController';
-import { MatterportViewer } from './MatterportViewer';
+import { assertNativeBootstrap } from './native';
 import { nextTourLocation, tourSegment } from './segments';
 
-type Stage = { element: HTMLDivElement; key: string; spaceIndex: number; three?: SphrRuntime; matterport?: MatterportViewer; audio?: AudioController; reloadRequired?: boolean };
+type Stage = { element: HTMLDivElement; key: string; spaceIndex: number; three?: SphrRuntime };
 
 /** Owns tour position across independent scene renderers; failed scene loads retain the last viewer. */
 export class ViewerSession {
@@ -23,19 +22,20 @@ export class ViewerSession {
       navigating: false, loading: { label: 'Loading', progress: 0, ready: false } };
   }
 
-  async init() { await this.activate(0); }
+  async init() {
+    assertNativeBootstrap(this.bootstrap);
+    await this.activate(0);
+  }
 
   private emit() {
     if (this.disposed) return;
     this.state = { ...this.state, ...this.preferences };
-    this.container.dataset.sphrSession = JSON.stringify({ ...this.state, engine: this.active?.matterport ? 'matterport' : 'three', engineKey: this.active?.key });
+    this.container.dataset.sphrSession = JSON.stringify({ ...this.state, engine: 'three', engineKey: this.active?.key });
     this.callbacks.onState?.(this.state);
   }
 
   private release(stage?: Stage) {
     stage?.three?.dispose();
-    stage?.matterport?.dispose();
-    stage?.audio?.dispose();
     stage?.element.remove();
   }
 
@@ -55,43 +55,23 @@ export class ViewerSession {
     this.emit();
     try {
       if (segment.space.availability?.status === 'unavailable') throw new Error(segment.space.availability.message);
-      if (segment.space.type === 'matterport') {
-        stage.audio = new AudioController(normalizeTour(this.bootstrap).audio);
-        stage.audio.setMuted(this.preferences.muted);
-        stage.matterport = new MatterportViewer(element, segment.space, this.bootstrap.integrations?.matterport?.sdkKey ?? '', change => {
+      const canvas = document.createElement('canvas');
+      canvas.className = 'sphr-canvas';
+      canvas.setAttribute('aria-label', 'SPHR interactive scene');
+      element.append(canvas);
+      stage.three = new SphrRuntime(canvas, segment.bootstrap, {
+        onState: state => {
           if (this.disposed || (this.pending ?? this.active) !== stage) return;
-          this.state = { ...this.state, ...change };
+          this.state = { ...state, activeSpaceIndex: spaceIndex,
+            loading: this.switching ? { ...state.loading, ready: false } : state.loading };
           this.emit();
-        }, normalizeTour(segment.bootstrap).annotationGraph);
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([stage.matterport.init(segment.point), new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('The Matterport viewer did not become ready. Please retry.')), 45000);
-          })]);
-        } finally { if (timer) clearTimeout(timer); }
-        this.state = { ...this.state, activeSpaceIndex: spaceIndex, activePointIndex: pointIndex ?? 0 };
-        stage.audio.updateForPoint(this.preferences.guided ? segment.point : undefined);
-        stage.matterport.showAnnotations(this.preferences.guided ? segment.point.annotations : []);
-        stage.matterport.setMuted(this.preferences.muted);
-      } else {
-        const canvas = document.createElement('canvas');
-        canvas.className = 'sphr-canvas';
-        canvas.setAttribute('aria-label', 'SPHR interactive scene');
-        element.append(canvas);
-        stage.three = new SphrRuntime(canvas, segment.bootstrap, {
-          onState: state => {
-            if (this.disposed || (this.pending ?? this.active) !== stage) return;
-            this.state = { ...state, activeSpaceIndex: spaceIndex,
-              loading: this.switching ? { ...state.loading, ready: false } : state.loading };
-            this.emit();
-          }
-        });
-        await stage.three.init(pointIndex);
-        if (this.disposed) return;
-        stage.three.start(this.preferences.guided);
-        if (stage.three.getState().muted !== this.preferences.muted) stage.three.toggleMute();
-        if (stage.three.getState().showText !== this.preferences.showText) stage.three.toggleText();
-      }
+        }
+      });
+      await stage.three.init(pointIndex);
+      if (this.disposed) return;
+      stage.three.start(this.preferences.guided);
+      if (stage.three.getState().muted !== this.preferences.muted) stage.three.toggleMute();
+      if (stage.three.getState().showText !== this.preferences.showText) stage.three.toggleText();
       if (this.disposed) return;
       this.active = stage;
       this.pending = undefined;
@@ -114,30 +94,8 @@ export class ViewerSession {
   async goTo(spaceIndex: number, pointIndex: number) {
     if (this.disposed || this.switching || this.state.navigating) return;
     const segment = tourSegment(this.bootstrap, spaceIndex, pointIndex);
-    if (this.active?.key !== segment.key || this.active.reloadRequired) return this.activate(spaceIndex, pointIndex);
-    if (this.active.three) {
-      await this.active.three.goTo(0, pointIndex);
-      return;
-    }
-    const stage = this.active;
-    this.state = { ...this.state, navigating: true, navigationError: undefined };
-    this.emit();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([stage.matterport?.goTo(segment.point), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('This panorama did not finish loading. Try the tour button again.')), 30000);
-      })]);
-      if (this.disposed || this.active !== stage) return;
-      stage.audio?.updateForPoint(this.preferences.guided ? segment.point : undefined);
-      stage.matterport?.showAnnotations(this.preferences.guided ? segment.point.annotations : []);
-      this.state = { ...this.state, activeSpaceIndex: spaceIndex, activePointIndex: pointIndex };
-    } catch (error) {
-      if (this.disposed || this.active !== stage) return;
-      // A stalled vendor texture request can leave its SDK transition pending.
-      // Retry with a fresh renderer, retaining the current viewer until it is ready.
-      stage.reloadRequired = true;
-      this.state = { ...this.state, navigationError: error instanceof Error ? error.message : String(error) };
-    } finally { if (timer) clearTimeout(timer); this.state = { ...this.state, navigating: false }; this.emit(); }
+    if (this.active?.key !== segment.key) return this.activate(spaceIndex, pointIndex);
+    await this.active.three?.goTo(0, pointIndex);
   }
 
   next() {
@@ -163,16 +121,12 @@ export class ViewerSession {
       if (index >= 0) { void this.goTo(this.state.activeSpaceIndex, index); return; }
     }
     this.active?.three?.start(this.preferences.guided);
-    this.active?.audio?.updateForPoint(this.preferences.guided ? points[this.state.activePointIndex] : undefined);
-    this.active?.matterport?.showAnnotations(this.preferences.guided ? points[this.state.activePointIndex].annotations : []);
     this.emit();
   }
 
   toggleMute() {
     this.preferences.muted = !this.preferences.muted;
     this.active?.three?.toggleMute();
-    this.active?.audio?.setMuted(this.preferences.muted);
-    this.active?.matterport?.setMuted(this.preferences.muted);
     this.emit();
   }
 
@@ -184,10 +138,7 @@ export class ViewerSession {
 
   toggleViewMode() {
     if (this.state.navigating) return;
-    if (this.active?.three) this.active.three.toggleViewMode();
-    else void this.active?.matterport?.toggleView(this.state.viewMode).catch(error => {
-      this.state = { ...this.state, navigationError: String(error) }; this.emit();
-    });
+    this.active?.three?.toggleViewMode();
   }
 
   getState() { return this.state; }

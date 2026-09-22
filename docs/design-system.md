@@ -56,6 +56,11 @@ to the left of the visible label “Guide”, blue when on, with `role="switch"`
 row above the icons. Put the dollhouse control at the bottom only in free exploration;
 never show it while guided mode is active.
 
+Tour copy is anchored at the bottom-left on desktop in a compact panel, with
+navigation at the bottom-right. On smaller screens, copy and navigation share one
+full-width bottom panel. Keep long copy scrollable and navigation visible. Legacy
+`textPosition` values must not move copy to the top, center, or right.
+
 On mobile guided tours, Next is an essential **full-width 72px text button** fixed at
 the bottom, with a smaller 44px Previous text button above it. Next has a white
 background and black text, with neutral hover/disabled states; never use the accent

@@ -88,10 +88,9 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 /* Viewer chrome stays separate from the photographic scene. */
 .sphr-root { position: fixed; inset: 0; overflow: hidden; background: var(--surface-desk); }
 .sphr-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
-.sphr-viewport, .sphr-viewer-stage, .sphr-embedded-viewer { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.sphr-viewport, .sphr-viewer-stage { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .sphr-viewer-stage { transition: opacity 180ms ease; }
 
-.sphr-embedded-annotations { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* A drafting sheet over the space's photograph, shown only while assets load. */
 .scene-load-screen { position: absolute; inset: 0; z-index: 40; isolation: isolate; display: grid; place-items: center; overflow: auto; padding: max(48px, env(safe-area-inset-top)) 32px max(48px, env(safe-area-inset-bottom)); background: #151719; color: #f5f5f5; }
 .scene-load-backdrop { position: absolute; inset: 0; z-index: -3; overflow: hidden; }
@@ -134,18 +133,16 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .navigation-status { position: absolute; z-index: 25; top: 88px; left: var(--space-3); max-width: calc(100% - 48px); padding: var(--space-2); border-left: 3px solid var(--accent); background: var(--surface-page); font-size: var(--size-caption); }
 
 /* Authored tour text uses the same page stock and rules. Camera motion is unchanged. */
-.tour-overlay { position: absolute; inset: 0; z-index: 18; pointer-events: none; }
-.tour-copy { position: absolute; left: var(--space-3); top: 104px; max-height: calc(100% - 200px); overflow: auto; width: min(38vw, 440px); padding: var(--space-3); border-top: var(--rule-strong); background: var(--surface-page); pointer-events: auto; text-align: left; }
-.tour-overlay.text-right .tour-copy { left: auto; right: var(--space-3); }
-.tour-overlay.text-center .tour-copy { left: 50%; transform: translateX(-50%); width: min(56vw, 640px); }
-.tour-main-text { color: var(--text-heading); font-size: var(--size-h2); line-height: var(--leading-heading); }
+.tour-overlay { position: absolute; top: 104px; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); z-index: 18; display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); pointer-events: none; }
+.tour-copy { flex: 0 1 480px; min-width: 0; max-height: 100%; overflow: auto; overscroll-behavior: contain; padding: var(--space-2); border-top: var(--rule-strong); background: var(--surface-page); pointer-events: auto; text-align: left; }
+.tour-main-text { color: var(--text-heading); font-size: 22px; line-height: 1.4; }
 .tour-main-text > :first-child, .tour-secondary-text > :first-child { margin-top: 0; }
 .tour-main-text > :last-child, .tour-secondary-text > :last-child { margin-bottom: 0; }
 .tour-main-text h1, .tour-main-text h2, .tour-main-text h3 { font-size: inherit; }
 .tour-copy em, .tour-copy i { font-style: normal; }
 .tour-secondary-text { margin-top: var(--space-2); color: var(--text-muted); font-size: var(--size-body); line-height: var(--leading-body); }
 .tour-media { display: block; width: min(100%, 360px); max-height: 24vh; object-fit: contain; object-position: left; margin-bottom: var(--space-2); }
-.tour-nav { position: absolute; bottom: var(--space-3); left: 50%; transform: translateX(-50%); display: flex; gap: var(--space-1); pointer-events: none; }
+.tour-nav { flex: none; display: flex; margin-left: auto; gap: var(--space-1); pointer-events: none; }
 .tour-prev, .tour-next { width: 44px; height: 44px; padding: 0; pointer-events: auto; }
 .tour-next { width: auto; min-width: 136px; padding: 0 var(--space-2); }
 .tour-button-label { display: none; }
@@ -177,12 +174,13 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .scene-heading { font-size: var(--size-label); }
   .hud-right { align-self: flex-end; }
   .hud-left { left: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
-  .tour-nav { bottom: calc(16px + env(safe-area-inset-bottom)); left: var(--space-2); right: var(--space-2); transform: none; flex-direction: column; align-items: center; gap: var(--space-1); }
+  .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: calc(100% - 128px - env(safe-area-inset-top)); flex-direction: column; align-items: stretch; gap: 0; background: var(--surface-page); }
+  .tour-nav { margin: 0; padding: var(--space-1) var(--space-2) calc(16px + env(safe-area-inset-bottom)); flex-direction: column; align-items: center; gap: var(--space-1); }
   .tour-prev { width: auto; height: 44px; padding: var(--space-1) var(--space-2); font-size: var(--size-caption); }
   .tour-next { width: 100%; height: 72px; padding: var(--space-2); font-size: 22px; text-transform: uppercase; }
   .tour-next-final { font-size: 18px; }
   .tour-button-label { display: inline; }
-  .has-guided-tour .tour-copy, .tour-overlay.text-right .tour-copy, .tour-overlay.text-center .tour-copy { top: auto; bottom: calc(156px + env(safe-area-inset-bottom)); left: var(--space-2); right: var(--space-2); width: auto; max-height: calc(100% - 272px - env(safe-area-inset-bottom) - env(safe-area-inset-top)); padding: var(--space-2); transform: none; }
+  .tour-copy { flex: 0 1 auto; min-height: 0; width: 100%; max-height: calc(100dvh - 276px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: var(--space-2); }
   .tour-main-text { font-size: 20px; }
   .tour-secondary-text { font-size: var(--size-caption); }
   .tour-media { max-height: 18vh; }

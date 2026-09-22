@@ -112,9 +112,9 @@ Thumbnail delivery follows the scene's viewer visibility.
 
 For an authored native tour, this changes the first stop's camera while retaining
 its story, audio and subsequent stops. The editor stays in the opening space.
-Embedded Matterport viewers and tours that open on standalone model stops retain
-their existing camera configuration; their titles remain editable. Import the
-Matterport capture to enable native start-view and thumbnail editing.
+Tours that open on standalone model stops retain their existing camera configuration;
+their titles remain editable. Matterport-hosted configurations cannot be viewed or
+published: import their native capture first.
 
 ## Debian VM deployment
 

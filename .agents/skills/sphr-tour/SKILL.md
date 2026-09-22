@@ -55,14 +55,15 @@ Runtime behavior:
 ## Implementation Rules
 
 - `ViewerSession` owns tour position across `orderedSpaces`. Keep navigation global;
-  a native scene, embedded Matterport scene, or standalone MODEL stop is a renderer
+  a native scene or standalone MODEL stop is a renderer
   stage. A failed incoming stage must leave the previous viewer usable.
 - MODEL stops use their selected scene-graph objects, the authored camera position,
   and the object bounds as the orbit target. Do not navigate to a retained nodeUUID
   on a MODEL stop. Video annotations are video textures and follow the mute state.
 - For an earlier Django collection, use [the recovery workflow](../../../docs/legacy-recovery.md).
   Preserve source identities and authored media in generated data, never runtime
-  branches for individual spaces. Matterport links still depend on their hosted models.
+  branches for individual spaces. Matterport links are source inventory only: migrate
+  their assets to native scenes before publication. Never add an embed renderer.
 - For static legacy releases, use [compiled tour migration](../../../docs/compiled-tour-migration.md).
   Extract literal story data without executing archived bundles, select the latest
   complete release, bind original scan identities exactly, and preserve embedded
