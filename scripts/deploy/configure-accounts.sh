@@ -2,8 +2,12 @@
 # Stores the sign-in and billing secrets for customer accounts in the service environment
 # and prepares Stripe. Run on the app VM from a checkout whose dependencies are installed
 # (the deploy checkout). It asks for each secret; nothing is passed on the command line.
-#   bash scripts/deploy/configure-accounts.sh
+#   bash scripts/deploy/configure-accounts.sh [--google-json client_secret.json]
+# --google-json reads the client ID and secret from the file Google Cloud offers to download
+# when a web client is created, then deletes that copy.
 set -euo pipefail
+google_json=""
+[[ "${1:-}" == "--google-json" ]] && google_json="${2:?Pass the downloaded client secret file.}"
 cd "$(dirname "$0")/../.."
 node_bin=$(ls -d "$HOME"/.local/share/sphr/node-v*-linux-x64/bin 2>/dev/null | sort -V | tail -1 || true)
 [[ -n "$node_bin" ]] && export PATH="$node_bin:$PATH"
@@ -13,8 +17,15 @@ current() { sudo grep -E "^$1=" "$env_file" 2>/dev/null | tail -1 | cut -d= -f2-
 origin=$(current SPHR_PUBLIC_URL); [[ -z "$origin" && -f "$build_env" ]] && origin=$(grep -E '^SPHR_PUBLIC_URL=' "$build_env" | tail -1 | cut -d= -f2-)
 [[ -n "$origin" ]] || { echo 'Set SPHR_PUBLIC_URL in the environment or build settings first.' >&2; exit 1; }
 echo "Configuring customer accounts for $origin (Enter keeps a current value)."
-read -r -p "Google OAuth client ID [$(current SPHR_GOOGLE_CLIENT_ID)]: " google_id
-read -r -s -p "Google OAuth client secret: " google_secret; echo
+if [[ -n "$google_json" ]]; then
+  google_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["web"]["client_id"])' "$google_json")
+  google_secret=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["web"]["client_secret"])' "$google_json")
+  shred -u "$google_json" 2>/dev/null || rm -f "$google_json"
+  echo "Google client $google_id read from the downloaded file."
+else
+  read -r -p "Google OAuth client ID [$(current SPHR_GOOGLE_CLIENT_ID)]: " google_id
+  read -r -s -p "Google OAuth client secret: " google_secret; echo
+fi
 read -r -s -p "Stripe secret key (sk_test_… or sk_live_…): " stripe_key; echo
 read -r -p "Monthly price per space, in cents [200]: " amount
 google_id=${google_id:-$(current SPHR_GOOGLE_CLIENT_ID)}
