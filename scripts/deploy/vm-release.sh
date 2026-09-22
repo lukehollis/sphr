@@ -8,6 +8,16 @@ test -z "$(git status --porcelain --untracked-files=no)" || { echo 'Commit track
 trap 'git restore --worktree next-env.d.ts tsconfig.json' EXIT
 test "$(uname -m)" = x86_64 || { echo 'This runtime package requires an x86_64 VM.' >&2; exit 1; }
 
+# Public build settings belong to the operator, outside the Git checkout.
+build_env="${SPHR_BUILD_ENV:-/etc/sphr/build.env}"
+if [[ -f "$build_env" ]]; then
+  set -a
+  source "$build_env"
+  set +a
+fi
+: "${SPHR_PUBLIC_URL:?Set the public application origin in the build environment.}"
+: "${SPHR_ASSET_BASE_URL:?Set the static asset prefix in the build environment.}"
+
 node_version="${SPHR_NODE_VERSION:-24.21.0}"
 [[ "$node_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
 node_home="$HOME/.local/share/sphr/node-v${node_version}-linux-x64"
@@ -22,7 +32,7 @@ if [[ ! -x "$node_home/bin/node" ]]; then
   rm -rf "$download_dir"
 fi
 export PATH="$node_home/bin:$PATH"
-export NEXT_TELEMETRY_DISABLED=1 SPHR_HOSTED=1 SPHR_STANDALONE=1 SPHR_BUILD_CPUS=1
+export NEXT_TELEMETRY_DISABLED=1 SPHR_STANDALONE=1 SPHR_BUILD_CPUS=1
 export NODE_OPTIONS=--max-old-space-size=1536
 nice -n 10 npm ci --no-audit --no-fund
 nice -n 10 npm run build

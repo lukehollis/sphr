@@ -15,10 +15,9 @@ try {
 }
 
 // The app server serves the interface; Cloud Storage/CDN serves capture data directly.
-// Explicit environment settings override these deployment defaults for other hosts.
-const hosted = process.env.VERCEL === "1" || process.env.SPHR_HOSTED === "1";
+// A clean checkout uses local assets; each deployment supplies its own origins.
 const assetBase = (process.env.SPHR_ASSET_BASE_URL || process.env.NEXT_PUBLIC_SPHR_ASSET_BASE_URL
-  || (hosted ? "https://static.mused.com/sphr" : "")).replace(/\/$/, "");
+  || "").replace(/\/$/, "");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -39,7 +38,7 @@ const nextConfig = {
     SPHR_ASSET_BASE_URL: assetBase,
     NEXT_PUBLIC_SPHR_ASSET_BASE_URL: assetBase,
     SPHR_CATALOG_URL: process.env.SPHR_CATALOG_URL || (assetBase ? `${assetBase}/datasets/matterport/index.json` : ""),
-    SPHR_PUBLIC_URL: process.env.SPHR_PUBLIC_URL || (hosted ? "https://app.mused.com" : "http://localhost:3002")
+    SPHR_PUBLIC_URL: process.env.SPHR_PUBLIC_URL || "http://localhost:3002"
   }
 };
 
