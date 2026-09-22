@@ -12,10 +12,13 @@ and `.sog` directly. Exports from Polycam, Luma, Scaniverse, Postshot, gsplat, n
 node scripts/packages/build-splat.mjs --input "<file>" --title "<title>"
 ```
 
-Options:
+The tool levels the capture automatically: it finds the ground plane in the dense part of the
+splat (ignoring stray floaters) and turns it horizontal, with up on the side the scene rises into.
+It frames the opening orbit on the dense body of the capture. Check `preview.jpg`: the ground must be
+at the bottom and the subject in view. If it is not:
 
-- `--rotation x,y,z` in degrees. Trainers that use COLMAP's axes (y down, z forward) need `180,0,0`.
-  Look at `preview.jpg`: the floor or ground must be at the bottom.
+- `--rotation x,y,z` in degrees replaces the automatic leveling (for example `180,0,0` for an upside-down
+  COLMAP-frame export when there is no clear ground). `--no-level` keeps the file's own axes.
 - `--interior` opens standing inside the capture (rooms, buildings you walk through) instead of orbiting
   it from outside (objects, statues, exteriors, drone captures).
 - `--elevation 25` sets how steeply the opening orbit looks down (degrees).
