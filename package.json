@@ -17,20 +17,26 @@
     "test:admin": "node --test scripts/test-admin.mjs",
     "test:editor": "node --experimental-transform-types --test scripts/test-scene-editor.mjs",
     "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-overview.mjs scripts/test-audio-autoplay.mjs && node --experimental-transform-types --test scripts/test-panorama-navigation.mjs",
-    "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v"
+    "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v",
+    "test:accounts": "node --test scripts/test-accounts.mjs",
+    "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
+    "worker": "node scripts/worker/agent-runner.mjs"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.1.0",
     "lucide-react": "1.23.0",
     "next": "16.2.10",
+    "nodemailer": "10.0.10",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "sharp": "0.34.5",
+    "stripe": "22.6.2",
     "three": "0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.10.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.0",

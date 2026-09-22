@@ -96,6 +96,8 @@ export type TourPoint = {
   position?: Vector3Like;
   rotation?: CameraRotation;
   zoom?: number;
+  /** Orbit distance, in meters, for a free (non-node) target viewed in ORBIT mode. */
+  distance?: number;
   files?: MediaFile[];
   models?: string[];
   sounds?: string[];

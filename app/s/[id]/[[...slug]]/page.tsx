@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import SphrApp from "@/components/SphrApp";
 import { findScene, readAllScenes } from "@/lib/scene-catalog";
 import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
-import { isAdmin } from "@/lib/server/auth";
+import { loginPath, sceneAccess } from "@/lib/server/accounts";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string; slug?: string[] }> };
@@ -26,7 +26,9 @@ export default async function ScenePage({ params }: Props) {
   const { id, slug } = await params;
   const scene = /^[a-f0-9]{12}$/.test(id) ? (await readAllScenes()).find(item => item.sceneId === id) : undefined;
   if (!scene) notFound();
-  if (!isScenePublic(id) && !(await isAdmin())) redirect(`/admin/login?next=${encodeURIComponent(scene.scenePath)}`);
+  const access = await sceneAccess(id);
+  if (access === "unavailable") notFound();
+  if (access === "login") redirect(loginPath(scene.scenePath));
   // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
   return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null }} preview={{ title: scene.title, image: scene.thumbnail }} />;

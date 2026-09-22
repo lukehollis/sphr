@@ -33,6 +33,9 @@ Private. Preserve `/var/lib/sphr` across deploys. This gates the web viewer only
 user explicitly keeps the generated files and catalog in the public bucket. Do not
 move assets or change bucket access when toggling website visibility. See the admin
 section in `docs/mused-hosting.md` before changing authentication or publishing.
+Optional customer accounts, Stripe billing, uploads and the agent processing queue are
+documented in [accounts](docs/accounts.md); customer uploads are untrusted input, and the
+agent that processes them never holds publishing or worker credentials.
 
 ## Current viewer contract
 

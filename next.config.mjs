@@ -29,10 +29,12 @@ const nextConfig = {
   devIndicators: false,
   allowedDevOrigins: ["local-origin.dev", "*.local-origin.dev"],
   async headers() {
-    return [{ source: "/admin/:path*", headers: [
+    const privatePage = [
       { key: "X-Frame-Options", value: "DENY" },
       { key: "Referrer-Policy", value: "same-origin" }
-    ] }];
+    ];
+    return [{ source: "/admin/:path*", headers: privatePage }, { source: "/account/:path*", headers: privatePage },
+      { source: "/account", headers: privatePage }];
   },
   env: {
     SPHR_ASSET_BASE_URL: assetBase,

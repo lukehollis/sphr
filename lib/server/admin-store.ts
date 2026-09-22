@@ -11,7 +11,7 @@ let database: DatabaseSync | undefined;
 
 export function accessControlled() { return process.env.SPHR_ACCESS_CONTROL === "1"; }
 
-function db() {
+export function db() {
   if (database) return database;
   const directory = process.env.SPHR_STATE_DIR;
   if (!directory) throw new Error("SPHR_STATE_DIR must be configured for administration.");
@@ -126,8 +126,12 @@ export async function changePassword(current: string, replacement: string) {
 }
 
 export function allowLogin(address: string) {
+  return allowAttempt([[`ip:${tokenHash(address)}`, 5], ["global", 100]]);
+}
+
+/** Counts one attempt against every key; refuses when any key has reached its limit. */
+export function allowAttempt(entries: readonly (readonly [key: string, limit: number])[], window = 15 * 60 * 1000) {
   const now = Date.now();
-  const entries = [[`ip:${tokenHash(address)}`, 5], ["global", 100]] as const;
   db().exec("BEGIN IMMEDIATE");
   try {
     db().prepare("DELETE FROM login_limits WHERE resets<=?").run(now);
@@ -135,7 +139,7 @@ export function allowLogin(address: string) {
       const row = db().prepare("SELECT attempts FROM login_limits WHERE key=?").get(key) as { attempts: number } | undefined;
       if (row && row.attempts >= limit) { db().exec("COMMIT"); return false; }
     }
-    for (const [key] of entries) db().prepare("INSERT INTO login_limits VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1").run(key, now + 15 * 60 * 1000);
+    for (const [key] of entries) db().prepare("INSERT INTO login_limits VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1").run(key, now + window);
     db().exec("COMMIT");
     return true;
   } catch (error) { db().exec("ROLLBACK"); throw error; }

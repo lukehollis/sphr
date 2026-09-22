@@ -260,3 +260,84 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .admin-help { margin: 16px 0; }
   .admin-visibility { padding: 0 16px 16px; }
 }
+
+/* Customer accounts reuse the administration surfaces. */
+.account-auth .admin-form { width: min(100%, 380px); }
+.account-providers { display: grid; gap: 8px; margin-top: 16px; }
+.account-provider { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 48px; padding: 12px 16px; background: #fff; color: #111 !important; text-decoration: none; font-weight: var(--weight-bold); }
+.account-provider svg { width: 20px; height: 20px; flex: none; }
+.account-provider:hover { background: #e8e6e1; }
+.account-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; color: #aaa; font-size: 14px; }
+.account-divider::before, .account-divider::after { content: ""; flex: 1; border-top: 1px solid #383838; }
+.account-auth-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 8px; font-size: 14px; }
+.account-auth-links a, .account-auth-links button { display: inline-flex; align-items: center; min-height: 44px; margin: 0 !important; padding: 0 !important; background: none !important; color: #f5f3ee !important; border: 0; text-decoration: underline; text-underline-offset: 3px; font: inherit; cursor: pointer; }
+.admin-form [role=status], .admin-feedback [role=status] { border-left: 3px solid #555; padding-left: 12px; }
+.account-page textarea { width: 100%; padding: 12px; border: 1px solid #555; border-radius: 0; background: #222; color: #f5f3ee; font: inherit; resize: vertical; }
+.account-header > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.account-header h1 { overflow-wrap: anywhere; }
+.account-back { color: #aaa !important; font-size: 14px; text-decoration: none; }
+.account-back:hover { color: #f5f3ee !important; text-decoration: underline; }
+.account-notice, .account-billing { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin-bottom: 24px; padding: 16px 0; border-bottom: 1px solid #333; font-size: 14px; line-height: 1.5; }
+.account-notice p, .account-billing p { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.account-notice button, .account-billing button, .account-panel > button, .account-drop button { border: 0; background: #f5f3ee; color: #111; min-height: 44px; padding: 12px 16px; font: inherit; cursor: pointer; }
+.account-billing [role=alert] { flex-basis: 100%; }
+.account-notice button:disabled, .account-billing button:disabled, .account-panel button:disabled { opacity: .5; cursor: default; }
+.account-new { margin-bottom: 40px; font-size: 14px; }
+.account-new label { display: block; margin-bottom: 8px; }
+.account-new > div { display: flex; gap: 8px; max-width: 640px; }
+.account-new input { flex: 1; min-width: 0; min-height: 44px; padding: 12px; border: 1px solid #555; border-radius: 0; background: #222; color: #f5f3ee; font: inherit; }
+.account-new button { flex: none; border: 0; background: #f5f3ee; color: #111; min-height: 44px; padding: 12px 16px; font: inherit; cursor: pointer; }
+.account-new button:disabled, .account-new input:disabled { opacity: .5; cursor: default; }
+.account-new .admin-help { margin: 8px 0 0; }
+.account-status-mark { display: grid; place-items: center; height: 100%; color: #555; font-size: var(--size-display); background-image: var(--bg-graph-paper); }
+.account-status-ready, .account-status-processing, .account-status-queued { color: #f5f3ee; }
+.account-status-failed, .account-status-unpaid { color: #fff; border-left: 3px solid #0098db; padding-left: 8px; }
+.account-footer { justify-content: flex-start; }
+.account-space-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, .8fr); gap: 40px; align-items: start; }
+.account-panel { min-width: 0; font-size: 14px; line-height: 1.5; }
+.account-panel h2 { font-size: 18px; margin: 0 0 12px; padding-bottom: 12px; border-bottom: 3px solid #f5f3ee; }
+.account-panel > p { margin: 0 0 16px; }
+.account-message { margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid #0098db; background: #1c1b19; white-space: pre-wrap; }
+.account-scene { margin-top: 16px; }
+.account-scene .admin-visibility, .account-scene .admin-edit { padding: 16px 0 0; }
+.account-scene .admin-help { margin: 8px 0 0; }
+.account-scene-link { display: block; color: #f5f3ee; text-decoration: none; }
+.account-scene-link img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; background: #1c1b19; }
+.account-scene-link span { display: block; padding-top: 8px; text-decoration: underline; text-underline-offset: 3px; }
+.account-drop { padding: 24px; border: 1px dashed #555; background: #161614; text-align: center; }
+.account-drop p { margin: 0 0 12px; }
+.account-drop .admin-help { margin: 12px 0 0; }
+.account-drop-active { border-color: #0098db; background: #10222b; }
+.account-files { list-style: none; margin: 16px 0 0; padding: 0; }
+.account-files li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
+.account-file-name { overflow-wrap: anywhere; }
+.account-file-meta { color: #aaa; white-space: nowrap; }
+.account-files progress { grid-column: 1 / -1; width: 100%; height: 4px; appearance: none; border: 0; background: #2a2a2a; }
+.account-files progress::-webkit-progress-bar { background: #2a2a2a; }
+.account-files progress::-webkit-progress-value { background: #0098db; }
+.account-files progress::-moz-progress-bar { background: #0098db; }
+.account-link-button { min-height: 32px; padding: 0; border: 0; background: none; color: #aaa; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.account-link-button:hover { color: #f5f3ee; }
+.account-submit { margin-top: 24px; }
+.account-panel .admin-form + .account-danger { margin-top: 32px; }
+.account-panel .account-danger { width: 100%; background: #282828; color: #f5f3ee; }
+.account-panel .account-danger:hover:not(:disabled) { background: #333; }
+@media (max-width: 1000px) {
+  .account-space-layout { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+}
+@media (max-width: 740px) {
+  .account-new > div { flex-direction: column; }
+}
+.account-progress { display: grid; gap: 4px; margin: 0 0 16px; padding: 12px 16px; border-left: 3px solid #555; background: #161614; }
+.account-progress span { color: #aaa; font-size: 12px; }
+.account-autostart { margin-top: 16px; padding: 16px; border-left: 3px solid #0098db; background: #10222b; }
+.account-autostart p { margin: 0 0 12px; }
+.account-autostart div { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.account-autostart button:first-child { border: 0; background: #f5f3ee; color: #111; min-height: 44px; padding: 12px 16px; font: inherit; cursor: pointer; }
+.policy { max-width: 720px; font-size: 16px; line-height: 1.6; }
+.policy h1 { font-size: 28px; margin: 0 0 8px; }
+.policy h2 { font-size: 18px; margin: 32px 0 8px; padding-bottom: 8px; border-bottom: 1px solid #333; }
+.policy ul { padding-left: 20px; }
+.policy a { color: inherit; }
+.account-legal { margin: 16px 0 0; color: #aaa; font-size: 12px; line-height: 1.5; }
+.account-legal a { color: inherit !important; margin: 0 !important; font-size: 12px !important; }

@@ -16,7 +16,8 @@ def title_slug(title):
 
 
 def scene_identity(manifest, previous=None):
-    scene_id = (previous or {}).get("sceneId") or manifest.get("sceneId") or uuid.uuid4().hex[:12]
+    # SPHR_SCENE_ID lets a hosted processing job import into the ID reserved for it.
+    scene_id = (previous or {}).get("sceneId") or manifest.get("sceneId") or os.environ.get("SPHR_SCENE_ID") or uuid.uuid4().hex[:12]
     if not re.fullmatch(r"[a-f0-9]{12}", scene_id):
         raise ValueError(f"Invalid sceneId: {scene_id}")
     slug = title_slug(manifest["title"])
@@ -62,7 +63,7 @@ def write_matterport_index(matterport_dir):
         if manifest_path.parent.name.startswith("."):
             continue
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") not in {"sphr-matterport-e57-v1", "sphr-matterport-e57-v2"}:
+        if manifest.get("schema") not in {"sphr-matterport-e57-v1", "sphr-matterport-e57-v2", "sphr-package-v1"}:
             continue
         if not (manifest_path.parent / "bootstrap.json").is_file():
             continue
@@ -84,6 +85,7 @@ def write_matterport_index(matterport_dir):
                 if (manifest_path.parent / "preview.jpg").is_file()
                 else f"{manifest['datasetUrl']}/faces/scan-000/face1.jpg",
             "nodeCount": manifest.get("nodeCount", 0),
+            **({"sourceType": manifest["sourceType"]} if manifest.get("schema") == "sphr-package-v1" and manifest.get("sourceType") else {}),
             "scanCount": manifest.get("scanCount", 0),
             "mesh": {key: mesh.get(key) for key in ("triangles", "vertices", "bytes")},
         })

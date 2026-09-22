@@ -1,8 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { ChevronLeft, ChevronRight, Footprints } from "lucide-react";
 import type { RuntimeState, TourPoint, TourUiText } from "@/lib/types";
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
+import { sanitizeTourHtml } from "@/lib/tour-html";
 
 type Props = {
   point: TourPoint;
@@ -31,18 +33,20 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
   const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps(?:\/embed\/|\?)/.test(point.mapUrl) ? point.mapUrl : '';
   // Older tours kept their opening description in a separate start screen.
   // Preserve that copy at an otherwise empty first stop when entering directly.
-  const text = point.text || (!point.secondaryText && !primaryFile && !mapUrl
+  const rawText = point.text || (!point.secondaryText && !primaryFile && !mapUrl
     && state.activeSpaceIndex === 0 && state.activePointIndex === 0 ? description : undefined);
+  const text = useMemo(() => sanitizeTourHtml(rawText), [rawText]);
+  const secondaryText = useMemo(() => sanitizeTourHtml(point.secondaryText), [point.secondaryText]);
 
   return (
     <section className="tour-overlay" aria-live="polite">
-      {state.guided && Boolean(text || point.secondaryText || primaryFile || mapUrl) && (
+      {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl) && (
         <div className="tour-copy">
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
             <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}
           {text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: text }} />}
-          {point.secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: point.secondaryText }} />}
+          {secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: secondaryText }} />}
         </div>
       )}
       {state.guided && (

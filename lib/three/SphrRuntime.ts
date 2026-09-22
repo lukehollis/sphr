@@ -125,7 +125,12 @@ export class SphrRuntime {
     this.state.activePointIndex = initialLocation.pointIndex;
     const initialPoint = activeTourPoint(this.tour, initialLocation.spaceIndex, initialLocation.pointIndex);
     this.currentNode = this.resolveNode(initialPoint?.nodeUUID) ?? this.resolveInitialNode();
-    this.setCameraPose(this.poseForPoint(initialPoint, "FPV"), true);
+    // Spaces without panoramas (splats, point clouds, models) may open orbiting their subject.
+    if (this.bootstrap.space.space_data.noPanos && initialPoint?.viewMode === "ORBIT") {
+      this.state.viewMode = "ORBIT";
+      this.updateControlsForViewMode();
+    }
+    this.setCameraPose(this.poseForPoint(initialPoint, this.state.viewMode), true);
 
     if (nodes.length) {
       this.nav = new NavigationLayer(this.scene, this.bootstrap.space.space_data, nodes);
@@ -834,7 +839,7 @@ export class SphrRuntime {
     const position = vectorFromLike(
       point?.position ?? this.bootstrap.space.space_data.initialPosition ?? { x: 0, y: 1.5, z: 4 }
     );
-    return this.poseForTarget(position, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode, point?.fov);
+    return this.poseForTarget(position, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode, point?.fov, point?.distance);
   }
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {
@@ -863,12 +868,12 @@ export class SphrRuntime {
     return { position: center.clone().add(new THREE.Vector3(.7, 1, .85).normalize().multiplyScalar(fit)), target: center, fov };
   }
 
-  private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT", authoredFov?: number) {
+  private poseForTarget(target: THREE.Vector3, rotation = { azimuth: 0, polar: 0 }, zoom = 0, mode: "FPV" | "ORBIT", authoredFov?: number, distance = 8) {
     const direction = cameraDirection(rotation);
     const fov = authoredFov === undefined ? THREE.MathUtils.clamp((mode === "FPV" ? 75 : 70) - zoom, 35, 85) : THREE.MathUtils.clamp(authoredFov, 30, 110);
     if (mode === "ORBIT") {
       return {
-        position: target.clone().add(direction.clone().multiplyScalar(-8)),
+        position: target.clone().add(direction.clone().multiplyScalar(-(Number.isFinite(distance) && distance > 0 ? distance : 8))),
         target: target.clone(),
         fov: THREE.MathUtils.clamp(fov, 45, 85)
       };

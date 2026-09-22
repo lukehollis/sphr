@@ -79,6 +79,22 @@ class PublisherTests(unittest.TestCase):
                         main()
                 self.assertEqual(events, [] if dry_run else ['assets'] if upload_fails else ['assets', 'catalog', 'public'])
 
+    def test_unlisted_publication_uploads_assets_and_reports_entries_without_the_catalog(self):
+        entry = {'sceneId': 'aaaaaaaaaaaa', 'slug': 'capture', 'title': 'Capture',
+                 'scenePath': '/s/aaaaaaaaaaaa/capture', 'bootstrapUrl': 'https://static.example.com/sphr/scenes/aaaaaaaaaaaa/rev/bootstrap.json'}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'index.json').write_text(json.dumps({'spaces': [entry]}))
+            events = []
+            argv = ['publish.py', '--directory', str(root), '--slug', 'capture', '--no-catalog', '--entries-out', str(root / 'entries.json'),
+                    '--bucket', 'example-assets', '--origin', 'https://static.example.com', '--app-origin', 'https://app.example.com']
+            with patch('sys.argv', argv), patch.dict('os.environ', {}, clear=True), patch('sys.stdout', new_callable=io.StringIO), patch('publish.stage_scene', return_value=(entry, 'scene')), patch('publish.gcloud', side_effect=lambda *args: events.append('assets')), patch('publish.commit_catalog', side_effect=lambda *args: events.append('catalog')):
+                main()
+            self.assertEqual(events, ['assets'])
+            self.assertEqual(json.loads((root / 'entries.json').read_text()), {'spaces': [entry]})
+            with patch('sys.argv', [*argv, '--make-public']), patch.dict('os.environ', {}, clear=True), patch('sys.stderr', new_callable=io.StringIO):
+                with self.assertRaises(SystemExit): main()
+
     def test_concurrent_publication_preserves_the_scene_that_finished_first(self):
         old = {'sceneId': 'aaaaaaaaaaaa', 'title': 'Existing'}
         arriving = {'sceneId': 'bbbbbbbbbbbb', 'title': 'Other publisher'}
