@@ -21,23 +21,32 @@ from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
+def assert_native_bootstrap(bootstrap):
+    """A source link is inventory, never a playable migration result."""
+    for space in [bootstrap['space'], *bootstrap.get('orderedSpaces', [])]:
+        host = (urlsplit(space.get('src') or '').hostname or '').lower()
+        if space.get('type') == 'matterport' or host == 'matterport.com' or host.endswith('.matterport.com'):
+            raise ValueError('A native capture is required; Matterport embeds cannot be recovered or published')
+
+
 def slugify(title):
     text = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode()
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:100].rstrip('-') or 'space'
 
 
-def canonical_urls(value):
+def canonical_urls(value, origins=None):
     if isinstance(value, str):
-        for service in ('static', 'iiif', 'app', 'spaces', 'tours'):
-            value = value.replace(f'https://{service}.mused.org/', f'https://{service}.mused.com/')
+        for old, new in (origins or {}).items():
+            # Rewrite only complete URL origins, including URLs in authored HTML.
+            value = value.replace(old.rstrip('/') + '/', new.rstrip('/') + '/')
         if value.startswith('https://') and '<' not in value:
             url = urlsplit(value)
             value = urlunsplit((url.scheme, url.netloc, quote(url.path, safe='/%:@!$&\'()*+,;=-._~'), url.query, url.fragment))
         return value
     if isinstance(value, list):
-        return [canonical_urls(item) for item in value]
+        return [canonical_urls(item, origins) for item in value]
     if isinstance(value, dict):
-        return {key: canonical_urls(item) for key, item in value.items()}
+        return {key: canonical_urls(item, origins) for key, item in value.items()}
     return value
 
 
@@ -247,6 +256,8 @@ def recover_tour(record, records, spaces, audit):
             # against the new viewer's narrower free-exploration default.
             point['fov'] = max(40, min(110, 110 - (point.get('zoom') or 0)))
             if space['type'] != 'matterport' and point.get('targetType') != 'MODEL':
+                if point.get('viewMode') in ('DOLLHOUSE', 'FLOORPLAN'):
+                    point['viewMode'] = 'ORBIT'
                 aliases = {node.get('sourceLocationId'): node['uuid'] for node in nodes.values() if node.get('sourceLocationId')}
                 if point.get('nodeUUID') in aliases:
                     point['nodeUUID'] = aliases[point['nodeUUID']]
@@ -288,16 +299,28 @@ def main():
     parser.add_argument('--inventory', type=Path, action='append', required=True)
     parser.add_argument('--namespace', required=True, help='Stable source-system identity, unchanged across reruns')
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--origin', default='https://static.mused.com')
-    parser.add_argument('--iiif-origin', default='https://iiif.mused.com')
-    parser.add_argument('--sdk-key-file', type=Path, help='Existing public Matterport Embed SDK application key')
+    parser.add_argument('--origin', required=True, help='HTTPS origin for existing source assets')
+    parser.add_argument('--iiif-origin', required=True, help='HTTPS prefix for the image service')
+    parser.add_argument('--origin-map', type=Path, help='Private JSON object mapping old HTTPS origins to new HTTPS origins')
     parser.add_argument('--native-archive', type=Path, action='append', default=[], help='Source-verified native web package for an exact hosted model')
-    parser.add_argument('--native-origin', default='https://static.mused.com/sphr/archives', help='Delivery prefix for the staged native-assets directory')
+    parser.add_argument('--native-origin', help='HTTPS delivery prefix; required when using --native-archive')
     parser.add_argument('--hosted-audit', type=Path, help='Source-bound report from audit-hosted.py; retains unavailable models with an explicit viewer message')
     parser.add_argument('--allow-unmigrated-customizations', action='store_true', help='Explicitly allow data recovery with unresolved source custom handlers; this does not migrate or validate those handlers')
     parser.add_argument('--allow-unavailable-nodes', action='store_true', help='Record unavailable source nodes and omit broken navigation targets')
     args = parser.parse_args()
+    if args.native_archive and not args.native_origin:
+        parser.error('--native-archive requires --native-origin')
     source = json.loads(args.export.read_text())
+    if args.origin_map:
+        origins = json.loads(args.origin_map.read_text())
+        if not isinstance(origins, dict): parser.error('--origin-map must contain a JSON object')
+        for old, new in origins.items():
+            for value in (old, new):
+                if not isinstance(value, str): parser.error('Origin mappings must be strings')
+                url = urlsplit(value)
+                if url.scheme != 'https' or not url.netloc or url.path not in ('', '/') or url.username or url.query or url.fragment:
+                    parser.error('Origin mappings require HTTPS origins without paths or credentials')
+        source = canonical_urls(source, origins)
     inventory = read_inventory(args.inventory)
     audit = {'sourceSha256': hashlib.sha256(args.export.read_bytes()).hexdigest(), 'unavailableNodes': [], 'repairs': []}
     if any('space_custom' not in record for kind in ('spaces', 'tours') for record in source[kind]):
@@ -328,8 +351,13 @@ def main():
     if audit['unavailableNodes'] and not args.allow_unavailable_nodes:
         write_json(args.out / 'audit.json', audit)
         raise ValueError('Source panoramas are unavailable; inspect audit.json before allowing omission')
+    pending = [{'id': space['id'], 'title': space['title'], 'src': space.get('src')}
+               for space in spaces.values() if space['type'] == 'matterport']
+    audit['pendingNativeCaptures'] = pending
+    if pending:
+        write_json(args.out / 'audit.json', audit)
+        raise ValueError('Native captures are required for linked Matterport sources; no embed packages were generated. See audit.json')
     entries, previews = [], []
-    sdk_key = args.sdk_key_file.read_text().strip() if args.sdk_key_file else None
     for kind, items in (('space', source['spaces']), ('tour', source['tours'])):
         for record in items:
             key = str(record['id'])
@@ -343,17 +371,10 @@ def main():
                     bootstrap['tour'] = {'tour_data': {'mode': 'explore', 'spaces': [{'id': key, 'tourpoints': [{'viewMode': 'ORBIT'}]}]}}
             else:
                 bootstrap = recover_tour(record, records, spaces, audit)
-            if sdk_key:
-                bootstrap['integrations'] = {'matterport': {'sdkKey': sdk_key}}
+            assert_native_bootstrap(bootstrap)
             preview = asset_url(record.get('thumbnail') or record.get('share_image'), args.origin)
             if not preview:
                 preview = bootstrap['space']['thumbnail']
-            if not preview and bootstrap['space']['type'] == 'matterport':
-                with urlopen(bootstrap['space']['src'], timeout=30) as response:
-                    page = response.read(2 * 1024 * 1024).decode()
-                match = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', page)
-                if match:
-                    preview = html.unescape(match[1])
             if not preview:
                 raise ValueError(f'No preview available for {kind} {key}')
             bootstrap['ui'] = {'loadingImage': preview}

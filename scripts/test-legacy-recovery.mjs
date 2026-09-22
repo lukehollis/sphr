@@ -18,14 +18,13 @@ const { parseSceneCatalog } = await import('../lib/scene-catalog-data.ts');
 const { legacyDestination } = await import('../lib/legacy-routes.ts');
 const { SphrRuntime } = await import('../lib/three/SphrRuntime.ts');
 const { AnnotationLayer } = await import('../lib/three/layers/AnnotationLayer.ts');
-const { MatterportViewer } = await import('../lib/viewer/MatterportViewer.ts');
 const { ViewerSession } = await import('../lib/viewer/ViewerSession.ts');
 const { defaultBootstrap, normalizeTour } = await import('../lib/bootstrap.ts');
 const bootstrap = {
   space: { id: 'a', title: 'First', type: 'spaces', space_data: { nodes: [{ uuid: 'entry' }], sceneGraph: [{ id: 'mesh', type: 'model', persistent: true, raycast: true, file: '/mesh.glb' }] } },
   orderedSpaces: [
     { id: 'a', title: 'First', type: 'spaces', space_data: { nodes: [{ uuid: 'entry' }], sceneGraph: [{ id: 'mesh', type: 'model', persistent: true, raycast: true, file: '/mesh.glb' }] } },
-    { id: 'b', title: 'Second', type: 'matterport', src: 'https://my.matterport.com/show/?m=Example', space_data: {} }
+    { id: 'b', title: 'Second', type: 'spaces', space_data: { nodes: [{ uuid: 'sweep' }] } }
   ],
   tour: { tour_data: { mode: 'guided', sceneGraph: [{ id: 'artifact', type: 'model', file: '/object.glb' }], spaces: [
     { id: 'a', tourpoints: [{ nodeUUID: 'entry' }, { targetType: 'MODEL', nodeUUID: 'entry', models: ['artifact'] }, { nodeUUID: 'entry' }] },
@@ -38,7 +37,7 @@ test('tour crosses renderer boundaries in both directions and stops at real endp
   assert.deepEqual(nextTourLocation(bootstrap, 1, 0, -1), { spaceIndex: 0, pointIndex: 2 });
   assert.equal(nextTourLocation(bootstrap, 0, 0, -1), null);
   assert.equal(nextTourLocation(bootstrap, 1, 0, 1), null);
-  assert.equal(tourSegment(bootstrap, 1, 0).space.type, 'matterport');
+  assert.equal(tourSegment(bootstrap, 1, 0).space.type, 'spaces');
 });
 
 test('object stage isolates its model and returning restores the capture', () => {
@@ -89,48 +88,23 @@ test('neutral model pose fits the object on portrait screens and preserves viewi
   assert.equal(runtime.poseForTarget(new THREE.Vector3(), { azimuth: 0, polar: 0 }, 30, 'FPV', 80).fov, 80);
 });
 
-test('embedded tours convert legacy sweep IDs per model and retain current IDs and authored camera', async () => {
-  const viewer = Object.create(MatterportViewer.prototype), calls = [];
-  let conversions = 0;
-  viewer.sdk = {
-    Sweep: {
-      Conversion: { createIdMap: async invert => { assert.equal(invert, true); conversions++; return { 'old-sweep': 'current-sweep' }; } },
-      Transition: { INSTANT: 'instant', FLY: 'fly' },
-      moveTo: async (...args) => { calls.push(args); }
-    },
-    Camera: { zoomTo: async value => calls.push(['zoom', value]) }
-  };
-  await viewer.goTo({ nodeUUID: 'old-sweep', rotation: { azimuth: 80, polar: -10 }, fov: 90 }, true);
-  await viewer.goTo({ nodeUUID: 'current-sweep', fov: 110 });
-  assert.equal(conversions, 1);
-  assert.deepEqual(calls[0], ['current-sweep', { rotation: { x: -10, y: 80 }, transition: 'instant', transitionTime: 0 }]);
-  assert.deepEqual(calls[1], ['zoom', 110 / 90]);
-  assert.equal(calls[2][0], 'current-sweep');
-  assert.equal(calls[2][1].transition, 'fly');
-  // A source ID that no longer exists must surface the SDK failure, not land elsewhere.
-  viewer.sdk.Sweep.moveTo = async () => { throw new Error('Unavailable sweep'); };
-  await assert.rejects(viewer.goTo({ nodeUUID: 'missing' }), /Unavailable sweep/);
-});
-
-test('a stalled hosted panorama releases navigation and retries with a fresh renderer', async () => {
-  const session = Object.create(ViewerSession.prototype);
-  session.bootstrap = bootstrap;
-  session.container = { dataset: {} }; session.callbacks = {};
-  session.preferences = { guided: true, muted: false, showText: true };
-  session.state = { activeSpaceIndex: 1, activePointIndex: 0, navigating: false };
-  session.active = { key: '1:matterport', matterport: { goTo: () => new Promise(() => {}) } };
-  const original = globalThis.setTimeout;
-  globalThis.setTimeout = callback => { queueMicrotask(callback); return 0; };
-  try { await session.goTo(1, 0); } finally { globalThis.setTimeout = original; }
-  assert.equal(session.state.navigating, false);
-  assert.match(session.state.navigationError, /did not finish loading/);
-  assert.equal(session.state.activeSpaceIndex, 1);
-  assert.equal(session.state.activePointIndex, 0);
-  assert.equal(session.active.reloadRequired, true);
-  let retried;
-  session.activate = async (...position) => { retried = position; };
-  await session.goTo(1, 0);
-  assert.deepEqual(retried, [1, 0]);
+test('a hosted space anywhere in a tour is rejected before creating a renderer', async () => {
+  for (const index of [0, 1]) {
+    for (const hosted of [
+      { type: 'matterport' },
+      { type: 'spaces', src: 'https://my.matterport.com/show/?m=Example' }
+    ]) {
+      const source = structuredClone(bootstrap);
+      Object.assign(source.orderedSpaces[index], hosted);
+      let appended = false;
+      const session = new ViewerSession({ append() { appended = true; } }, source, {});
+      await assert.rejects(session.init(), /native capture.*Matterport embeds are not supported/);
+      assert.equal(appended, false);
+    }
+  }
+  const source = structuredClone(bootstrap);
+  source.space.type = 'matterport';
+  await assert.rejects(new ViewerSession({}, source, {}).init(), /native capture/);
 });
 
 test('video annotation plays only when selected, follows mute and releases its resources', async () => {

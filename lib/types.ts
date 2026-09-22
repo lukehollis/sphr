@@ -301,7 +301,6 @@ export type SphrBootstrap = {
   tour?: SphrTour | null;
   ui?: TourUiText;
   orderedSpaces?: SphrSpace[];
-  integrations?: { matterport?: { sdkKey?: string } };
 };
 
 export type NormalizedTour = {
