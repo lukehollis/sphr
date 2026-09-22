@@ -133,7 +133,7 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .navigation-status { position: absolute; z-index: 25; top: 88px; left: var(--space-3); max-width: calc(100% - 48px); padding: var(--space-2); border-left: 3px solid var(--accent); background: var(--surface-page); font-size: var(--size-caption); }
 
 /* Authored tour text uses the same page stock and rules. Camera motion is unchanged. */
-.tour-overlay { position: absolute; top: 104px; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); z-index: 18; display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); pointer-events: none; }
+.tour-overlay { position: absolute; top: 104px; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); z-index: 18; display: flex; align-items: flex-end; padding-bottom: 60px; pointer-events: none; }
 .tour-copy { flex: 0 1 480px; min-width: 0; max-height: 100%; overflow: auto; overscroll-behavior: contain; padding: var(--space-2); border-top: var(--rule-strong); background: var(--surface-page); pointer-events: auto; text-align: left; }
 .tour-main-text { color: var(--text-heading); font-size: 22px; line-height: 1.4; }
 .tour-main-text > :first-child, .tour-secondary-text > :first-child { margin-top: 0; }
@@ -142,8 +142,9 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .tour-copy em, .tour-copy i { font-style: normal; }
 .tour-secondary-text { margin-top: var(--space-2); color: var(--text-muted); font-size: var(--size-body); line-height: var(--leading-body); }
 .tour-media { display: block; width: min(100%, 360px); max-height: 24vh; object-fit: contain; object-position: left; margin-bottom: var(--space-2); }
-.tour-nav { flex: none; display: flex; margin-left: auto; gap: var(--space-1); pointer-events: none; }
+.tour-nav { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: max-content; display: flex; pointer-events: none; }
 .tour-prev, .tour-next { width: 44px; height: 44px; padding: 0; pointer-events: auto; }
+.tour-prev { position: absolute; right: calc(100% + var(--space-1)); bottom: 0; }
 .tour-next { width: auto; min-width: 136px; padding: 0 var(--space-2); }
 .tour-button-label { display: none; }
 .tour-next .tour-button-label { display: inline; }
@@ -174,9 +175,9 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .scene-heading { font-size: var(--size-label); }
   .hud-right { align-self: flex-end; }
   .hud-left { left: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
-  .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: calc(100% - 128px - env(safe-area-inset-top)); flex-direction: column; align-items: stretch; gap: 0; background: var(--surface-page); }
-  .tour-nav { margin: 0; padding: var(--space-1) var(--space-2) calc(16px + env(safe-area-inset-bottom)); flex-direction: column; align-items: center; gap: var(--space-1); }
-  .tour-prev { width: auto; height: 44px; padding: var(--space-1) var(--space-2); font-size: var(--size-caption); }
+  .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: calc(100% - 128px - env(safe-area-inset-top)); padding: 0; flex-direction: column; align-items: stretch; gap: 0; background: var(--surface-page); }
+  .tour-nav { position: relative; bottom: auto; left: auto; transform: none; flex: none; width: auto; margin: 0; padding: var(--space-1) var(--space-2) calc(16px + env(safe-area-inset-bottom)); flex-direction: column; align-items: center; gap: var(--space-1); }
+  .tour-prev { position: static; width: auto; height: 44px; padding: var(--space-1) var(--space-2); font-size: var(--size-caption); }
   .tour-next { width: 100%; height: 72px; padding: var(--space-2); font-size: 22px; text-transform: uppercase; }
   .tour-next-final { font-size: 18px; }
   .tour-button-label { display: inline; }

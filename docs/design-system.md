@@ -57,7 +57,10 @@ row above the icons. Put the dollhouse control at the bottom only in free explor
 never show it while guided mode is active.
 
 Tour copy is anchored at the bottom-left on desktop in a compact panel, with
-navigation at the bottom-right. On smaller screens, copy and navigation share one
+Next fixed at the bottom center. Center the Next button itself; the smaller Previous
+button must not offset it. This is a hard deployment gate at every viewport width,
+during transitions, and for the final Continue exploring action. Reserve clearance
+above navigation so copy cannot overlap it. On smaller screens, copy and navigation share one
 full-width bottom panel. Keep long copy scrollable and navigation visible. Legacy
 `textPosition` values must not move copy to the top, center, or right.
 

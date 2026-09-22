@@ -50,6 +50,10 @@ for toggling guided/free-explore mode. Do not use a lightbulb for this control.
 Do not show share/copy-link or fullscreen buttons in the viewer.
 Keep tour copy at the bottom-left on desktop and in a full-width bottom panel on smaller screens.
 Legacy textPosition values do not override this layout.
+HARD GATE: Next itself must always be horizontally centered at the bottom of the
+viewport, including while moving and on the final Continue exploring action. Never
+align it to a corner or center the combined Previous/Next group instead. Verify
+rendered button bounds at desktop, breakpoint, and 320px mobile widths before deployment.
 On mobile, keep a full-width 72px Next text button at the bottom, with a small Previous
 button above it. Dollhouse stays at the bottom and is visible only in free exploration.
 Show the Next label on desktop too. Do not expose a text visibility toggle; authored copy stays visible in guided mode.

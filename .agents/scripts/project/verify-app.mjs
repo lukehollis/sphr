@@ -18,6 +18,33 @@ const url = argValue("--url", "http://localhost:3000/?demo=garden");
 const screenshots = process.argv.includes("--screenshots");
 const artifactDir = path.join(root, "tmp", "claude-verify");
 
+async function assertTourNavigation(page) {
+  const bounds = await page.evaluate(() => {
+    const next = document.querySelector('.tour-next');
+    const rect = next?.getBoundingClientRect();
+    const copy = document.querySelector('.tour-copy')?.getBoundingClientRect();
+    const previous = document.querySelector('.tour-prev')?.getBoundingClientRect();
+    return {
+      width: innerWidth, height: innerHeight,
+      next: rect?.toJSON(), copy: copy?.toJSON(), previous: previous?.toJSON(),
+      visible: Boolean(rect?.width && rect?.height && getComputedStyle(next).visibility === 'visible'),
+    };
+  });
+  const { next, previous, copy, width, height } = bounds;
+  if (!bounds.visible || !next || Math.abs(next.x + next.width / 2 - width / 2) > 1
+    || next.bottom > height || height - next.bottom > 64 || next.top < 0) {
+    throw new Error(`HARD GATE: Next must remain visible at the bottom center: ${JSON.stringify(bounds)}`);
+  }
+  const overlaps = (a, b) => a && b && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  if (overlaps(copy, next) || overlaps(copy, previous)) {
+    throw new Error(`Tour copy overlaps navigation: ${JSON.stringify(bounds)}`);
+  }
+  if (width <= 740 && (next.height < 72 || next.width < width - 33 || previous.bottom > next.top)) {
+    throw new Error(`Mobile requires full-width 72px Next with Previous above: ${JSON.stringify(bounds)}`);
+  }
+  return bounds;
+}
+
 async function verifyViewport(browser, name, viewport, mobile = false) {
   const page = await browser.newPage({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 2 : 1 });
   const consoleMessages = [];
@@ -64,8 +91,22 @@ async function verifyViewport(browser, name, viewport, mobile = false) {
     throw new Error("Scene must automatically start its available tour or free exploration without an entrance gate");
   }
   if (guidedAvailable) {
-    if (await page.getByRole("button", { name: "Switch to orbit view", exact: true }).count()) throw new Error("Dollhouse must be hidden in guided mode");
-    await page.getByRole("switch", { name: "Guide", exact: true }).click();
+    metrics.tourNavigation = await assertTourNavigation(page);
+    // Check movement as well as the settled frame: navigation must not disappear.
+    await page.locator('.tour-next').click();
+    if (await page.locator('.tour-next').count()) await assertTourNavigation(page);
+    await page.waitForFunction(() => !JSON.parse(document.querySelector('[data-sphr-session]').dataset.sphrSession).navigating);
+    const stillGuided = await page.locator('.tour-next').count() > 0;
+    if (stillGuided) {
+      await assertTourNavigation(page);
+      await page.locator('.tour-prev').click();
+      await page.waitForFunction(() => !JSON.parse(document.querySelector('[data-sphr-session]').dataset.sphrSession).navigating);
+      await assertTourNavigation(page);
+    }
+    if (stillGuided) {
+      if (await page.getByRole("button", { name: "Switch to orbit view", exact: true }).count()) throw new Error("Dollhouse must be hidden in guided mode");
+      await page.getByRole("switch", { name: "Guide", exact: true }).click();
+    }
   }
   await page.getByRole("button", { name: "Switch to orbit view", exact: true }).click();
   await page.waitForFunction(() => JSON.parse(document.querySelector("canvas").dataset.sphrState).state.viewMode === "ORBIT");
@@ -104,7 +145,10 @@ async function main() {
   try {
     const results = [
       await verifyViewport(browser, "desktop", { width: 1440, height: 980 }),
-      await verifyViewport(browser, "mobile", { width: 390, height: 844 }, true)
+      await verifyViewport(browser, "desktop-narrow", { width: 741, height: 720 }),
+      await verifyViewport(browser, "mobile-breakpoint", { width: 740, height: 720 }, true),
+      await verifyViewport(browser, "mobile", { width: 390, height: 844 }, true),
+      await verifyViewport(browser, "mobile-small", { width: 320, height: 720 }, true)
     ];
     const failures = results.flatMap((result) => [
       ...result.requestFailures.map((failure) => `${result.name}: ${failure}`),
