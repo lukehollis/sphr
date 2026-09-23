@@ -3,6 +3,7 @@ import AccountAuth from "@/components/AccountAuth";
 import { accountsEnabled, currentUser, safeReturnPath } from "@/lib/server/accounts";
 import { mailConfigured } from "@/lib/server/mail";
 import { enabledProviders } from "@/lib/server/oauth";
+import { priceLabel, siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in", robots: { index: false, follow: false } };
@@ -12,6 +13,6 @@ export default async function AccountLoginPage({ searchParams }: { searchParams:
   const params = await searchParams;
   const returnPath = safeReturnPath(params.next);
   if (await currentUser()) redirect(returnPath);
-  return <AccountAuth mode="login" providers={enabledProviders()} passwordEnabled={mailConfigured()} returnPath={returnPath}
+  return <AccountAuth brand={siteBrand()} price={await priceLabel()} mode="login" providers={enabledProviders()} passwordEnabled={mailConfigured()} returnPath={returnPath}
     error={typeof params.error === "string" ? params.error : undefined} />;
 }

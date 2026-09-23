@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import AuthShell, { customerFacts } from "./site/AuthShell";
 
 type Provider = { id: string; label: string };
 
@@ -25,8 +26,8 @@ function ProviderIcon({ id }: { id: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#0A66C2" d="M20.4 20.5h-3.6v-5.6c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9v5.7H9.3V9h3.4v1.6c.5-.9 1.7-1.8 3.4-1.8 3.6 0 4.3 2.4 4.3 5.5v6.2zM5.3 7.4a2.1 2.1 0 1 1 0-4.2 2.1 2.1 0 0 1 0 4.2zm1.8 13.1H3.5V9h3.6v11.5zM22.2 0H1.8C.8 0 0 .8 0 1.7v20.6c0 .9.8 1.7 1.8 1.7h20.4c1 0 1.8-.8 1.8-1.7V1.7C24 .8 23.2 0 22.2 0z"/></svg>;
 }
 
-export default function AccountAuth({ mode: initialMode, providers, passwordEnabled, returnPath, error: errorCode }:
-  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string }) {
+export default function AccountAuth({ mode: initialMode, providers, passwordEnabled, returnPath, error: errorCode, brand, price }:
+  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string; price: string | null }) {
   const [mode, setMode] = useState<"login" | "signup" | "forgot">(initialMode);
   const [error, setError] = useState(errorCode ? errors[errorCode] ?? errors.failed : "");
   const [message, setMessage] = useState("");
@@ -48,33 +49,41 @@ export default function AccountAuth({ mode: initialMode, providers, passwordEnab
     } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
   const next = returnPath === "/account" ? "" : `?next=${encodeURIComponent(returnPath)}`;
-  const heading = mode === "signup" ? "Create account" : mode === "forgot" ? "Reset password" : "Sign in";
-  return <main className="admin-login account-auth"><div className="admin-form">
-    <h1>{heading}</h1>
-    {mode !== "forgot" && providers.length > 0 && <div className="account-providers">
-      {providers.map(provider => <a key={provider.id} className="account-provider" href={`/api/auth/${provider.id}${next}`}>
-        <ProviderIcon id={provider.id} /><span>{`Continue with ${provider.label}`}</span></a>)}
-    </div>}
-    {mode !== "forgot" && providers.length > 0 && passwordEnabled && <p className="account-divider"><span>or</span></p>}
-    {passwordEnabled && <form className="admin-form" onSubmit={submit}>
-      {mode === "signup" && <><label htmlFor="name">Name</label><input id="name" name="name" autoComplete="name" maxLength={120} /></>}
-      <label htmlFor="email">Email</label><input id="email" name="email" type="email" autoComplete="email" required maxLength={254} />
-      {mode !== "forgot" && <><label htmlFor="password">Password</label>
-        <input id="password" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} required minLength={mode === "signup" ? 8 : undefined} maxLength={256} /></>}
-      {error && <p role="alert">{error}</p>}
-      {message && <p role="status">{message}</p>}
-      <button disabled={busy} type="submit">{busy ? "Please wait…" : mode === "signup" ? "Create account" : mode === "forgot" ? "Send reset link" : "Sign in"}</button>
-    </form>}
-    {!passwordEnabled && error && <p role="alert">{error}</p>}
-    <nav className="account-auth-links" aria-label="Account">
-      {mode === "login" && passwordEnabled && <button type="button" onClick={() => { setMode("forgot"); setError(""); }}>Forgot password?</button>}
-      {mode === "login" ? <a href={`/account/signup${next}`}>Create an account</a> : <a href={`/account/login${next}`}>Sign in instead</a>}
-    </nav>
-    <p className="account-legal">By continuing you agree to the <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>.</p>
-  </div></main>;
+  const heading = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Sign in";
+  const lede = mode === "signup" ? "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : "Welcome back.";
+  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces." facts={customerFacts(price)}>
+    <div className="site-auth-form">
+      <div className="site-auth-heading"><span className="site-code">{mode === "signup" ? "A.1" : mode === "forgot" ? "A.3" : "A.2"}</span><h2>{heading}</h2><p>{lede}</p></div>
+      {mode !== "forgot" && providers.length > 0 && <div className="site-providers">
+        {providers.map(provider => <a key={provider.id} className="site-provider" href={`/api/auth/${provider.id}${next}`}>
+          <ProviderIcon id={provider.id} /><span>{`Continue with ${provider.label}`}</span></a>)}
+      </div>}
+      {mode !== "forgot" && providers.length > 0 && passwordEnabled && <p className="site-divider"><span>or with email</span></p>}
+      {passwordEnabled && <form className="site-form" onSubmit={submit}>
+        {mode === "signup" && <div className="site-field"><label htmlFor="name">Name</label><input className="site-input" id="name" name="name" autoComplete="name" maxLength={120} /></div>}
+        <div className="site-field"><label htmlFor="email">Email</label><input className="site-input" id="email" name="email" type="email" autoComplete="email" required maxLength={254} /></div>
+        {mode !== "forgot" && <div className="site-field">
+          <div className="site-field-label"><label htmlFor="password">Password</label>
+            {mode === "login" && <button type="button" className="site-link" onClick={() => { setMode("forgot"); setError(""); setMessage(""); }}>Forgot password?</button>}</div>
+          <input className="site-input" id="password" name="password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} required minLength={mode === "signup" ? 8 : undefined} maxLength={256} />
+          {mode === "signup" && <p className="site-hint">At least 8 characters.</p>}
+        </div>}
+        {error && <p className="site-alert" role="alert">{error}</p>}
+        {message && <p className="site-note" role="status">{message}</p>}
+        <button className="site-button site-button-block" disabled={busy} type="submit">{busy ? "Please wait…" : mode === "signup" ? "Create account" : mode === "forgot" ? "Send reset link" : "Sign in"}<span aria-hidden="true">→</span></button>
+      </form>}
+      {!passwordEnabled && error && <p className="site-alert" role="alert">{error}</p>}
+      <p className="site-auth-switch">
+        {mode === "login" ? <>New here? <a href={`/account/signup${next}`}>Create an account</a></>
+          : mode === "signup" ? <>Already have an account? <a href={`/account/login${next}`}>Sign in</a></>
+          : <button type="button" className="site-link" onClick={() => { setMode("login"); setError(""); setMessage(""); }}>← Back to sign in</button>}
+      </p>
+      <p className="site-legal">By continuing you agree to the <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a>.</p>
+    </div>
+  </AuthShell>;
 }
 
-export function ResetPassword({ token }: { token: string }) {
+export function ResetPassword({ token, brand }: { token: string; brand: string }) {
   const [error, setError] = useState(token ? "" : "This link is incomplete. Request a new one.");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -87,17 +96,19 @@ export function ResetPassword({ token }: { token: string }) {
       window.location.assign("/account");
     } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
-  return <main className="admin-login account-auth"><form className="admin-form" onSubmit={submit}>
-    <h1>Choose a new password</h1>
-    <label htmlFor="password">New password</label><input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={256} />
-    <label htmlFor="confirm">Confirm password</label><input id="confirm" name="confirm" type="password" autoComplete="new-password" required minLength={8} maxLength={256} />
-    {error && <p role="alert">{error}</p>}
-    <button disabled={busy || !token} type="submit">{busy ? "Saving…" : "Save password"}</button>
-    <a href="/account/login">Back to sign in</a>
-  </form></main>;
+  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces.">
+    <form className="site-auth-form site-form" onSubmit={submit}>
+      <div className="site-auth-heading"><span className="site-code">A.4</span><h2>Choose a new password</h2><p>Other sessions are signed out when you save.</p></div>
+      <div className="site-field"><label htmlFor="password">New password</label><input className="site-input" id="password" name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={256} /></div>
+      <div className="site-field"><label htmlFor="confirm">Confirm password</label><input className="site-input" id="confirm" name="confirm" type="password" autoComplete="new-password" required minLength={8} maxLength={256} /></div>
+      {error && <p className="site-alert" role="alert">{error}</p>}
+      <button className="site-button site-button-block" disabled={busy || !token} type="submit">{busy ? "Saving…" : "Save password"}<span aria-hidden="true">→</span></button>
+      <p className="site-auth-switch"><a href="/account/login">← Back to sign in</a></p>
+    </form>
+  </AuthShell>;
 }
 
-export function ConfirmEmail({ token }: { token: string }) {
+export function ConfirmEmail({ token, brand }: { token: string; brand: string }) {
   const [error, setError] = useState(token ? "" : "This link is incomplete. Sign in to send a new one.");
   const [busy, setBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -107,11 +118,15 @@ export function ConfirmEmail({ token }: { token: string }) {
     catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
   }
-  return <main className="admin-login account-auth"><div className="admin-form">
-    <h1>{confirmed ? "Email address confirmed" : "Confirm your email address"}</h1>
-    <p className="admin-help">{confirmed ? "You can now add spaces to your account." : "Confirm that this address belongs to your account."}</p>
-    {error && <p role="alert">{error}</p>}
-    {!confirmed && <button type="button" disabled={busy || !token} onClick={confirm}>{busy ? "Confirming…" : "Confirm email address"}</button>}
-    <a href="/account">{confirmed ? "Continue to your spaces" : "Go to your spaces"}</a>
-  </div></main>;
+  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces.">
+    <div className="site-auth-form">
+      <div className="site-auth-heading"><span className="site-code">A.5</span>
+        <h2>{confirmed ? "Email address confirmed" : "Confirm your email address"}</h2>
+        <p>{confirmed ? "You can now add spaces to your account." : "Confirm that this address belongs to your account."}</p></div>
+      {error && <p className="site-alert" role="alert">{error}</p>}
+      {confirmed ? <a className="site-button site-button-block" href="/account">Continue to your spaces<span aria-hidden="true">→</span></a>
+        : <button type="button" className="site-button site-button-block" disabled={busy || !token} onClick={confirm}>{busy ? "Confirming…" : "Confirm email address"}<span aria-hidden="true">→</span></button>}
+      {!confirmed && <p className="site-auth-switch"><a href="/account">Go to your spaces</a></p>}
+    </div>
+  </AuthShell>;
 }
