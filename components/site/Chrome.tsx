@@ -14,7 +14,7 @@ export function Wordmark({ brand, href = "/account" }: { brand: string; href?: s
 
 export type NavItem = { href: string; label: string; current?: boolean };
 
-export function SiteFooter({ brand, links = [] }: { brand: string; links?: NavItem[] }) {
+export function SiteFooter({ brand, links = [] }: { brand: ReactNode; links?: NavItem[] }) {
   return <footer className="site-footer">
     <span>{brand}</span>
     <nav aria-label="Legal">{links.map(link => <a key={link.href} href={link.href}>{link.label}</a>)}</nav>
