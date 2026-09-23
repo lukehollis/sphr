@@ -2,18 +2,21 @@
 
 import { useMemo, useState } from "react";
 import type { SceneListing } from "@/lib/scene-types";
+import SiteHeader from "./site/SiteHeader";
+import { SiteFooter } from "./site/Chrome";
 
 const isGuided = (scene: SceneListing) => scene.hasGuidedTour ?? scene.legacy?.kind === "tour";
 
 function SceneThumbnail({ scene }: { scene: SceneListing }) {
   const [failed, setFailed] = useState(false);
-  return <div className="scene-thumbnail">
+  return <div className="site-card-media">
     {!failed ? <img src={scene.thumbnail} alt="" loading="lazy" decoding="async" width={960} height={640} onError={() => setFailed(true)} />
-      : <span className="thumbnail-fallback">{scene.title.slice(0, 1)}</span>}
+      : <span className="site-card-letter" aria-hidden="true">{scene.title.slice(0, 1)}</span>}
+    {isGuided(scene) && <span className="site-card-tag site-card-kind">Guided tour</span>}
   </div>;
 }
 
-export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
+export default function SceneLibrary({ scenes, showAdminLink = false, brand }: { scenes: SceneListing[]; showAdminLink?: boolean; brand: string }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recent");
   const [kind, setKind] = useState("all");
@@ -26,38 +29,42 @@ export default function SceneLibrary({ scenes }: { scenes: SceneListing[] }) {
         : b.createdAt.localeCompare(a.createdAt) || a.title.localeCompare(b.title));
   }, [scenes, query, sort, kind]);
 
-  return <div className="space-library">
-    <div className="library-shell library-shell-with-footer">
-      <main className="library-layout" aria-label="Spaces">
-        <aside className="library-toolbar" aria-label="Filter collection">
-          <div className="library-kind" role="group" aria-label="Collection type">
-            {[["all", "All"], ["guided", "Guided tours"], ["spaces", "Spaces"]].map(([value, label]) =>
-              <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>)}
-          </div>
-          <label className="library-search-label" htmlFor="space-search">Search spaces</label>
-          <div className="library-search"><input id="space-search" type="search" placeholder="Title or scene ID" value={query} onChange={event => setQuery(event.target.value)} />{query && <button aria-label="Clear search" onClick={() => setQuery("")}>Clear</button>}</div>
-          <label className="library-sort" htmlFor="space-sort">Sort by</label>
-          <select id="space-sort" className="library-sort-select" value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort spaces"><option value="recent">Recently added</option><option value="title">Title A–Z</option><option value="locations">Most locations</option></select>
-        </aside>
-        <div className="library-exhibit">
-          <p className="sr-only" role="status">{filtered.length} {filtered.length === 1 ? "space" : "spaces"} found</p>
-          <section className="space-grid" aria-label="Available spaces">
-            {filtered.map(scene => <article className="space-card" key={scene.sceneId}>
-              <a className="space-card-link" href={scene.scenePath} aria-label={`Explore ${scene.title}`}>
-                <SceneThumbnail scene={scene} />
-                <div className="space-card-copy">{isGuided(scene) && <span className="space-card-kind">Guided tour</span>}<h2>{scene.title}</h2></div>
-              </a>
-            </article>)}
-          </section>
-          {!filtered.length && <section className="library-empty"><p>{scenes.length ? "No spaces found." : "No public spaces."}</p>{query && <button className="share-link-button" onClick={() => setQuery("")}>Clear search</button>}</section>}
+  return <div className="site"><div className="site-frame">
+    <SiteHeader brand={brand} home="/" nav={showAdminLink ? [{ href: "/", label: "Collection", current: true }, { href: "/admin", label: "Manage spaces" }] : []}
+      signOut={showAdminLink ? "admin" : undefined} />
+    <main className="site-main" aria-label="Spaces">
+      <h1 className="sr-only">Spaces</h1>
+      <div className="site-toolbar" role="search" aria-label="Filter collection">
+        <div className="site-segmented site-kind" role="group" aria-label="Collection type">
+          {[["all", "All"], ["guided", "Guided tours"], ["spaces", "Spaces"]].map(([value, label]) =>
+            <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)}>{label}</button>)}
         </div>
-      </main>
-      <footer className="library-footer">
-        <p>© {new Date().getFullYear()} <a href="https://mused.com/">mused.com</a></p>
-        <nav aria-label="Account">
-          <a href="/admin">Manage spaces</a>
-        </nav>
-      </footer>
-    </div>
-  </div>;
+        <div className="site-field site-search">
+          <label htmlFor="space-search">Search spaces</label>
+          <div className="site-search-box">
+            <input className="site-input" id="space-search" type="search" placeholder="Title or scene ID" value={query} onChange={event => setQuery(event.target.value)} />
+            {query && <button type="button" className="site-link" aria-label="Clear search" onClick={() => setQuery("")}>Clear</button>}
+          </div>
+        </div>
+        <div className="site-field site-sort">
+          <label htmlFor="space-sort">Sort by</label>
+          <select id="space-sort" className="site-input site-select" value={sort} onChange={event => setSort(event.target.value)}>
+            <option value="recent">Recently added</option><option value="title">Title A–Z</option><option value="locations">Most locations</option>
+          </select>
+        </div>
+      </div>
+      <p className="sr-only" role="status">{filtered.length} {filtered.length === 1 ? "space" : "spaces"} found</p>
+      <section className="site-grid" aria-label="Available spaces">
+        {filtered.map(scene => <a className="site-card" key={scene.sceneId} href={scene.scenePath} aria-label={`Explore ${scene.title}`}>
+          <SceneThumbnail scene={scene} />
+          <div className="site-card-body"><h3>{scene.title}</h3></div>
+        </a>)}
+      </section>
+      {!filtered.length && <div className="site-callout site-callout-action">
+        <p>{scenes.length ? "No spaces found." : "No public spaces."}</p>
+        {query && <button type="button" className="site-button site-button-secondary" onClick={() => setQuery("")}>Clear search</button>}
+      </div>}
+    </main>
+    <SiteFooter brand={<>© {new Date().getFullYear()} <a href="https://mused.com/">mused.com</a></>} />
+  </div></div>;
 }

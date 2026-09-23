@@ -1,5 +1,9 @@
 "use client";
 
+import ErrorSheet from "@/components/site/ErrorSheet";
+
 export default function ErrorPage({ reset }: { reset: () => void }) {
-  return <main className="library-message"><h1>Unable to open the collection.</h1><p>Please try again in a moment.</p><button type="button" className="share-link-button" onClick={reset}>Try again</button></main>;
+  return <ErrorSheet code="500" title="This page didn’t load." text="Something went wrong on our side. Try again in a moment.">
+    <button type="button" className="site-button" onClick={reset}>Try again<span aria-hidden="true">→</span></button>
+  </ErrorSheet>;
 }

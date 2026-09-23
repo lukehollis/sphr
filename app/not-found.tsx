@@ -1,3 +1,9 @@
+import ErrorSheet from "@/components/site/ErrorSheet";
+import { accountsEnabled } from "@/lib/server/accounts";
+
 export default function NotFound() {
-  return <main className="library-message"><p className="eyebrow">Space not found</p><h1>This space isn’t here.</h1><p>The link may be incomplete, or the space may have been removed.</p><a href="/">Browse all spaces</a></main>;
+  const [href, label] = accountsEnabled() ? ["/account", "Go to your spaces"] : ["/", "Browse all spaces"];
+  return <ErrorSheet code="404" title="This space isn’t here." text="The link may be incomplete, or the space may have been removed.">
+    <a className="site-button" href={href}>{label}<span aria-hidden="true">→</span></a>
+  </ErrorSheet>;
 }

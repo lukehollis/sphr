@@ -4,6 +4,7 @@ import { listCustomerSpaces, readUser } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { applyCheckoutSession, billingEnabled, readPrice, syncQuantity } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
+import { siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your spaces", robots: { index: false, follow: false } };
@@ -24,5 +25,5 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     : params.checkout ? "Payment received. Add your files to each space." : undefined;
   const fresh = readUser(user.id)!;
   const spaces = await Promise.all(listCustomerSpaces(fresh.id).map(describeSpace));
-  return <AccountDashboard account={describeAccount(fresh)} spaces={spaces} price={await readPrice()} notice={notice} />;
+  return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} price={await readPrice()} notice={notice} />;
 }

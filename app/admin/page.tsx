@@ -3,6 +3,7 @@ import AdminPanel from "@/components/AdminPanel";
 import { readAllScenes } from "@/lib/scene-catalog";
 import { accessControlled, isScenePublic } from "@/lib/server/admin-store";
 import { isAdmin } from "@/lib/server/auth";
+import { siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Manage spaces", robots: { index: false, follow: false } };
@@ -10,5 +11,5 @@ export const metadata = { title: "Manage spaces", robots: { index: false, follow
 export default async function AdminPage() {
   if (!accessControlled()) notFound();
   if (!(await isAdmin())) redirect("/admin/login");
-  return <AdminPanel scenes={(await readAllScenes()).map(scene => ({ ...scene, public: isScenePublic(scene.sceneId) }))} />;
+  return <AdminPanel scenes={(await readAllScenes()).map(scene => ({ ...scene, public: isScenePublic(scene.sceneId) }))} brand={siteBrand()} />;
 }
