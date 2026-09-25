@@ -26,8 +26,8 @@ function ProviderIcon({ id }: { id: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#0A66C2" d="M20.4 20.5h-3.6v-5.6c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9v5.7H9.3V9h3.4v1.6c.5-.9 1.7-1.8 3.4-1.8 3.6 0 4.3 2.4 4.3 5.5v6.2zM5.3 7.4a2.1 2.1 0 1 1 0-4.2 2.1 2.1 0 0 1 0 4.2zm1.8 13.1H3.5V9h3.6v11.5zM22.2 0H1.8C.8 0 0 .8 0 1.7v20.6c0 .9.8 1.7 1.8 1.7h20.4c1 0 1.8-.8 1.8-1.7V1.7C24 .8 23.2 0 22.2 0z"/></svg>;
 }
 
-export default function AccountAuth({ mode: initialMode, providers, passwordEnabled, returnPath, error: errorCode, brand, price }:
-  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string; price: string | null }) {
+export default function AccountAuth({ mode: initialMode, providers, passwordEnabled, returnPath, error: errorCode, brand }:
+  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string }) {
   const [mode, setMode] = useState<"login" | "signup" | "forgot">(initialMode);
   const [error, setError] = useState(errorCode ? errors[errorCode] ?? errors.failed : "");
   const [message, setMessage] = useState("");
@@ -51,7 +51,7 @@ export default function AccountAuth({ mode: initialMode, providers, passwordEnab
   const next = returnPath === "/account" ? "" : `?next=${encodeURIComponent(returnPath)}`;
   const heading = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Sign in";
   const lede = mode === "signup" ? "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : "Welcome back.";
-  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces." facts={customerFacts(price)}>
+  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces." facts={customerFacts}>
     <div className="site-auth-form">
       <div className="site-auth-heading"><span className="site-code">{mode === "signup" ? "A.1" : mode === "forgot" ? "A.3" : "A.2"}</span><h2>{heading}</h2><p>{lede}</p></div>
       {mode !== "forgot" && providers.length > 0 && <div className="site-providers">
