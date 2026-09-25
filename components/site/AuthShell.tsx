@@ -21,11 +21,9 @@ export default function AuthShell({ brand, home = "/account", headline, facts = 
   </div>;
 }
 
-export function customerFacts(price: string | null): Fact[] {
-  return [
-    { code: "1.1", title: "Upload anything", text: "Matterport and E57 exports, Gaussian splats, 360° photos and video, lidar and meshes." },
-    { code: "1.2", title: "Processed for you", text: "Agents build, check and publish each space, then email you." },
-    price ? { code: "1.3", title: price.replace(" per space per ", " per space, per "), text: "One invoice covers every space. Delete a space any time." }
-      : { code: "1.3", title: "Private until shared", text: "Only you can open a space until you make it public." }
-  ];
-}
+/** The price is left to Checkout: people often sign in only to open a space. */
+export const customerFacts: Fact[] = [
+  { code: "1.1", title: "Upload anything", text: "Matterport and E57 exports, Gaussian splats, 360° photos and video, lidar and meshes." },
+  { code: "1.2", title: "Processed for you", text: "Agents build, check and publish each space, then email you." },
+  { code: "1.3", title: "Private until shared", text: "Only you can open a space until you make it public." }
+];

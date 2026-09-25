@@ -10,7 +10,9 @@ The flow for a customer:
 1. Sign up with Google, Apple, LinkedIn, or an email address and password (`/account/signup`).
    Email accounts confirm their address before adding spaces.
 2. Add a space. The first space opens Stripe Checkout for a per-space subscription; later
-   spaces are added to the same subscription, prorated on the next invoice.
+   spaces are added to the same subscription, prorated on the next invoice. The price is
+   first shown at Checkout: sign-in, sign-up and the account page leave it out, because
+   many visitors sign in only to open a space. Subscribers see it where they add a space.
 3. Upload capture files of any kind: Matterport or other E57 exports, Gaussian splats, 360
    photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers upload directly
    to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted multi-gigabyte
@@ -131,7 +133,7 @@ new password with *Forgot password?*. Email confirmation links open a page with 
 
 1. Create a product (for example "Space hosting") with a **recurring, per-unit price**
    (standard pricing, licensed usage, monthly or yearly). Put its ID in `SPHR_STRIPE_PRICE_ID`.
-   The account page reads the amount from Stripe, so changing the price needs no rebuild;
+   The app reads the amount from Stripe, so changing the price needs no rebuild;
    create a new price and update the setting.
 2. Add a webhook endpoint `https://app.example.com/api/stripe/webhook` for
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,

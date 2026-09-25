@@ -8,8 +8,6 @@ import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
 import type { PriceSummary } from "@/lib/server/billing";
 import { formatPrice } from "@/lib/price";
 
-export { formatPrice };
-
 export const statusLabels: Record<string, string> = {
   unpaid: "Waiting for payment", draft: "Add files", queued: "Submitted", processing: "Processing",
   ready: "Ready", failed: "Needs attention"
@@ -43,7 +41,10 @@ export function spaceStatus(space: SpaceView) {
   return space.status;
 }
 
-/** Billing figures across the top of the page, and a call to action when billing needs attention. */
+/**
+ * Billing figures across the top of the page, and a call to action when billing needs attention.
+ * The price itself waits for Checkout; only a running subscription shows its next invoice.
+ */
 function BillingSummary({ account, spaces, price }: { account: AccountView; spaces: SpaceView[]; price?: PriceSummary }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -70,9 +71,8 @@ function BillingSummary({ account, spaces, price }: { account: AccountView; spac
   return <>
     <dl className="site-stats">
       <div><dt>Spaces</dt><dd>{hosted}</dd></div>
-      {account.billing && <div><dt>Price</dt><dd>{price ? formatPrice(price).replace(" per space per ", " / space / ") : "—"}</dd></div>}
-      {account.billing && <div><dt>{subscription?.cancelAtPeriodEnd ? "Billing ends" : "Next invoice"}</dt>
-        <dd>{active && subscription?.periodEnd ? <>{formatDate(subscription.periodEnd)}{total && <small>{total}</small>}</> : "—"}</dd></div>}
+      {account.billing && active && subscription?.periodEnd ? <div><dt>{subscription.cancelAtPeriodEnd ? "Billing ends" : "Next invoice"}</dt>
+        <dd>{formatDate(subscription.periodEnd)}{total && <small>{total}</small>}</dd></div> : null}
       {account.billing && action && <div className="site-stats-action">
         <button type="button" className={`site-button${alert ? "" : " site-button-secondary"}`} disabled={busy} onClick={() => go(action[0])}>{busy ? "Opening…" : action[1]}</button>
       </div>}
@@ -143,10 +143,9 @@ export default function AccountDashboard({ account, spaces, price, notice, brand
             <label htmlFor="space-title">Title</label>
             <input className="site-input" id="space-title" name="title" required maxLength={200} placeholder="Riverside studio" disabled={blocked} />
           </div>
-          <button className="site-button" type="submit" disabled={busy || blocked}>{busy ? "Adding…" : account.billing && !active ? "Add and pay" : "Add space"}<span aria-hidden="true">→</span></button>
+          <button className="site-button" type="submit" disabled={busy || blocked}>{busy ? account.billing && !active ? "Opening checkout…" : "Adding…" : "Add space"}<span aria-hidden="true">→</span></button>
         </form>
-        {account.billing && price && <p className="site-hint">{active ? `Adds ${formatPrice(price).replace(" per space", "")}, prorated for this period.`
-          : `Checkout opens next. ${formatPrice(price)}. Delete a space any time.`}</p>}
+        {account.billing && active && price && <p className="site-hint">Adds {formatPrice(price).replace(" per space", "")}, prorated for this period.</p>}
       </section>
 
       <section className="site-block" aria-labelledby="space-list">
