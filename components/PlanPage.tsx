@@ -87,7 +87,7 @@ export default function PlanPage({ account: initial, plans, brand }: { account: 
             <button type="button" className="site-button" disabled={busy || !selected || selected.id === current?.id} onClick={change}>
               {busy ? "Changing plans…" : selected && selected.id !== current?.id ? `Switch to ${planLabel(selected)}` : "Choose another plan"}</button>
             <button type="button" className="site-link" disabled={busy} onClick={portal}>Billing and invoices</button>
-          </> : spaces > 0 ? <button type="button" className="site-button" disabled={busy || !selected} onClick={pay}>
+          </> : spaces > 0 ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
             {busy ? "Opening payment…" : "Continue to payment"}<span aria-hidden="true">→</span></button>
           : <a className="site-button" href="/account">Add a space<span aria-hidden="true">→</span></a>}
         </div>

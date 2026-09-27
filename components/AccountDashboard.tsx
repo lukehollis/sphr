@@ -75,7 +75,7 @@ function BillingBar({ account, spaces, plans }: { account: AccountView; spaces: 
   return <>
     {alert && <div className="site-callout site-callout-action" role="status">
       <p>{alert}</p>
-      {action && (action[0] === "plan" ? <a className="site-button" href="/account/plan">{action[1]}</a>
+      {action && (action[0] === "plan" ? <a className="site-button site-button-accent" href="/account/plan">{action[1]}</a>
         : <button type="button" className="site-button" disabled={busy} onClick={portal}>{busy ? "Opening…" : action[1]}</button>)}
     </div>}
     {!alert && active && subscription && <div className="spaces-billing">
@@ -241,7 +241,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
           <h1>Your spaces</h1>
           <p>Drop a capture anywhere on this page and it becomes a space you can share.</p>
         </div>
-        <button type="button" className="site-button spaces-add-button" onClick={openFresh} disabled={blocked}>
+        <button type="button" className="site-button site-button-accent spaces-add-button" onClick={openFresh} disabled={blocked}>
           <span aria-hidden="true" className="spaces-plus" />Add a space
         </button>
       </div>
