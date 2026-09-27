@@ -25,5 +25,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     : params.checkout ? "Payment received. Add your files to each space." : undefined;
   const fresh = readUser(user.id)!;
   const spaces = await Promise.all(listCustomerSpaces(fresh.id).map(describeSpace));
-  return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} price={await readPrice()} notice={notice} />;
+  return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} price={await readPrice()} notice={notice}
+    fromCheckout={typeof params.checkout === "string"} />;
 }

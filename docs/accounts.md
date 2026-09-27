@@ -9,19 +9,31 @@ The flow for a customer:
 
 1. Sign up with Google, Apple, LinkedIn, or an email address and password (`/account/signup`).
    Email accounts confirm their address before adding spaces.
-2. Add a space. The first space opens Stripe Checkout for a per-space subscription; later
-   spaces are added to the same subscription, prorated on the next invoice. The price is
-   first shown at Checkout: sign-in, sign-up and the account page leave it out, because
-   many visitors sign in only to open a space. Subscribers see it where they add a space.
-3. Upload capture files of any kind: Matterport or other E57 exports, Gaussian splats, 360
-   photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers upload directly
-   to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted multi-gigabyte
-   uploads resume.
-4. Processing starts on its own 15 seconds after an upload finishes (the customer can start it
-   at once or wait to add more files). A waiting agent runner picks the job up within seconds,
-   and the space page shows the agent's latest step as it works. When the space is published
-   the customer is emailed and can preview it, make it public, and edit its title, start view
-   and thumbnail. If the upload cannot become a space, the page says what to upload instead.
+2. Add a space. *Add a space* (or files dragged anywhere onto *Your spaces*) opens a
+   full-screen sheet that takes files or whole folders. The space is created at once, titled
+   from the file or folder names (the customer can change the title then or later). The
+   first space needs a per-space subscription: payment opens in a new tab and the dropped
+   files start uploading in the first tab as soon as it goes through. Later spaces join the
+   same subscription, prorated on the next invoice. The price is first shown at Checkout:
+   sign-in, sign-up and the account page leave it out, because many visitors sign in only
+   to open a space. Subscribers see it in the sheet where they add a space.
+3. Capture files of any kind upload from the sheet: Matterport or other E57 exports, Gaussian
+   splats, 360 photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers
+   upload directly to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted
+   multi-gigabyte uploads resume. Uploads keep going after the sheet is closed while the page
+   stays open, and each space's card shows its progress.
+4. Processing starts on its own 10 seconds after an upload finishes (the customer can start it
+   at once or wait to add more files, and leaving the page during those seconds starts it at once).
+   Files added later to a hosted space wait until the customer reprocesses it. A waiting agent
+   runner picks the job up within seconds, and the cards and the space page show the agent's
+   latest step as it works. The customer is emailed when processing starts, when the space is
+   published (with its preview image) and when it cannot be finished, and can then preview
+   it, make it public, and edit its title, start view and thumbnail. If the upload cannot
+   become a space, the page says what to upload instead.
+
+Account emails (address confirmation, password resets, sign-in changes and the processing
+notices above) are sent as HTML with a plain-text alternative, laid out after the 1975 NASA
+Graphics Standards Manual. The templates are in `lib/server/emails.ts`.
 
 Customer spaces are listed from the application database, never from the shared
 `index.json` catalog, so they do not appear in any public listing. *Private* means the
