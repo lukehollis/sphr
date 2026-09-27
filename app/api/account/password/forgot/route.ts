@@ -2,6 +2,8 @@ import { allowAttempt } from "@/lib/server/admin-store";
 import { createUserToken, normalizeEmail, readUserByEmail } from "@/lib/server/accounts-store";
 import { accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrigin, readAccountBody } from "@/lib/server/accounts";
 import { mailConfigured, sendMail } from "@/lib/server/mail";
+import { passwordResetEmail } from "@/lib/server/emails";
+import { siteBrand } from "@/lib/server/brand";
 
 export async function POST(request: Request) {
   if (!accountsEnabled() || !mailConfigured()) return accountResponse({ error: "Password reset is unavailable." }, 404);
@@ -16,8 +18,7 @@ export async function POST(request: Request) {
     const origin = publicOrigin(request);
     const token = createUserToken(user.id, "reset", 60 * 60 * 1000);
     // Not awaited: response time must not reveal whether the account exists.
-    void sendMail(user.email, "Reset your password",
-      `Choose a new password for your account at ${origin}:\n\n${origin}/account/reset?token=${token}\n\nThe link expires in one hour. If you did not ask for this, ignore this message.`)
+    void sendMail(user.email, passwordResetEmail(siteBrand(), origin, `${origin}/account/reset?token=${token}`))
       .catch(error => console.error("Unable to send password reset email:", error instanceof Error ? error.message : error));
   }
   return accountResponse({ ok: true });

@@ -174,9 +174,15 @@ export function smtpSink() {
 function decodeMessage(raw) {
   const [headers, ...rest] = raw.split('\n\n');
   let body = rest.join('\n\n');
+  // Plain text with an HTML alternative: decode each part.
+  const boundary = headers.replace(/\n\s+/g, ' ').match(/Content-Type: multipart\/[\w-]+;.*?boundary="?([^";\s]+)"?/i)?.[1];
+  if (boundary) {
+    const parts = body.split(`--${boundary}`).slice(1).filter(part => !part.startsWith('--'));
+    return `${headers}\n\n${parts.map(part => decodeMessage(part.replace(/^\n/, ''))).join('\n\n')}`;
+  }
   if (/Content-Transfer-Encoding: base64/i.test(headers)) body = Buffer.from(body.replace(/\s+/g, ''), 'base64').toString('utf8');
   if (/Content-Transfer-Encoding: quoted-printable/i.test(headers)) {
-    body = body.replace(/=\n/g, '').replace(/=([0-9A-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    body = Buffer.from(body.replace(/=\n/g, '').replace(/=([0-9A-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1').toString('utf8');
   }
   return `${headers}\n\n${body}`;
 }

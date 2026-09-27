@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { db, hashPassword, verifyPassword } from "./admin-store";
+import { formatBytes } from "../bytes";
 
 // Customer accounts share the admin state database so one backup covers visibility,
 // edits, accounts, billing state and the processing queue.
@@ -403,12 +404,7 @@ export function setUploadStatus(id: string, status: UploadStatus) {
   store().prepare("UPDATE uploads SET status=?, session=CASE WHEN ?='uploading' THEN session ELSE NULL END WHERE id=?").run(status, status, id);
 }
 
-export function formatBytes(bytes: number) {
-  const units = ["bytes", "KB", "MB", "GB", "TB"];
-  let value = bytes, unit = 0;
-  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
-  return `${unit ? value.toFixed(value < 10 ? 1 : 0) : value} ${units[unit]}`;
-}
+export { formatBytes };
 
 // ---- Processing queue ----
 

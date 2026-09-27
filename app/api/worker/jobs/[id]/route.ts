@@ -3,6 +3,8 @@ import { AccountError, claimJob, cleanText, finishJob, holdJob, readJob, readUse
 import { accountsEnabled, notifyOwner, publicOrigin } from "@/lib/server/accounts";
 import { jobDetails, jobListing, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { listingRevision, removePublishedScene } from "@/lib/server/published-assets";
+import { spaceFailedEmail, spaceReadyEmail } from "@/lib/server/emails";
+import { siteBrand } from "@/lib/server/brand";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -46,7 +48,8 @@ export async function POST(request: Request, { params }: Params) {
     }
     if (body?.action === "complete") {
       // The listing stays in the application database, out of the shared public catalog.
-      try { jobListing(job, body.scene); }
+      let listing;
+      try { listing = jobListing(job, body.scene); }
       catch (error) { return workerResponse({ error: `Invalid scene listing: ${error instanceof Error ? error.message : error}` }, 400); }
       // Stored as published and validated again whenever it is read.
       const result = finishJob(job.id, { ok: true, message, listing: body.scene });
@@ -57,9 +60,8 @@ export async function POST(request: Request, { params }: Params) {
         void removePublishedScene(job.sceneId, revision).catch(error => console.error("Unable to remove earlier revisions:", error instanceof Error ? error.message : error));
       }
       if (result.job.status === "done") {
-        const origin = publicOrigin(request);
-        await notifyOwner(readUser(result.space.userId), "Your space is ready",
-          `${result.space.title} is ready. Only you can open it until you make it public:\n\n${origin}/account/spaces/${result.space.id}`);
+        await notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
+          { path: listing.scenePath, thumbnail: listing.thumbnail }));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }
@@ -67,8 +69,7 @@ export async function POST(request: Request, { params }: Params) {
       if (!message) return workerResponse({ error: "Explain the failure for the customer." }, 400);
       const result = finishJob(job.id, { ok: false, message });
       if (result.job.status === "failed") {
-        await notifyOwner(readUser(result.space.userId), "Your space needs attention",
-          `We could not finish ${result.space.title}:\n\n${message}\n\n${publicOrigin(request)}/account/spaces/${result.space.id}`);
+        await notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }

@@ -5,6 +5,8 @@ import { AccountError, consumeOAuthState, signInWithIdentity } from "@/lib/serve
 import { accountsEnabled, notifyOwner, publicOrigin, startUserSession } from "@/lib/server/accounts";
 import { appleName, exchangeCode, oauthProvider } from "@/lib/server/oauth";
 import { clearOAuthCookie, oauthCookie } from "@/lib/server/oauth-cookie";
+import { providerLinkedEmail } from "@/lib/server/emails";
+import { siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ provider: string }> };
@@ -47,8 +49,7 @@ async function finish(request: Request, id: string, callback: Callback) {
     throw error;
   }
   if (result.passwordRemoved) {
-    await notifyOwner(result.user, `${provider.label} sign-in added to your account`,
-      `You signed in to ${origin} with ${provider.label}. Your account's password was removed and other sessions were signed out. To use a password again, choose "Forgot password?" on the sign-in page.`);
+    await notifyOwner(result.user, providerLinkedEmail(siteBrand(), origin, provider.label));
   }
   await startUserSession(result.user.id);
   return leave(check.returnPath);

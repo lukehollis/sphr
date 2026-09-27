@@ -5,7 +5,9 @@ import { createUserSession, createUserToken, deleteUserSession, hostingActive, r
   type CustomerSpace, type User } from "./accounts-store";
 import { adminResponse, cookieOptions, isAdmin, readAdminBody, sameOrigin } from "./auth";
 import { billingEnabled } from "./billing";
-import { sendMail } from "./mail";
+import { sendMail, type MailContent } from "./mail";
+import { verificationEmail } from "./emails";
+import { siteBrand } from "./brand";
 
 /** Customer accounts are optional and build on the private-by-default access control. */
 export function accountsEnabled() {
@@ -58,13 +60,12 @@ export function spaceHosted(space: CustomerSpace) {
 
 export async function sendVerification(user: User, origin: string) {
   const token = createUserToken(user.id, "verify", 7 * 24 * 60 * 60 * 1000);
-  await sendMail(user.email, "Confirm your email address",
-    `Confirm the email address for your account at ${origin}:\n\n${origin}/account/verify?token=${token}\n\nThe link expires in 7 days. If you did not create an account, ignore this message.`);
+  await sendMail(user.email, verificationEmail(siteBrand(), origin, `${origin}/account/verify?token=${token}`));
 }
 
-export async function notifyOwner(user: User | undefined, subject: string, text: string) {
+export async function notifyOwner(user: User | undefined, content: MailContent) {
   if (!user) return;
-  try { await sendMail(user.email, subject, text); }
+  try { await sendMail(user.email, content); }
   catch (error) { console.error("Unable to send account email:", error instanceof Error ? error.message : error); }
 }
 
