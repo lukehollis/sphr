@@ -2,6 +2,7 @@
 @import "./design-system/typography.css";
 @import "./design-system/spacing.css";
 @import "./design-system/site.css";
+@import "./design-system/spaces.css";
 
 * { box-sizing: border-box; }
 html, body {

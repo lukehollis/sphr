@@ -1,8 +1,16 @@
 import { allowAttempt } from "@/lib/server/admin-store";
-import { AccountError, cleanText, createCustomerSpace, hostingStatuses, readCustomerSpace, readSubscription, removeCustomerSpaceRecord } from "@/lib/server/accounts-store";
-import { accountRequest, accountResponse, attemptKey, publicOrigin } from "@/lib/server/accounts";
+import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCustomerSpaces, readCustomerSpace, readSubscription, removeCustomerSpaceRecord } from "@/lib/server/accounts-store";
+import { accountRequest, accountResponse, accountsEnabled, attemptKey, currentUser, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
 import { describeSpace } from "@/lib/server/customer-spaces";
+
+/** The customer's spaces, newest first, for refreshing the page while spaces are processing. */
+export async function GET() {
+  if (!accountsEnabled()) return accountResponse({ error: "Accounts are unavailable." }, 404);
+  const user = await currentUser();
+  if (!user) return accountResponse({ error: "Sign in to continue." }, 401);
+  return accountResponse({ spaces: await Promise.all(listCustomerSpaces(user.id).map(describeSpace)) });
+}
 
 /** Adds a space. With billing, it joins the subscription or waits for Checkout. */
 export async function POST(request: Request) {
