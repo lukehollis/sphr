@@ -1,8 +1,10 @@
-import { AccountError, cleanText, readCustomerSpace, submitCustomerSpace } from "@/lib/server/accounts-store";
+import { AccountError, cleanText, listUploads, readCustomerSpace, submitCustomerSpace } from "@/lib/server/accounts-store";
 import { allowAttempt } from "@/lib/server/admin-store";
-import { accountRequest, accountResponse, attemptKey, spaceHosted } from "@/lib/server/accounts";
+import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { describeSpace } from "@/lib/server/customer-spaces";
 import { announceJob } from "@/lib/server/job-signal";
+import { filesReceivedEmail } from "@/lib/server/emails";
+import { siteBrand } from "@/lib/server/brand";
 
 /** Queues the uploaded files for processing. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -19,6 +21,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     submitCustomerSpace(space.id, cleanText(body?.notes, 2000));
     announceJob();
+    const files = listUploads(space.id).filter(upload => upload.status === "complete");
+    // Not awaited: the page should not wait on the mail server.
+    void notifyOwner(user, filesReceivedEmail(siteBrand(), publicOrigin(request), space,
+      { count: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0) }));
     return accountResponse({ ok: true, space: await describeSpace(readCustomerSpace(space.id)!) });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
