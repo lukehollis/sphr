@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { accountRequest } from "./AccountAuth";
-import { legalLinks, openBilling, spaceStatus } from "./AccountDashboard";
+import { accountNav, legalLinks, spaceStatus } from "./AccountDashboard";
 import SiteHeader from "./site/SiteHeader";
 import { SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
 import UploadModal, { batchActive, useUploadBatches } from "./UploadModal";
@@ -91,10 +91,6 @@ export default function SpaceManager({ space: initial, account, brand }: { space
     try { await accountRequest(`/api/account/spaces/${space.id}`, undefined, "DELETE"); window.location.assign("/account"); }
     catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
-  async function pay() {
-    setBusy(true); setError("");
-    try { await openBilling("checkout"); } catch (failure) { setError((failure as Error).message); setBusy(false); }
-  }
 
   const steps = [...(account.billing ? ["Payment"] : []), "Upload", "Processing", "Hosted"];
   const reached = space.status === "unpaid" ? "Payment" : ["draft", "failed"].includes(space.status) ? "Upload"
@@ -104,7 +100,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
   const status = spaceStatus(space);
 
   return <div className="site"><div className="site-frame">
-    <SiteHeader brand={brand} nav={[{ href: "/account", label: "Your spaces" }]} account={account.email} signOut="account" />
+    <SiteHeader brand={brand} nav={accountNav(account, "space")} account={account.email} signOut="account" />
     <main className="site-main">
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
@@ -154,7 +150,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
             <p>{detail}</p>
             {waiting && space.job?.progress && <p className="site-progress" aria-live="polite"><span>Latest step</span>{space.job.progress}</p>}
             {space.message && !waiting && <blockquote className="site-quote">{space.message}</blockquote>}
-            {space.status === "unpaid" && <button type="button" className="site-button site-button-block" disabled={busy} onClick={pay}>Complete payment<span aria-hidden="true">→</span></button>}
+            {space.status === "unpaid" && <a className="site-button site-button-block" href="/account/plan">Complete payment<span aria-hidden="true">→</span></a>}
           </div>
           {space.scene && <div className="site-aside-block">
             <h3>Sharing</h3>

@@ -5,10 +5,11 @@ import AuthShell, { customerFacts } from "./site/AuthShell";
 
 type Provider = { id: string; label: string };
 
+/** Posts JSON to an account route. A failure throws an error carrying the status and the response body. */
 export async function accountRequest(url: string, body?: object, method = "POST") {
   const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Something went wrong. Try again.");
+  if (!response.ok) throw Object.assign(new Error(data.error || "Something went wrong. Try again."), { status: response.status, data });
   return data;
 }
 

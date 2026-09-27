@@ -24,7 +24,7 @@ function store() {
       nonce TEXT NOT NULL, return_path TEXT NOT NULL, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS subscriptions (user_id TEXT PRIMARY KEY, subscription TEXT NOT NULL UNIQUE, item TEXT,
       status TEXT NOT NULL, quantity INTEGER NOT NULL, period_end INTEGER, cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
-      updated TEXT NOT NULL);
+      updated TEXT NOT NULL, plan TEXT);
     CREATE TABLE IF NOT EXISTS customer_spaces (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL,
       status TEXT NOT NULL, scene_id TEXT UNIQUE, listing TEXT, notes TEXT, message TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS customer_spaces_user ON customer_spaces(user_id);
@@ -36,6 +36,10 @@ function store() {
     CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
     CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, received TEXT NOT NULL);
   `);
+  // Databases from before plans were added gain the column; their subscriptions are per space.
+  if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "plan")) {
+    connection.exec("ALTER TABLE subscriptions ADD COLUMN plan TEXT");
+  }
   prepared = true;
   return connection;
 }
@@ -241,12 +245,27 @@ export function setCheckoutSession(userId: string, session: string | null) {
 // ---- Billing state (Stripe remains the source of truth; this is its latest copy) ----
 
 export const hostingStatuses = new Set(["active", "trialing", "past_due"]);
-export type Subscription = { id: string; item: string | null; status: string; quantity: number; periodEnd: number | null; cancelAtPeriodEnd: boolean };
-type SubscriptionRow = { subscription: string; item: string | null; status: string; quantity: number; period_end: number | null; cancel_at_period_end: number };
+/** The price a subscription pays. `spaces` is how many spaces a plan covers; null means billed per space. */
+export type SubscriptionPlan = { price: string; amount: number | null; currency: string; interval: string; intervalCount: number; spaces: number | null };
+export type Subscription = { id: string; item: string | null; status: string; quantity: number; periodEnd: number | null; cancelAtPeriodEnd: boolean;
+  plan: SubscriptionPlan | null };
+type SubscriptionRow = { subscription: string; item: string | null; status: string; quantity: number; period_end: number | null; cancel_at_period_end: number;
+  plan: string | null };
+
+function parsePlan(value: string | null): SubscriptionPlan | null {
+  try { return value ? JSON.parse(value) as SubscriptionPlan : null; } catch { return null; }
+}
 
 export function readSubscription(userId: string): Subscription | undefined {
   const row = store().prepare("SELECT * FROM subscriptions WHERE user_id=?").get(userId) as SubscriptionRow | undefined;
-  return row && { id: row.subscription, item: row.item, status: row.status, quantity: row.quantity, periodEnd: row.period_end, cancelAtPeriodEnd: row.cancel_at_period_end === 1 };
+  return row && { id: row.subscription, item: row.item, status: row.status, quantity: row.quantity, periodEnd: row.period_end,
+    cancelAtPeriodEnd: row.cancel_at_period_end === 1, plan: parsePlan(row.plan) };
+}
+
+/** How many spaces the customer's plan covers, or null when each space is billed. */
+export function planSpaceLimit(userId: string) {
+  const subscription = readSubscription(userId);
+  return subscription && hostingStatuses.has(subscription.status) ? subscription.plan?.spaces ?? null : null;
 }
 
 export function saveSubscription(userId: string, subscription: Subscription) {
@@ -255,11 +274,12 @@ export function saveSubscription(userId: string, subscription: Subscription) {
     // A late event for an older, ended subscription must not replace a live one.
     if (current && current.id !== subscription.id && hostingStatuses.has(current.status) && !hostingStatuses.has(subscription.status)) return;
     store().prepare("DELETE FROM subscriptions WHERE subscription=? AND user_id<>?").run(subscription.id, userId);
-    store().prepare(`INSERT INTO subscriptions VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
+    store().prepare(`INSERT INTO subscriptions(user_id, subscription, item, status, quantity, period_end, cancel_at_period_end, updated, plan)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
       subscription=excluded.subscription, item=excluded.item, status=excluded.status, quantity=excluded.quantity,
-      period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, updated=excluded.updated`)
+      period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, updated=excluded.updated, plan=excluded.plan`)
       .run(userId, subscription.id, subscription.item, subscription.status, subscription.quantity, subscription.periodEnd,
-        Number(subscription.cancelAtPeriodEnd), now());
+        Number(subscription.cancelAtPeriodEnd), now(), subscription.plan ? JSON.stringify(subscription.plan) : null);
   });
 }
 
@@ -311,10 +331,16 @@ export function spaceForScene(sceneId: string) {
   return row ? toSpace(row) : undefined;
 }
 
-export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft") {
+/** A space the customer's plan does not cover; the customer can change plans to add it. */
+export class PlanLimitError extends AccountError {}
+
+export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null) {
   return transaction(() => {
     const { count } = store().prepare("SELECT count(*) AS count FROM customer_spaces WHERE user_id=? AND status<>'deleted'").get(userId) as { count: number };
     if (count >= maxSpacesPerAccount) throw new AccountError("This account has reached its space limit. Contact support to add more.");
+    if (planSpaces !== null && count >= planSpaces) {
+      throw new PlanLimitError(`Your plan covers ${planSpaces} ${planSpaces === 1 ? "space" : "spaces"}. Change plans to add another.`);
+    }
     if (status === "unpaid") {
       const { waiting } = store().prepare("SELECT count(*) AS waiting FROM customer_spaces WHERE user_id=? AND status='unpaid'").get(userId) as { waiting: number };
       if (waiting >= 10) throw new AccountError("Complete payment for your existing spaces first.");

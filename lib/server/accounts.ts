@@ -43,7 +43,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/spaces\/[a-f0-9]{12}(?:\/edit)?)?|s\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?)?$/;
+const returnPattern = /^\/(?:account(?:\/plan|\/spaces\/[a-f0-9]{12}(?:\/edit)?)?|s\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?)?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }

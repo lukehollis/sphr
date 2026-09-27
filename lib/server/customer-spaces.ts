@@ -1,8 +1,9 @@
 import { readSceneEdits } from "./admin-store";
 import { isScenePublic } from "./admin-store";
-import { latestJob, listUploads, readSubscription, type CustomerSpace, type User } from "./accounts-store";
+import { latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
+import { sourceUrl } from "./brand";
 import { maxSpaceBytes } from "./uploads";
 import { readSourceScenes } from "../scene-catalog";
 import { editedListing } from "../scene-edits";
@@ -27,9 +28,11 @@ export function describeAccount(user: User) {
   const subscription = billingEnabled() ? readSubscription(user.id) : undefined;
   return {
     email: user.email, name: user.name, emailVerified: user.emailVerified, hasPassword: user.hasPassword, providers: user.providers,
-    billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(),
+    billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null,
+    /** Spaces that count toward a plan: every space not deleted. */
+    spaceCount: payableSpaceCount(user.id),
     subscription: subscription ? { status: subscription.status, quantity: subscription.quantity, periodEnd: subscription.periodEnd,
-      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd } : null
+      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd, plan: subscription.plan } : null
   };
 }
 export type AccountView = ReturnType<typeof describeAccount>;

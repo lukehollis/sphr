@@ -12,11 +12,16 @@ The flow for a customer:
 2. Add a space. *Add a space* (or files dragged anywhere onto *Your spaces*) opens a
    full-screen sheet that takes files or whole folders. The space is created at once, titled
    from the file or folder names (the customer can change the title then or later). The
-   first space needs a per-space subscription: payment opens in a new tab and the dropped
-   files start uploading in the first tab as soon as it goes through. Later spaces join the
-   same subscription, prorated on the next invoice. The price is first shown at Checkout:
-   sign-in, sign-up and the account page leave it out, because many visitors sign in only
-   to open a space. Subscribers see it in the sheet where they add a space.
+   first space starts hosting: the sheet shows the ways to pay with pay as you go chosen
+   (a price per space each month) beside any plans that cover a set number of spaces for one
+   price, payment opens in a new tab for the chosen one, and the dropped files start
+   uploading in the first tab as soon as it goes through. On pay as you go, later spaces
+   join the same subscription, prorated on the next invoice. On a plan, spaces are added
+   until the plan is full; the sheet then keeps the files while the customer moves to a
+   plan with room. Prices appear in the sheet, on the plan page (`/account/plan`) and, for
+   subscribers, above their spaces. Sign-in, sign-up and an account without spaces leave
+   them out, because many visitors sign in only to open a space. When `SPHR_SOURCE_URL`
+   is set, the plan choice notes that the service is open source and links to its code.
 3. Capture files of any kind upload from the sheet: Matterport or other E57 exports, Gaussian
    splats, 360 photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers
    upload directly to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted
@@ -41,10 +46,13 @@ viewer page requires the owner's (or the operator's) sign-in. The published asse
 are served from unguessable URLs, so they are private only if the asset bucket does not
 allow anonymous object listing; see [upload and asset storage](#upload-storage).
 
-The subscription quantity always equals the customer's spaces that are not deleted.
-Deleting a space lowers it (credited on the next invoice). If a subscription ends or
-stays unpaid, the customer's spaces go offline until billing restarts; `past_due`
-subscriptions stay online while Stripe retries the payment. The operator's `/admin`
+On pay as you go, the subscription quantity always equals the customer's spaces that are
+not deleted. Deleting a space lowers it (credited on the next invoice). A plan is one unit
+whatever the number of spaces, and a customer cannot add more spaces than it covers. Plans
+change on the plan page: the subscription item moves to the new price at once, and the
+difference is prorated onto the next regular invoice. A plan must cover every space the
+customer has. If a subscription ends or stays unpaid, the customer's spaces go offline
+until billing restarts; `past_due` subscriptions stay online while Stripe retries the payment. The operator's `/admin`
 login is separate and continues to see and manage every space.
 
 ## Runtime settings
@@ -75,7 +83,8 @@ SPHR_LINKEDIN_CLIENT_SECRET=...
 
 # Billing. Without these, customer spaces are free.
 SPHR_STRIPE_SECRET_KEY=sk_live_...
-SPHR_STRIPE_PRICE_ID=price_...
+SPHR_STRIPE_PRICE_ID=price_...                # pay as you go, per space
+SPHR_STRIPE_PLAN_PRICES=price_...,price_...   # optional plans covering a set number of spaces
 SPHR_STRIPE_WEBHOOK_SECRET=whsec_...
 # SPHR_STRIPE_AUTOMATIC_TAX=1                 # after enabling Stripe Tax
 
@@ -96,6 +105,8 @@ SPHR_CUSTOMER_ASSET_BUCKET=example-customer-assets
 # Privacy and terms pages (/privacy, /terms), linked from sign-in. Review their wording.
 SPHR_OPERATOR_NAME="Example Spaces"
 SPHR_CONTACT_EMAIL=support@example.com
+# Where the code this deployment runs is published. The plan choice links to it.
+# SPHR_SOURCE_URL=https://github.com/example/sphr
 ```
 
 Restart the service after changing these. Accounts, sessions, subscriptions, spaces,
@@ -143,10 +154,19 @@ new password with *Forgot password?*. Email confirmation links open a page with 
 
 ## Stripe
 
-1. Create a product (for example "Space hosting") with a **recurring, per-unit price**
+1. Create a product (for example "Pay as you go") with a **recurring, per-unit price**
    (standard pricing, licensed usage, monthly or yearly). Put its ID in `SPHR_STRIPE_PRICE_ID`.
    The app reads the amount from Stripe, so changing the price needs no rebuild;
    create a new price and update the setting.
+   Plans are optional: one product per plan (for example "Starter") with a recurring price
+   whose metadata `sphr_spaces` is the number of spaces it covers. List their price IDs,
+   comma-separated, in `SPHR_STRIPE_PLAN_PRICES`. Plans show under their product names,
+   from the smallest, after pay as you go. Give every price the same currency and interval.
+   With Stripe Managed Payments, each product needs an eligible tax code such as
+   `txcd_10701100` (Website Hosting). `scripts/deploy/stripe-setup.mjs` creates all of this,
+   by default pay as you go at 2 USD a space and Starter (8 USD, 6 spaces), Pro (50 USD,
+   30 spaces) and Enterprise (249 USD, 200 spaces) a month; change them with `--amount`
+   and `--plans name:cents:spaces,...`.
 2. Add a webhook endpoint `https://app.example.com/api/stripe/webhook` for
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `customer.subscription.created`, `customer.subscription.updated`,
@@ -154,10 +174,15 @@ new password with *Forgot password?*. Email confirmation links open a page with 
    `customer.subscription.resumed`. Its signing secret is `SPHR_STRIPE_WEBHOOK_SECRET`.
 3. Configure the Customer Portal: allow payment method updates, invoice history and
    cancellation at the end of the billing period. **Do not allow quantity or plan changes**;
-   the quantity follows the number of spaces and is reset to it if changed elsewhere.
+   the quantity follows the number of spaces (or is one for a plan) and is reset if changed
+   elsewhere, and plan changes happen in the application, which checks that a plan covers
+   every space.
 
-When you change the price, existing subscriptions keep the price they started with, and
-new subscriptions use the new one. Move existing customers to a new price in Stripe if needed.
+When you change a price, existing subscriptions keep the price they started with, and
+new subscriptions use the new one. A plan price keeps its space limit in its metadata, so
+customers on a retired plan price keep its limit. Move existing customers to a new price in
+Stripe if needed. Plan changes and added spaces are never invoiced on their own, because
+Managed Payments does not allow invoices outside the billing period.
 
 Stripe's fixed fee applies per invoice, not per space: all of a customer's spaces share
 one subscription and one invoice per period. Proration for spaces added or deleted mid-period
@@ -329,10 +354,11 @@ npm run build
 ```
 
 `test:accounts` covers passwords, sessions, single-use links, account linking, ID token
-verification, the queue and billing against a local stand-in for the Stripe API.
-`test:accounts-routes` starts a development server with local stand-ins for Stripe,
-the three identity providers and an SMTP server, then exercises sign-up, verification,
-every sign-in method, Checkout and webhooks, pausing and resuming hosting, resumable
+verification, the queue and billing (pay as you go, plans and plan changes) against a local
+stand-in for the Stripe API. `test:accounts-routes` starts a development server with local
+stand-ins for Stripe, the three identity providers and an SMTP server, then exercises
+sign-up, verification, every sign-in method, Checkout on each plan and webhooks, full plans
+and plan changes, pausing and resuming hosting, resumable
 uploads, customer isolation, private viewing and editing, and the agent runner. Run it
 in a checkout without local capture packages, because it installs a test package into
 `public/datasets` and removes it afterwards. Test live providers and Stripe test mode on

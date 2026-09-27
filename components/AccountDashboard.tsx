@@ -5,11 +5,12 @@ import { accountRequest } from "./AccountAuth";
 import SiteHeader from "./site/SiteHeader";
 import { ConstructionDrawing, SiteFooter, StatusMark } from "./site/Chrome";
 import UploadModal, { awaitingPaymentKey, batchActive, useUploadBatches, type Batch } from "./UploadModal";
+import { cheaperPlan, currentPlan, hostingActive, periodTotal } from "./PlanPicker";
 import { getJson } from "./uploads";
 import { formatBytes } from "@/lib/bytes";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
-import type { PriceSummary } from "@/lib/server/billing";
-import { formatPrice } from "@/lib/price";
+import type { Plan } from "@/lib/server/billing";
+import { formatMoney, formatPeriod } from "@/lib/price";
 
 export const legalLinks = [{ href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
 
@@ -21,15 +22,16 @@ function shortDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function money(amount: number, currency: string) {
-  const zeroDecimal = new Set(["jpy", "krw", "vnd", "clp", "pyg", "ugx", "xaf", "xof"]);
-  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(zeroDecimal.has(currency) ? amount : amount / 100);
+/** Stripe's billing portal: payment methods, invoices and cancellation. */
+export async function openPortal() {
+  const { url } = await accountRequest("/api/account/billing/portal");
+  window.location.assign(url);
 }
 
-export async function openBilling(kind: "checkout" | "portal") {
-  const { url } = await accountRequest(`/api/account/billing/${kind}`);
-  // Without a URL, an earlier payment was just applied.
-  if (url) window.location.assign(url); else window.location.reload();
+/** The account's pages; the plan page is listed once there is billing to manage. */
+export function accountNav(account: AccountView, current: "spaces" | "plan" | "space") {
+  return [{ href: "/account", label: "Your spaces", current: current === "spaces" },
+    ...(account.billing && (account.subscription || current === "plan") ? [{ href: "/account/plan", label: "Plan", current: current === "plan" }] : [])];
 }
 
 /** The status a space shows on its card. */
@@ -39,45 +41,53 @@ export function spaceStatus(space: SpaceView) {
   return space.status;
 }
 
-const hostingActive = (account: AccountView) => Boolean(account.subscription && ["active", "trialing", "past_due"].includes(account.subscription.status));
-
 /**
- * The count of spaces, the next invoice for subscribers, and a call to action when billing
- * needs attention. The price itself waits for Checkout.
+ * The plan, the spaces it holds, its price and renewal date for subscribers, and a call to action
+ * when billing needs attention. Choosing a plan and paying happen on the plan page.
  */
-function BillingBar({ account, spaces, price }: { account: AccountView; spaces: SpaceView[]; price?: PriceSummary }) {
+function BillingBar({ account, spaces, plans }: { account: AccountView; spaces: SpaceView[]; plans: Plan[] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const subscription = account.subscription;
   const active = hostingActive(account);
   const unpaid = spaces.some(space => space.status === "unpaid");
-  async function go(kind: "checkout" | "portal") {
+  async function portal() {
     setBusy(true); setError("");
-    try { await openBilling(kind); } catch (failure) { setError((failure as Error).message); setBusy(false); }
+    try { await openPortal(); } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
-  let alert = "", action: ["checkout" | "portal", string] | undefined;
+  let alert = "", action: ["plan" | "portal", string] | undefined;
   if (subscription && ["unpaid", "incomplete", "paused"].includes(subscription.status)) {
     alert = "Hosting is paused until a payment goes through. Update your payment method to bring your spaces back online.";
     action = ["portal", "Update payment method"];
   } else if (!active && spaces.length && (unpaid || subscription)) {
     alert = subscription ? "Hosting is paused because billing ended. Restart billing to bring your spaces back online." : "Complete payment to start uploading.";
-    action = ["checkout", subscription ? "Restart billing" : "Complete payment"];
+    action = ["plan", subscription ? "Restart billing" : "Complete payment"];
   } else if (subscription?.status === "past_due") {
     alert = "Your last payment did not go through. Update your payment method to keep your spaces online.";
     action = ["portal", "Update payment method"];
-  } else if (active) action = ["portal", "Billing and invoices"];
-  if (!account.billing || (!action && !alert)) return null;
+  }
+  if (!account.billing || (!alert && !(active && subscription))) return null;
+  const plan = currentPlan(plans, subscription);
   const hosted = spaces.filter(space => space.status !== "unpaid").length;
-  const total = price && active && subscription ? money(price.amount * subscription.quantity, price.currency) : null;
+  const covers = subscription?.plan?.spaces ?? null;
+  const total = subscription && periodTotal(subscription);
+  const better = active && covers === null ? cheaperPlan(plans, hosted) : undefined;
   return <>
     {alert && <div className="site-callout site-callout-action" role="status">
       <p>{alert}</p>
-      {action && <button type="button" className="site-button" disabled={busy} onClick={() => go(action[0])}>{busy ? "Opening…" : action[1]}</button>}
+      {action && (action[0] === "plan" ? <a className="site-button" href="/account/plan">{action[1]}</a>
+        : <button type="button" className="site-button" disabled={busy} onClick={portal}>{busy ? "Opening…" : action[1]}</button>)}
     </div>}
     {!alert && active && subscription && <div className="spaces-billing">
-      <p><strong>{hosted} {hosted === 1 ? "space" : "spaces"} hosted</strong>
-        {subscription.periodEnd ? <span>{subscription.cancelAtPeriodEnd ? "Billing ends" : "Next invoice"} {formatDate(subscription.periodEnd)}{total ? `, ${total}` : ""}</span> : null}</p>
-      {action && <button type="button" className="site-link" disabled={busy} onClick={() => go(action[0])}>{busy ? "Opening…" : action[1]}</button>}
+      <p><strong>{plan?.name ?? (covers === null ? "Pay as you go" : "Your plan")}</strong>
+        <span>{covers === null ? `${hosted} ${hosted === 1 ? "space" : "spaces"}` : `${hosted} of ${covers} spaces`}</span>
+        {total && <span>{total}</span>}
+        {subscription.periodEnd ? <span>{subscription.cancelAtPeriodEnd ? "Ends" : "Renews"} {formatDate(subscription.periodEnd)}</span> : null}
+        {better && <a className="spaces-billing-offer" href="/account/plan">{better.name} covers up to {better.spaces} spaces for {formatMoney(better.amount, better.currency)} {formatPeriod(better.interval, better.intervalCount)}</a>}</p>
+      <span className="spaces-billing-actions">
+        <a className="site-link" href="/account/plan">Change plan</a>
+        <button type="button" className="site-link" disabled={busy} onClick={portal}>{busy ? "Opening…" : "Billing and invoices"}</button>
+      </span>
     </div>}
     {error && <p className="site-alert" role="alert">{error}</p>}
   </>;
@@ -152,9 +162,10 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   </article>;
 }
 
-export default function AccountDashboard({ account, spaces: initial, price, notice, fromCheckout, brand }:
-  { account: AccountView; spaces: SpaceView[]; price?: PriceSummary; notice?: string; fromCheckout?: boolean; brand: string }) {
+export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand }:
+  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string }) {
   const [spaces, setSpaces] = useState(initial);
+  const [account, setAccount] = useState(initialAccount);
   const [error, setError] = useState("");
   const [message, setMessage] = useState(notice ?? "");
   const [modal, setModal] = useState(false);
@@ -162,6 +173,7 @@ export default function AccountDashboard({ account, spaces: initial, price, noti
   const refresh = useCallback(async () => {
     const result = await getJson("/api/account/spaces").catch(() => undefined);
     if (result?.spaces) setSpaces(result.spaces);
+    if (result?.account) setAccount(result.account);
   }, []);
   const uploads = useUploadBatches(refresh);
   const blocked = !account.emailVerified;
@@ -208,13 +220,21 @@ export default function AccountDashboard({ account, spaces: initial, price, noti
     return () => { window.removeEventListener("dragenter", enter); window.removeEventListener("dragover", over); window.removeEventListener("drop", over); };
   }, [modal, openFresh]);
 
-  const priceHint = account.billing && hostingActive(account) && price ? `Each space adds ${formatPrice(price).replace(" per space", "")}, prorated for this period.` : undefined;
+  const active = hostingActive(account);
+  const plan = currentPlan(plans, account.subscription);
+  const perSpace = plans.find(item => item.spaces === null);
+  const covers = active ? account.subscription?.plan?.spaces ?? null : null;
+  const priceHint = !account.billing ? undefined
+    : !active ? perSpace && `You start on pay as you go at ${formatMoney(perSpace.amount, perSpace.currency)} ${formatPeriod(perSpace.interval, perSpace.intervalCount)} for each space, and you can choose a plan before paying.`
+    : covers !== null ? `${plan?.name ?? "Your plan"} covers ${covers} spaces and you have ${account.spaceCount}.`
+    : account.subscription?.plan?.amount ? `Each space adds ${formatMoney(account.subscription.plan.amount, account.subscription.plan.currency)} ${formatPeriod(account.subscription.plan.interval, account.subscription.plan.intervalCount)}, prorated for this period.`
+    : undefined;
   const bySpace = new Map(uploads.batches.filter(batch => batch.spaceId).map(batch => [batch.spaceId!, batch]));
   // A space that is still being created has no card yet.
   const pending = uploads.batches.filter(batch => !batch.spaceId && batchActive(batch));
 
   return <div className="site"><div className="site-frame">
-    <SiteHeader brand={brand} nav={[{ href: "/account", label: "Your spaces", current: true }]} account={account.email} signOut="account" />
+    <SiteHeader brand={brand} nav={accountNav(account, "spaces")} account={account.email} signOut="account" />
     <main className="site-main">
       <div className="spaces-head">
         <div>
@@ -233,7 +253,7 @@ export default function AccountDashboard({ account, spaces: initial, price, noti
         <p>Confirm your email address to add spaces. We sent a link to <strong>{account.email}</strong>.</p>
         <button type="button" className="site-button site-button-secondary" onClick={resend}>Send a new link</button>
       </div>}
-      <BillingBar account={account} spaces={spaces} price={price} />
+      <BillingBar account={account} spaces={spaces} plans={plans} />
 
       {spaces.length || pending.length ? <section aria-label="Spaces" className="spaces-grid">
         <button type="button" className="space-add" onClick={openFresh} disabled={blocked}>
@@ -244,9 +264,9 @@ export default function AccountDashboard({ account, spaces: initial, price, noti
         {pending.map(batch => <article key={batch.key} className="space-card space-card-uploading">
           <button type="button" className="space-card-media" onClick={() => { setBatchKey(batch.key); setModal(true); }}>
             <span className="space-art space-art-upload" aria-hidden="true"><ConstructionDrawing /></span>
-            <span className="space-card-tag"><StatusMark status="processing" label="Setting up" /></span>
+            <span className="space-card-tag"><StatusMark status="processing" label={batch.phase === "full" ? "Plan full" : "Setting up"} /></span>
           </button>
-          <div className="space-card-body"><h3>{batch.title}</h3><p>Creating the space</p></div>
+          <div className="space-card-body"><h3>{batch.title}</h3><p>{batch.phase === "full" ? "Change plans to add it" : "Creating the space"}</p></div>
         </article>)}
         {spaces.map(space => <SpaceCard key={space.id} space={space} batch={bySpace.get(space.id)} onOpenBatch={key => { setBatchKey(key); setModal(true); }} />)}
       </section>
@@ -261,6 +281,7 @@ export default function AccountDashboard({ account, spaces: initial, price, noti
     </main>
     <SiteFooter brand={brand} links={legalLinks} />
     <UploadModal open={modal} onClose={() => setModal(false)} uploads={uploads} batchKey={current ? batchKey : null}
-      onBatch={key => setBatchKey(key)} maxBytes={account.maxSpaceBytes} priceHint={priceHint} />
+      onBatch={key => setBatchKey(key)} maxBytes={account.maxSpaceBytes} priceHint={priceHint}
+      billing={account.billing ? { plans, current: active ? plan?.id ?? null : null, spaces: account.spaceCount, brand, sourceUrl: account.sourceUrl } : undefined} />
   </div></div>;
 }

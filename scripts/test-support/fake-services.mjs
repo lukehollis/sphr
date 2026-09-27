@@ -9,10 +9,25 @@ export function listen(handler) {
   });
 }
 
+// Prices the stand-in knows: pay as you go per space, and plans covering a set number of spaces.
+export const fakePrices = {
+  price_space: { unit_amount: 100, product: { id: 'prod_space', name: 'Pay as you go' }, metadata: {} },
+  price_starter: { unit_amount: 800, product: { id: 'prod_starter', name: 'Starter' }, metadata: { sphr_plan: 'starter', sphr_spaces: '6' } },
+  price_pro: { unit_amount: 5000, product: { id: 'prod_pro', name: 'Pro' }, metadata: { sphr_plan: 'pro', sphr_spaces: '30' } },
+  price_enterprise: { unit_amount: 24900, product: { id: 'prod_enterprise', name: 'Enterprise' }, metadata: { sphr_plan: 'enterprise', sphr_spaces: '200' } }
+};
+
 // A small stand-in for the Stripe API, keeping just enough state for billing flows.
-export function fakeStripe() {
-  const state = { customers: new Map(), sessions: new Map(), subscriptions: new Map(), updates: [], counter: 0 };
+// Checkout links point at `checkoutBase`, so a local page can stand in for Checkout.
+export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
+  const state = { customers: new Map(), sessions: new Map(), subscriptions: new Map(), updates: [], planChanges: [], counter: 0 };
   const id = prefix => `${prefix}_test${++state.counter}`;
+  const price = (priceId, expand) => {
+    const known = fakePrices[priceId] ?? { unit_amount: 100, product: { id: 'prod_other', name: 'Other' }, metadata: {} };
+    return { id: priceId, object: 'price', active: true, currency: 'usd', unit_amount: known.unit_amount, metadata: known.metadata,
+      nickname: null, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
+      product: expand ? { object: 'product', ...known.product } : known.product.id };
+  };
   const handler = async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -20,7 +35,7 @@ export function fakeStripe() {
     const url = new URL(request.url, 'http://stripe');
     const send = (value, status = 200) => { response.statusCode = status; response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(value)); };
     const parts = url.pathname.split('/').filter(Boolean);
-    if (request.method === 'GET' && parts[1] === 'prices') return send({ id: parts[2], object: 'price', unit_amount: 100, currency: 'usd', recurring: { interval: 'month', interval_count: 1 } });
+    if (request.method === 'GET' && parts[1] === 'prices') return send(price(parts[2], [...url.searchParams].some(([key, value]) => key.startsWith('expand') && value === 'product')));
     if (request.method === 'POST' && parts[1] === 'customers') {
       const customer = { id: id('cus'), object: 'customer', email: form.get('email'), metadata: { sphr_user: form.get('metadata[sphr_user]') } };
       state.customers.set(customer.id, customer);
@@ -29,7 +44,7 @@ export function fakeStripe() {
     if (parts[1] === 'checkout' && parts[2] === 'sessions') {
       if (request.method === 'POST' && parts.length === 3) {
         const session = { id: id('cs'), object: 'checkout.session', mode: form.get('mode'), status: 'open', customer: form.get('customer'),
-          client_reference_id: form.get('client_reference_id'), url: `https://checkout.example/${state.counter}`, subscription: null,
+          client_reference_id: form.get('client_reference_id'), url: `${checkoutBase}/${state.counter}`, subscription: null,
           quantity: Number(form.get('line_items[0][quantity]')), price: form.get('line_items[0][price]'), success_url: form.get('success_url') };
         state.sessions.set(session.id, session);
         return send(session);
@@ -37,7 +52,7 @@ export function fakeStripe() {
       const session = state.sessions.get(parts[3]);
       if (!session) return send({ error: { message: 'No such session', type: 'invalid_request_error' } }, 404);
       if (parts[4] === 'expire') { session.status = 'expired'; return send(session); }
-      return send({ ...session, line_items: { object: 'list', data: [{ quantity: session.quantity }] } });
+      return send({ ...session, line_items: { object: 'list', data: [{ quantity: session.quantity, price: price(session.price) }] } });
     }
     if (request.method === 'GET' && parts[1] === 'subscriptions' && parts.length === 2) {
       const data = [...state.subscriptions.values()].filter(item => item.customer === url.searchParams.get('customer'));
@@ -45,7 +60,16 @@ export function fakeStripe() {
     }
     if (parts[1] === 'subscriptions') {
       const subscription = state.subscriptions.get(parts[2]);
-      return subscription ? send(subscription) : send({ error: { message: 'No such subscription', type: 'invalid_request_error' } }, 404);
+      if (!subscription) return send({ error: { message: 'No such subscription', type: 'invalid_request_error' } }, 404);
+      if (request.method === 'POST') {
+        // Changing plans: the item keeps its ID and takes the new price and quantity.
+        const item = subscription.items.data.find(entry => entry.id === form.get('items[0][id]'));
+        if (!item) return send({ error: { message: 'No such item', type: 'invalid_request_error' } }, 400);
+        if (form.has('items[0][price]')) item.price = price(form.get('items[0][price]'));
+        if (form.has('items[0][quantity]')) item.quantity = Number(form.get('items[0][quantity]'));
+        state.planChanges.push({ price: item.price.id, quantity: item.quantity, proration: form.get('proration_behavior') });
+      }
+      return send(subscription);
     }
     if (request.method === 'POST' && parts[1] === 'subscription_items') {
       for (const subscription of state.subscriptions.values()) {
@@ -66,7 +90,7 @@ export function fakeStripe() {
     const session = state.sessions.get(sessionId);
     const subscription = { id: id('sub'), object: 'subscription', status: 'active', customer: session.customer, cancel_at_period_end: false,
       metadata: { sphr_user: session.client_reference_id },
-      items: { object: 'list', data: [{ id: id('si'), object: 'subscription_item', quantity: session.quantity, current_period_end: 1900000000, price: { id: session.price } }] } };
+      items: { object: 'list', data: [{ id: id('si'), object: 'subscription_item', quantity: session.quantity, current_period_end: 1900000000, price: price(session.price) }] } };
     state.subscriptions.set(subscription.id, subscription);
     Object.assign(session, { status: 'complete', subscription: subscription.id });
     return subscription;

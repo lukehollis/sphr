@@ -1,6 +1,6 @@
 import Stripe from "stripe";
-import { activateUnpaidSpaces, billableSpaceCount, hostingStatuses, payableSpaceCount, readSubscription, readUser,
-  saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type User } from "./accounts-store";
+import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses, payableSpaceCount, readSubscription, readUser,
+  saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 
 let client: Stripe | undefined;
@@ -22,21 +22,72 @@ export function stripe() {
 }
 
 const priceId = () => env("SPHR_STRIPE_PRICE_ID")!;
-let priceCache: { value: PriceSummary; expires: number } | undefined;
-export type PriceSummary = { amount: number; currency: string; interval: string; intervalCount: number };
+/** Prices of plans that cover a set number of spaces for one amount, offered beside pay as you go. */
+const planPriceIds = () => (env("SPHR_STRIPE_PLAN_PRICES") ?? "").split(",").map(id => id.trim()).filter(Boolean);
 
-export async function readPrice(): Promise<PriceSummary | undefined> {
-  if (!billingEnabled()) return undefined;
-  if (priceCache && priceCache.expires > Date.now()) return priceCache.value;
-  try {
-    const price = await stripe().prices.retrieve(priceId());
-    if (price.unit_amount === null || !price.recurring) throw new Error("The Stripe price must be a recurring per-unit price.");
-    priceCache = { value: { amount: price.unit_amount, currency: price.currency, interval: price.recurring.interval, intervalCount: price.recurring.interval_count }, expires: Date.now() + 10 * 60 * 1000 };
-    return priceCache.value;
-  } catch (error) {
-    console.error("Unable to read the hosting price:", error instanceof Error ? error.message : error);
+/**
+ * A way to pay for hosting, identified by its Stripe price. Pay as you go bills each space
+ * (`spaces` is null); a plan covers up to `spaces` spaces for one amount.
+ */
+export type Plan = { id: string; name: string; amount: number; currency: string; interval: string; intervalCount: number; spaces: number | null };
+const payAsYouGoName = "Pay as you go";
+
+/** Plan prices record how many spaces they cover in their metadata. Any other price bills per space. */
+function coveredSpaces(price: Stripe.Price) {
+  if (price.id === priceId()) return null;
+  const spaces = Number(price.metadata?.sphr_spaces);
+  return Number.isInteger(spaces) && spaces > 0 ? spaces : null;
+}
+
+function toPlan(price: Stripe.Price): Plan | undefined {
+  const spaces = coveredSpaces(price);
+  if (price.unit_amount === null || !price.recurring || !price.active) {
+    console.error(`Hosting price ${price.id} must be an active recurring price with a fixed amount.`);
     return undefined;
   }
+  if (price.id !== priceId() && spaces === null) {
+    console.error(`Plan price ${price.id} needs the metadata sphr_spaces, the number of spaces it covers.`);
+    return undefined;
+  }
+  const product = typeof price.product === "object" && !price.product.deleted ? price.product : undefined;
+  return { id: price.id, name: spaces === null ? payAsYouGoName : product?.name || price.nickname || `Up to ${spaces} spaces`,
+    amount: price.unit_amount, currency: price.currency, interval: price.recurring.interval, intervalCount: price.recurring.interval_count, spaces };
+}
+
+let plansCache: { value: Plan[]; expires: number } | undefined;
+
+/**
+ * Pay as you go first, then the plans from the smallest. Amounts and names come from Stripe,
+ * so changing a price needs no rebuild. Empty when billing is off or Stripe cannot be reached.
+ */
+export async function readPlans(): Promise<Plan[]> {
+  if (!billingEnabled()) return [];
+  if (plansCache && plansCache.expires > Date.now()) return plansCache.value;
+  const results = await Promise.allSettled([priceId(), ...planPriceIds()].map(id => stripe().prices.retrieve(id, { expand: ["product"] })));
+  const failed = results.find(result => result.status === "rejected");
+  if (failed) console.error("Unable to read a hosting price:", failed.reason instanceof Error ? failed.reason.message : failed.reason);
+  const plans = results.map(result => result.status === "fulfilled" ? toPlan(result.value) : undefined);
+  const [perSpace, ...fixed] = plans;
+  if (!perSpace || perSpace.spaces !== null) return plansCache?.value ?? [];
+  const value = [perSpace, ...fixed.filter((plan): plan is Plan => Boolean(plan)).sort((a, b) => a.spaces! - b.spaces! || a.amount - b.amount)];
+  // A price that could not be read is retried sooner.
+  plansCache = { value, expires: Date.now() + (failed ? 60 * 1000 : 10 * 60 * 1000) };
+  return value;
+}
+
+/** The plan a customer chose, or pay as you go when none is named. */
+async function resolvePlan(id: unknown): Promise<Plan> {
+  if (id === undefined || id === null || id === "" || id === priceId()) {
+    return (await readPlans())[0] ?? { id: priceId(), name: payAsYouGoName, amount: 0, currency: "usd", interval: "month", intervalCount: 1, spaces: null };
+  }
+  const plan = typeof id === "string" ? (await readPlans()).find(item => item.id === id) : undefined;
+  if (!plan) throw new AccountError("That plan is not offered any more. Reload the page and choose again.");
+  return plan;
+}
+
+function subscriptionPlan(price: Stripe.Price): SubscriptionPlan {
+  return { price: price.id, amount: price.unit_amount, currency: price.currency, interval: price.recurring?.interval ?? "month",
+    intervalCount: price.recurring?.interval_count ?? 1, spaces: coveredSpaces(price) };
 }
 
 async function ensureCustomer(user: User) {
@@ -49,28 +100,38 @@ async function ensureCustomer(user: User) {
 /** Subscriptions that still bill or can recover; a new Checkout would duplicate them. */
 const liveStatuses = new Set(["active", "trialing", "past_due", "unpaid", "incomplete", "paused"]);
 
-export type CheckoutStart = { url: string } | { paid: true } | { portal: string };
+/** A Checkout to open (with the plan it pays for), a payment already applied, or the portal to repair billing. */
+export type CheckoutStart = { url: string; plan: string } | { paid: true } | { portal: string };
 
 /**
  * One Checkout for all waiting spaces, one at a time per customer. An open session is
  * reused, a paid one is applied, and a customer whose subscription still exists in Stripe
- * is sent to the billing portal instead, so a customer is never subscribed twice.
+ * is sent to the billing portal instead, so a customer is never subscribed twice. Without
+ * a plan named, an open session keeps its plan while that plan still covers every space.
  */
-export function startCheckout(user: User, origin: string): Promise<CheckoutStart> {
+export function startCheckout(user: User, origin: string, planId?: unknown): Promise<CheckoutStart> {
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
-    const quantity = payableSpaceCount(current.id);
-    if (!quantity) throw new Error("Add a space before paying.");
+    const count = payableSpaceCount(current.id);
+    if (!count) throw new AccountError("Add a space before paying.");
     const customer = await ensureCustomer(current);
-    if (current.checkoutSession) {
-      const previous = await stripe().checkout.sessions.retrieve(current.checkoutSession, { expand: ["line_items"] }).catch(() => undefined);
-      if (previous?.status === "complete") {
-        await applyCheckoutSession(previous.id, current.id);
-        return { paid: true };
-      }
-      if (previous?.status === "open" && previous.url && previous.line_items?.data[0]?.quantity === quantity) return { url: previous.url };
-      if (previous?.status === "open") await stripe().checkout.sessions.expire(previous.id);
+    const previous = current.checkoutSession
+      ? await stripe().checkout.sessions.retrieve(current.checkoutSession, { expand: ["line_items"] }).catch(() => undefined) : undefined;
+    if (previous?.status === "complete") {
+      await applyCheckoutSession(previous.id, current.id);
+      return { paid: true };
     }
+    const open = previous?.status === "open" ? previous : undefined;
+    const openLine = open?.line_items?.data[0];
+    const chosen = planId ?? openLine?.price?.id;
+    let plan = await resolvePlan(chosen).catch(error => { if (planId === undefined) return resolvePlan(undefined); throw error; });
+    if (plan.spaces !== null && count > plan.spaces) {
+      if (planId !== undefined) throw new AccountError(`${plan.name} covers up to ${plan.spaces} spaces. Choose a larger plan or pay as you go.`);
+      plan = await resolvePlan(undefined);
+    }
+    const quantity = plan.spaces === null ? count : 1;
+    if (open?.url && openLine?.quantity === quantity && openLine.price?.id === plan.id) return { url: open.url, plan: plan.id };
+    if (open) await stripe().checkout.sessions.expire(open.id);
     const existing = (await stripe().subscriptions.list({ customer, status: "all", limit: 20 })).data.filter(item => liveStatuses.has(item.status));
     if (existing.length) {
       for (const subscription of existing) await syncSubscription(subscription.id);
@@ -78,14 +139,14 @@ export function startCheckout(user: User, origin: string): Promise<CheckoutStart
     }
     const session = await stripe().checkout.sessions.create({
       mode: "subscription", customer, client_reference_id: user.id,
-      line_items: [{ price: priceId(), quantity }],
+      line_items: [{ price: plan.id, quantity }],
       subscription_data: { metadata: { sphr_user: user.id } },
       success_url: `${origin}/account?checkout={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/account`,
       ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
     });
     setCheckoutSession(current.id, session.id);
-    return { url: session.url! };
+    return { url: session.url!, plan: plan.id };
   });
 }
 
@@ -115,9 +176,10 @@ export async function syncSubscription(id: string) {
   const customer = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
   const userId = userIdForCustomer(customer);
   if (!userId || (subscription.metadata?.sphr_user && subscription.metadata.sphr_user !== userId)) return;
-  // Existing customers keep the price they subscribed at when the configured price changes.
+  // Existing customers keep the price they subscribed at when the configured prices change.
   const stored = readSubscription(userId);
-  const item = subscription.items.data.find(entry => entry.id === stored?.item) ?? subscription.items.data.find(entry => entry.price.id === priceId())
+  const offered = new Set([priceId(), ...planPriceIds()]);
+  const item = subscription.items.data.find(entry => entry.id === stored?.item) ?? subscription.items.data.find(entry => offered.has(entry.price.id))
     ?? subscription.items.data[0];
   if (!item) return;
   if (stored && stored.id !== subscription.id && hostingStatuses.has(stored.status) && hostingStatuses.has(subscription.status)) {
@@ -125,7 +187,7 @@ export async function syncSubscription(id: string) {
     return;
   }
   saveSubscription(userId, { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
-    periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end });
+    periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, plan: subscriptionPlan(item.price) });
   if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
     activateUnpaidSpaces(userId);
     await syncQuantity(userId);
@@ -133,20 +195,45 @@ export async function syncSubscription(id: string) {
 }
 
 /**
- * The subscription quantity always equals the customer's hosted spaces. Updates for one
- * customer run one at a time in this single-process server; each reads the latest count.
+ * On pay as you go the subscription quantity always equals the customer's hosted spaces;
+ * a plan is one unit. Updates for one customer run one at a time in this single-process
+ * server; each reads the latest count.
  */
 export function syncQuantity(userId: string) {
   return serialized(userId, async () => {
     const subscription = readSubscription(userId);
     if (!subscription?.item || !hostingStatuses.has(subscription.status)) return false;
-    const quantity = billableSpaceCount(userId);
+    const quantity = subscription.plan?.spaces ? 1 : billableSpaceCount(userId);
     if (quantity === subscription.quantity) return true;
     // Prorations are collected on the next regular invoice to avoid a card charge per space.
     const item = await stripe().subscriptionItems.update(subscription.item, { quantity, proration_behavior: "create_prorations" });
     setSubscriptionQuantity(userId, subscription.id, item.quantity ?? quantity);
     return true;
   });
+}
+
+/**
+ * Moves a hosting subscription to another plan at once. As with adding a space, the
+ * difference is prorated onto the next regular invoice: Stripe Managed Payments does not
+ * allow invoices outside the billing period. A plan must cover every space the customer has.
+ */
+export async function changePlan(user: User, planId: unknown) {
+  const plan = await resolvePlan(planId);
+  const changed = await serialized(user.id, async () => {
+    const subscription = readSubscription(user.id);
+    if (!subscription?.item || !hostingStatuses.has(subscription.status)) throw new AccountError("Start hosting before changing plans.");
+    if (subscription.plan?.price === plan.id) return undefined;
+    const count = payableSpaceCount(user.id);
+    if (plan.spaces !== null && count > plan.spaces) {
+      throw new AccountError(`${plan.name} covers up to ${plan.spaces} spaces and you have ${count}. Delete spaces or choose a larger plan.`);
+    }
+    await stripe().subscriptions.update(subscription.id, {
+      items: [{ id: subscription.item, price: plan.id, quantity: plan.spaces === null ? billableSpaceCount(user.id) : 1 }],
+      proration_behavior: "create_prorations"
+    });
+    return subscription.id;
+  });
+  if (changed) await syncSubscription(changed);
 }
 
 export async function handleStripeEvent(event: Stripe.Event) {
