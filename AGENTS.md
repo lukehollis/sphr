@@ -70,8 +70,11 @@ HTTP 200, resource prefetch, or synthetic unit test with a visually verified sce
 
 ## Interface design
 
-Use the supplied NASA 1975 design system's Reversed dark theme throughout. Read
+Use the supplied NASA 1975 design system. The viewer uses its Reversed dark theme with the
+`#0098db` blue accent; pages outside the viewer (accounts, spaces, plans, the upload sheet,
+administration, the collection, policies and errors) use the light stock in the homepage's
+colors, with NASA red `#e03c31` kept for the one main action on a page. Read
 [docs/design-system.md](docs/design-system.md) before interface changes. Tokens
 live in `app/design-system/`. Keep the collection free of an H1/hero; use Helvetica,
-square opaque panels, ruled sections, icon controls, and the `#0098db` blue accent. Next uses white with black text, never an accent fill.
-Buttons have no visible outer borders; retain keyboard focus outlines and blue active indicators.
+square opaque panels, ruled sections and icon controls. Next uses white with black text, never an accent fill.
+Viewer buttons have no visible outer borders; retain keyboard focus outlines and active indicators.

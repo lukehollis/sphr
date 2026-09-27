@@ -543,10 +543,10 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
       {billing && <OpenSourceNote brand={billing.brand} sourceUrl={billing.sourceUrl} />}
       {batch.error && <p className="site-alert" role="alert">{batch.error}</p>}
       <div className="site-actions">
-        {batch.preparing ? <button type="button" className="site-button" disabled>Preparing payment…</button>
-          : batch.checkoutUrl ? <a className="site-button" href={batch.checkoutUrl} target="_blank" rel="noopener" onClick={() => uploads.markCheckoutOpened(batch.key)}>
+        {batch.preparing ? <button type="button" className="site-button site-button-accent" disabled>Preparing payment…</button>
+          : batch.checkoutUrl ? <a className="site-button site-button-accent" href={batch.checkoutUrl} target="_blank" rel="noopener" onClick={() => uploads.markCheckoutOpened(batch.key)}>
             {batch.checkoutOpened ? "Open payment again" : "Continue to payment"}<span aria-hidden="true">↗</span></a>
-          : <button type="button" className="site-button" onClick={() => void uploads.choosePlan(batch.key, plan?.id ?? "")}>Try payment again</button>}
+          : <button type="button" className="site-button site-button-accent" onClick={() => void uploads.choosePlan(batch.key, plan?.id ?? "")}>Try payment again</button>}
         <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Cancel</button>
       </div>
       <p className="site-hint">{batch.checkoutOpened ? "Finish paying in the other tab. Your files start uploading here as soon as payment goes through."

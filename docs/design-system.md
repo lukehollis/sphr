@@ -1,16 +1,25 @@
 # Interface design system
 
-SPHR uses the **Reversed** dark theme from the supplied
-[NASA 1975 Graphics Standards Manual Design System](../../NASA%201975%20Graphics%20Standards%20Manual%20Design%20System/README.md).
-The collection, loading status, viewer controls, guided tour overlays, and
-error pages share this system. Photographic and 3D scene content retain their colors.
+SPHR uses the supplied
+[NASA 1975 Graphics Standards Manual Design System](../../NASA%201975%20Graphics%20Standards%20Manual%20Design%20System/README.md)
+in two stocks. The viewer (loading status, viewer controls, guided tour overlays and the
+space editor) uses the **Reversed** dark theme with a blue accent. Pages outside the viewer
+(sign-in, accounts, spaces, plans, the upload sheet, administration, the collection,
+policies and error pages) use the **Standard** light stock in the colors of the public
+homepage: white paper, black ink, warm grays, and NASA red for the main action on a page.
+Photographic and 3D scene content retain their colors.
 
 ## Source and implementation
 
 - `app/design-system/{colors,typography,spacing}.css` derive from the reference's
   corresponding `tokens/` files. Typography and spacing retain the source tokens;
-  colors replace NASA Red with the user-selected SPHR accent `#0098db` and blue hover
-  shades. Import them once through `app/globals.css`.
+  the viewer's colors replace NASA Red with the user-selected SPHR accent `#0098db` and
+  blue hover shades. Import them once through `app/globals.css`.
+- `app/design-system/site.css` sets the light values for pages outside the viewer on
+  their containers (`.site`, `.site-auth`, `.site-error`): paper `#ffffff`, tint `#f1f0ee`,
+  cream `#f2efe6`, ink `#111111`, grays `#555555`/`#888888`, hairline `#dddddd` and NASA
+  red `#e03c31` (pressed `#c33228`). `spaces.css` styles Your spaces, the upload sheet and
+  plans with the same values.
 - `app/layout.tsx` sets `data-theme="dark"` explicitly, regardless of OS preference.
 - Use the supplied Helvetica → Helvetica Neue → Arimo → Arial fallback stack.
   System fonts keep viewing independent of a Google Fonts request; the optional
@@ -20,15 +29,22 @@ error pages share this system. Photographic and 3D scene content retain their co
 
 ## Composition and controls
 
-Use near-black page stock, warm off-white text, muted gray captions, and `#0098db` blue
-as the single accent. Avoid red UI accents. Keep square corners, flat opaque panels, 8px spacing units,
+In the viewer, use near-black page stock, warm off-white text, muted gray captions, and
+`#0098db` blue as the single accent, without red UI accents. On pages outside the viewer,
+use white paper, black ink and gray captions. Red is used sparingly there: the one main
+action on a page (adding a space, paying) takes `.site-button-accent`, and small marks
+(error alerts, the Public status square, link hover underlines, dimension lines on the
+large drawings) may use it. Other buttons are ink, secondary buttons are outlined in ink,
+and focus rings, selected states, progress and active rules are ink. Keep square corners, flat opaque panels, 8px spacing units,
 3px opening/closing rules, 1px section rules, flush-left Helvetica text, and weights
 400/700. Use sentence case for interface labels; preserve proper scene titles.
 Avoid gradients, glass, UI shadows, decorative tracking, and serif text.
 Use Lucide icons for viewer actions, with accessible labels and tooltips; this user
 preference overrides the reference system’s text-only control guidance. Do not add NASA branding.
-Buttons have no visible outer borders in normal, hover, or disabled states. Keep
-keyboard focus outlines and blue active indicators, and preserve control dimensions.
+Viewer buttons have no visible outer borders in normal, hover, or disabled states; on
+pages outside the viewer, secondary buttons carry a 1px ink outline as on the homepage.
+Keep keyboard focus outlines and active indicators (blue in the viewer, ink on pages),
+and preserve control dimensions.
 
 The collection has no visible heading, counts, or instructions. Its compact footer
 contains the current-year copyright linked to mused.com and Login / Sign up links
@@ -44,7 +60,7 @@ from the viewer; canonical scene URLs remain available in the address bar.
 
 Visibility controls belong on `/admin`, where each card adds a labeled Public/Private
 select. The public collection keeps the thumbnail/title-only layout. Admin forms use
-the same square dark surfaces, Helvetica, white action buttons and blue focus outlines.
+the same square light surfaces, Helvetica, ink action buttons and ink focus outlines.
 
 Viewer controls use compact 44px icon buttons. Show mute only when the normalized
 scene/tour audio configuration contains a nonempty audio URL. Do not expose a markers

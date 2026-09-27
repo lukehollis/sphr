@@ -150,7 +150,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
             <p>{detail}</p>
             {waiting && space.job?.progress && <p className="site-progress" aria-live="polite"><span>Latest step</span>{space.job.progress}</p>}
             {space.message && !waiting && <blockquote className="site-quote">{space.message}</blockquote>}
-            {space.status === "unpaid" && <a className="site-button site-button-block" href="/account/plan">Complete payment<span aria-hidden="true">→</span></a>}
+            {space.status === "unpaid" && <a className="site-button site-button-accent site-button-block" href="/account/plan">Complete payment<span aria-hidden="true">→</span></a>}
           </div>
           {space.scene && <div className="site-aside-block">
             <h3>Sharing</h3>
