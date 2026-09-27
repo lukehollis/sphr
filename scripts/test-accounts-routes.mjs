@@ -40,6 +40,7 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_APPLE_PRIVATE_KEY: apple.privateKey.export({ format: 'pem', type: 'pkcs8' }).replace(/\n/g, '\\n'),
   SPHR_LINKEDIN_CLIENT_ID: clients.linkedin.id, SPHR_LINKEDIN_CLIENT_SECRET: clients.linkedin.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
+  SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr',
   SPHR_WORKER_TOKEN: workerToken, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
@@ -147,6 +148,7 @@ try {
   assert.equal(response.status, 200);
   assert.match(body.checkout, /^https:\/\/checkout\.example\//);
   assert.equal(body.space.status, 'unpaid');
+  assert.equal(body.plan, 'price_space', 'new customers start on pay as you go');
   const studio = body.space;
   const [firstSession] = stripeFake.state.sessions.values();
   assert.equal(firstSession.quantity, 1);
@@ -373,6 +375,45 @@ try {
   assert.equal((await new Browser().post('/api/account/login', { email: 'alice@example.com', password: 'alice password' })).status, 401);
   await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Google sign-in added'));
 
+  // ---- Plans: chosen before paying, full plans, and changing plans ----
+  const grace = new Browser();
+  await signInWith(grace, 'google', { sub: 'google-grace', email: 'grace@example.com', email_verified: true, name: 'Grace' });
+  assert.ok(!(await (await grace.get('/account')).text()).includes('a month'), 'no prices before a space is added');
+  body = await (await grace.post('/api/account/spaces', { title: 'Grace 1' })).json();
+  assert.equal(body.plan, 'price_space');
+  let page = (await (await grace.get('/account/plan')).text()).replaceAll('<!-- -->', '');
+  for (const text of ['Start hosting', "You're on pay as you go", 'Pay as you go', 'Starter', '$8', 'Up to 6 spaces', 'Pro', '$50', 'Enterprise', '$249',
+    'Up to 200 spaces', 'open source software', 'https://source.example/sphr']) assert.ok(page.includes(text.replaceAll("'", '&#x27;')) || page.includes(text), text);
+  assert.equal((await grace.post('/api/account/billing/checkout', { plan: 'price_nope' })).status, 400, 'only offered plans');
+  body = await (await grace.post('/api/account/billing/checkout', { plan: 'price_starter' })).json();
+  assert.equal(body.plan, 'price_starter');
+  const graceSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(body.url, graceSession.url);
+  assert.deepEqual([graceSession.price, graceSession.quantity], ['price_starter', 1], 'a plan is one unit');
+  const graceSubscription = stripeFake.state.pay(graceSession.id);
+  assert.equal((await webhook({ id: 'evt_grace', type: 'checkout.session.completed', data: { object: { id: graceSession.id, object: 'checkout.session' } } })).status, 200);
+  for (let index = 2; index <= 6; index++) assert.equal((await grace.post('/api/account/spaces', { title: `Grace ${index}` })).status, 200);
+  assert.equal(graceSubscription.items.data[0].quantity, 1, 'spaces within a plan leave its price alone');
+  page = (await (await grace.get('/account')).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Starter') && page.includes('6 of 6 spaces') && page.includes('Change plan'), 'the plan and its room are shown');
+  response = await grace.post('/api/account/spaces', { title: 'Grace 7' });
+  assert.equal(response.status, 402);
+  assert.equal((await response.json()).planFull, true, 'a full plan asks for a larger one');
+  assert.equal((await grace.post('/api/account/billing/plan', { plan: 'price_nope' })).status, 400);
+  response = await grace.post('/api/account/billing/plan', { plan: 'price_pro' });
+  body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.account.subscription.plan.spaces, 30);
+  assert.equal(graceSubscription.items.data[0].price.id, 'price_pro');
+  assert.deepEqual(stripeFake.state.planChanges.at(-1), { price: 'price_pro', quantity: 1, proration: 'create_prorations' });
+  assert.equal((await grace.post('/api/account/spaces', { title: 'Grace 7' })).status, 200, 'the waiting space fits the new plan');
+  assert.equal((await grace.post('/api/account/billing/plan', { plan: 'price_starter' })).status, 400, 'a plan must cover every space');
+  assert.equal((await grace.post('/api/account/billing/plan', { plan: 'price_space' })).status, 200);
+  assert.equal(graceSubscription.items.data[0].quantity, 7, 'pay as you go bills each space');
+  page = (await (await grace.get('/account')).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Pay as you go') && page.includes('7 spaces') && page.includes('$7 a month'), 'pay as you go shows the spaces and what they cost');
+  assert.equal((await bob.post('/api/account/billing/plan', { plan: 'price_pro' })).status, 400, 'changing plans needs hosting');
+
   // ---- Password reset signs out every session ----
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'nobody@example.com' })).status, 200, 'no account enumeration');
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'alice@example.com' })).status, 200);
@@ -387,7 +428,7 @@ try {
   assert.equal((await resetter.post('/api/account/logout')).status, 200);
   assert.equal((await resetter.get('/api/account/spaces/' + studio.id)).status, 404);
 
-  console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing, the worker API, and the agent runner with credential isolation.');
+  console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities and plans, plan changes and full plans, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing, the worker API, and the agent runner with credential isolation.');
 } catch (error) {
   console.error(appLog.split('\n').slice(-60).join('\n'));
   throw error;

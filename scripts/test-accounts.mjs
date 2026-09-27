@@ -237,21 +237,26 @@ test('ID tokens: signature, issuer, audience, lifetime, nonce and key rotation',
   assert.equal(appleName('not json'), null);
 });
 
+const fake = fakeStripe();
+const stripeServer = await listen(fake.handler);
+after(() => stripeServer.server.close());
+
 test('billing follows the number of hosted spaces', async () => {
-  const fake = fakeStripe();
-  const { server, base } = await listen(fake.handler);
-  after(() => server.close());
-  Object.assign(process.env, { SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: 'whsec_test', SPHR_STRIPE_TEST_API: base });
+  Object.assign(process.env, { SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+    SPHR_STRIPE_TEST_API: stripeServer.base, SPHR_STRIPE_PLAN_PRICES: 'price_pro, price_starter,price_missing,price_enterprise' });
   const billing = await import('../lib/server/billing.ts');
-  assert.deepEqual(await billing.readPrice(), { amount: 100, currency: 'usd', interval: 'month', intervalCount: 1 });
+  // Pay as you go first, then the plans from the smallest; a price Stripe cannot find is left out.
+  assert.deepEqual((await billing.readPlans()).map(plan => [plan.id, plan.name, plan.amount, plan.spaces]), [
+    ['price_space', 'Pay as you go', 100, null], ['price_starter', 'Starter', 800, 6], ['price_pro', 'Pro', 5000, 30], ['price_enterprise', 'Enterprise', 24900, 200]]);
 
   const user = await store.createPasswordUser('billing@example.com', 'password one', 'Bill Ing');
   store.markEmailVerified(user.id);
   store.createCustomerSpace(user.id, 'First', 'unpaid');
   store.createCustomerSpace(user.id, 'Second', 'unpaid');
-  const { url } = await billing.startCheckout(store.readUser(user.id), 'https://app.example');
+  const { url, plan } = await billing.startCheckout(store.readUser(user.id), 'https://app.example');
   const [session] = fake.state.sessions.values();
   assert.equal(url, session.url);
+  assert.equal(plan, 'price_space', 'pay as you go unless another plan is chosen');
   assert.equal(session.quantity, 2, 'Checkout covers every waiting space');
   assert.equal(session.success_url, 'https://app.example/account?checkout={CHECKOUT_SESSION_ID}');
   const [again, twice] = await Promise.all([1, 2].map(() => billing.startCheckout(store.readUser(user.id), 'https://app.example')));
@@ -270,6 +275,7 @@ test('billing follows the number of hosted spaces', async () => {
   assert.equal(store.readSubscription(user.id), undefined, 'another customer cannot apply the session');
   await billing.applyCheckoutSession(current.id, user.id);
   assert.equal(store.readSubscription(user.id).status, 'active');
+  assert.deepEqual(store.readSubscription(user.id).plan, { price: 'price_space', amount: 100, currency: 'usd', interval: 'month', intervalCount: 1, spaces: null });
   assert.equal(store.billableSpaceCount(user.id), 3, 'paid spaces open for uploads');
   assert.equal(fake.state.updates.length, 0, 'quantity already matches');
   assert.equal(store.readUser(user.id).checkoutSession, null);
@@ -324,4 +330,69 @@ test('billing follows the number of hosted spaces', async () => {
   assert.equal(stripe.webhooks.constructEvent(payload, header, 'whsec_test').id, 'evt_1');
   assert.throws(() => stripe.webhooks.constructEvent(payload, header, 'whsec_other'));
   assert.equal(await billing.portalUrl(store.readUser(user.id), 'https://app.example'), 'https://billing.example/portal');
+});
+
+test('plans cover a set number of spaces for one price', async () => {
+  const billing = await import('../lib/server/billing.ts');
+  const user = await store.createPasswordUser('plans@example.com', 'password one', null);
+  store.markEmailVerified(user.id);
+  store.createCustomerSpace(user.id, 'Porch', 'unpaid');
+  const origin = 'https://app.example';
+
+  // Choosing a plan at Checkout: one unit of the plan's price, whatever the number of spaces.
+  const payg = await billing.startCheckout(store.readUser(user.id), origin);
+  const starter = await billing.startCheckout(store.readUser(user.id), origin, 'price_starter');
+  assert.equal(starter.plan, 'price_starter');
+  assert.notEqual(starter.url, payg.url);
+  const session = [...fake.state.sessions.values()].at(-1);
+  assert.deepEqual([session.price, session.quantity], ['price_starter', 1]);
+  assert.equal([...fake.state.sessions.values()].find(item => item.url === payg.url).status, 'expired', 'the earlier choice is withdrawn');
+  await assert.rejects(() => billing.startCheckout(store.readUser(user.id), origin, 'price_missing'), /not offered/);
+  // Another space keeps the chosen plan while it covers every space.
+  store.createCustomerSpace(user.id, 'Kitchen', 'unpaid');
+  const kept = await billing.startCheckout(store.readUser(user.id), origin);
+  assert.equal(kept.plan, 'price_starter');
+  assert.equal([...fake.state.sessions.values()].at(-1).quantity, 1);
+  for (const title of ['Hall', 'Attic', 'Cellar', 'Garden', 'Garage']) store.createCustomerSpace(user.id, title, 'unpaid');
+  await assert.rejects(() => billing.startCheckout(store.readUser(user.id), origin, 'price_starter'), /Starter covers up to 6 spaces/);
+  const grown = await billing.startCheckout(store.readUser(user.id), origin);
+  assert.equal(grown.plan, 'price_space', 'a plan too small for every space falls back to pay as you go');
+  assert.equal([...fake.state.sessions.values()].at(-1).quantity, 7);
+  store.deleteCustomerSpace(store.listCustomerSpaces(user.id).find(space => space.title === 'Garage').id);
+
+  // Paying for Starter with six spaces.
+  const paid = await billing.startCheckout(store.readUser(user.id), origin, 'price_starter');
+  const subscription = fake.state.pay([...fake.state.sessions.values()].find(item => item.url === paid.url).id);
+  await billing.syncSubscription(subscription.id);
+  assert.equal(store.readSubscription(user.id).plan.spaces, 6);
+  assert.equal(store.planSpaceLimit(user.id), 6);
+  assert.equal(store.billableSpaceCount(user.id), 6);
+  assert.equal(subscription.items.data[0].quantity, 1, 'a plan is one unit however many spaces it holds');
+  assert.throws(() => store.createCustomerSpace(user.id, 'Seventh', 'draft', 6), error => error instanceof store.PlanLimitError);
+  const [hall] = store.listCustomerSpaces(user.id);
+  store.deleteCustomerSpace(hall.id);
+  await billing.syncQuantity(user.id);
+  assert.equal(subscription.items.data[0].quantity, 1, 'deleting a space leaves a plan as it is');
+
+  // Changing plans keeps the subscription item and prorates onto the next invoice.
+  const itemId = subscription.items.data[0].id;
+  await assert.rejects(() => billing.changePlan(store.readUser(user.id), 'price_missing'), /not offered/);
+  await billing.changePlan(store.readUser(user.id), 'price_pro');
+  assert.deepEqual(fake.state.planChanges.at(-1), { price: 'price_pro', quantity: 1, proration: 'create_prorations' });
+  assert.equal(subscription.items.data[0].id, itemId);
+  assert.equal(store.readSubscription(user.id).plan.spaces, 30);
+  const changes = fake.state.planChanges.length;
+  await billing.changePlan(store.readUser(user.id), 'price_pro');
+  assert.equal(fake.state.planChanges.length, changes, 'choosing the current plan changes nothing');
+  await billing.changePlan(store.readUser(user.id), 'price_space');
+  assert.deepEqual(fake.state.planChanges.at(-1), { price: 'price_space', quantity: 5, proration: 'create_prorations' }, 'pay as you go counts the spaces');
+  assert.equal(store.readSubscription(user.id).plan.spaces, null);
+  assert.equal(store.planSpaceLimit(user.id), null);
+  for (const title of ['One', 'Two']) store.createCustomerSpace(user.id, title, 'draft');
+  await billing.syncQuantity(user.id);
+  assert.equal(subscription.items.data[0].quantity, 7);
+  await assert.rejects(() => billing.changePlan(store.readUser(user.id), 'price_starter'), /Starter covers up to 6 spaces and you have 7/);
+  subscription.status = 'canceled';
+  await billing.syncSubscription(subscription.id);
+  await assert.rejects(() => billing.changePlan(store.readUser(user.id), 'price_pro'), /Start hosting/);
 });

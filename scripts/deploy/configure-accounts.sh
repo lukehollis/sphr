@@ -28,6 +28,7 @@ else
 fi
 read -r -s -p "Stripe secret key (sk_test_… or sk_live_…): " stripe_key; echo
 read -r -p "Monthly price per space, in cents [200]: " amount
+read -r -p "Plans as name:cents:spaces, or none [starter:800:6,pro:5000:30,enterprise:24900:200]: " plans
 google_id=${google_id:-$(current SPHR_GOOGLE_CLIENT_ID)}
 google_secret=${google_secret:-$(current SPHR_GOOGLE_CLIENT_SECRET)}
 stripe_key=${stripe_key:-$(current SPHR_STRIPE_SECRET_KEY)}
@@ -37,7 +38,8 @@ webhook_secret=$(current SPHR_STRIPE_WEBHOOK_SECRET)
 [[ "$stripe_key" != "$previous_key" ]] && webhook_secret=""
 settings=$(printf 'SPHR_GOOGLE_CLIENT_ID=%s\nSPHR_GOOGLE_CLIENT_SECRET=%s\nSPHR_STRIPE_SECRET_KEY=%s\n' "$google_id" "$google_secret" "$stripe_key")
 if [[ -n "$stripe_key" ]]; then
-  stripe_settings=$(SPHR_STRIPE_SECRET_KEY="$stripe_key" SPHR_STRIPE_WEBHOOK_SECRET="$webhook_secret" node scripts/deploy/stripe-setup.mjs --origin "$origin" --amount "${amount:-200}")
+  stripe_settings=$(SPHR_STRIPE_SECRET_KEY="$stripe_key" SPHR_STRIPE_WEBHOOK_SECRET="$webhook_secret" node scripts/deploy/stripe-setup.mjs --origin "$origin" \
+    --amount "${amount:-200}" --plans "${plans:-starter:800:6,pro:5000:30,enterprise:24900:200}")
   settings=$(printf '%s\n%s\n' "$settings" "$stripe_settings")
 fi
 # Replace or append each setting, keeping the file's owner and mode; values travel on stdin only.

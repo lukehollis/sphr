@@ -1,18 +1,19 @@
 import { allowAttempt } from "@/lib/server/admin-store";
-import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCustomerSpaces, readCustomerSpace, readSubscription, removeCustomerSpaceRecord } from "@/lib/server/accounts-store";
+import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCustomerSpaces, PlanLimitError, readCustomerSpace, readSubscription, readUser,
+  removeCustomerSpaceRecord } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, accountsEnabled, attemptKey, currentUser, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
-import { describeSpace } from "@/lib/server/customer-spaces";
+import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 
-/** The customer's spaces, newest first, for refreshing the page while spaces are processing. */
+/** The customer's spaces, newest first, and the account, for refreshing the page while spaces upload and process. */
 export async function GET() {
   if (!accountsEnabled()) return accountResponse({ error: "Accounts are unavailable." }, 404);
   const user = await currentUser();
   if (!user) return accountResponse({ error: "Sign in to continue." }, 401);
-  return accountResponse({ spaces: await Promise.all(listCustomerSpaces(user.id).map(describeSpace)) });
+  return accountResponse({ spaces: await Promise.all(listCustomerSpaces(user.id).map(describeSpace)), account: describeAccount(readUser(user.id)!) });
 }
 
-/** Adds a space. With billing, it joins the subscription or waits for Checkout. */
+/** Adds a space. With billing, it joins the subscription (within the plan's spaces) or waits for Checkout. */
 export async function POST(request: Request) {
   const { user, body, error } = await accountRequest(request);
   if (error) return error;
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     const subscription = readSubscription(user.id);
     if (!billingEnabled()) return accountResponse({ ok: true, space: await describeSpace(createCustomerSpace(user.id, title, "draft")) });
     if (subscription && hostingStatuses.has(subscription.status)) {
-      const space = createCustomerSpace(user.id, title, "draft");
+      const space = createCustomerSpace(user.id, title, "draft", subscription.plan?.spaces ?? null);
       try { await syncQuantity(user.id); }
       catch (failure) {
         removeCustomerSpaceRecord(space.id);
@@ -37,13 +38,15 @@ export async function POST(request: Request) {
     try {
       const next = await startCheckout(user, publicOrigin(request));
       const view = await describeSpace(readCustomerSpace(space.id)!);
-      return accountResponse({ ok: true, space: view, ...("url" in next ? { checkout: next.url } : "portal" in next ? { portal: next.portal } : {}) });
+      return accountResponse({ ok: true, space: view, ...("url" in next ? { checkout: next.url, plan: next.plan } : "portal" in next ? { portal: next.portal } : {}) });
     }
     catch (failure) {
       console.error("Unable to start Checkout:", failure instanceof Error ? failure.message : failure);
       return accountResponse({ ok: true, space: await describeSpace(space), error: "Payment could not start. Use Complete payment to try again." });
     }
   } catch (failure) {
+    // The page offers the plans that fit when the current plan is full.
+    if (failure instanceof PlanLimitError) return accountResponse({ error: failure.message, planFull: true }, 402);
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
     throw failure;
   }

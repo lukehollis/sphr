@@ -1,8 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import AccountDashboard from "@/components/AccountDashboard";
-import { listCustomerSpaces, readUser } from "@/lib/server/accounts-store";
+import { listCustomerSpaces, readSubscription, readUser } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
-import { applyCheckoutSession, billingEnabled, readPrice, syncQuantity } from "@/lib/server/billing";
+import { applyCheckoutSession, billingEnabled, readPlans, syncQuantity, syncSubscription } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { siteBrand } from "@/lib/server/brand";
 
@@ -18,6 +18,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   if (billingEnabled()) {
     // Returning from Checkout usually beats the webhook; apply the result now.
     if (typeof params.checkout === "string") await applyCheckoutSession(params.checkout, user.id).catch(log("Unable to apply Checkout:"));
+    // Subscriptions saved before plans existed learn their plan once.
+    const subscription = readSubscription(user.id);
+    if (subscription && !subscription.plan) await syncSubscription(subscription.id).catch(log("Unable to read the subscription:"));
     // Repairs a quantity left behind by an earlier failed update.
     await syncQuantity(user.id).catch(log("Unable to update the subscription quantity:"));
   }
@@ -25,6 +28,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     : params.checkout ? "Payment received. Add your files to each space." : undefined;
   const fresh = readUser(user.id)!;
   const spaces = await Promise.all(listCustomerSpaces(fresh.id).map(describeSpace));
-  return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} price={await readPrice()} notice={notice}
+  return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} plans={await readPlans()} notice={notice}
     fromCheckout={typeof params.checkout === "string"} />;
 }

@@ -3,18 +3,23 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { accountRequest } from "./AccountAuth";
 import { ConstructionDrawing } from "./site/Chrome";
+import PlanPicker, { OpenSourceNote } from "./PlanPicker";
 import { formatBytes } from "@/lib/bytes";
+import { formatMoney, formatPeriod } from "@/lib/price";
 import { fromList, getJson, keepCaptures, readDrop, titleFromFiles, uploadFile, type PickedFile, type Transfer } from "./uploads";
+import type { Plan } from "@/lib/server/billing";
 import type { SpaceView } from "@/lib/server/customer-spaces";
 
 /*
  * Adding a space: a full-screen sheet that takes dropped files or folders. The space is
- * created at once with a title taken from the file names, payment opens in a new tab
- * when hosting has not started yet, and the files upload while this page stays open,
- * even after the sheet is closed. Processing starts on its own shortly after the upload.
+ * created at once with a title taken from the file names. When hosting has not started
+ * yet, the sheet shows the plans with pay as you go chosen and payment opens in a new
+ * tab. When the customer's plan is full, the files wait while they change plans. The
+ * files upload while this page stays open, even after the sheet is closed, and
+ * processing starts on its own shortly after the upload.
  */
 
-export type BatchPhase = "creating" | "payment" | "uploading" | "countdown" | "held" | "submitting" | "processing" | "error";
+export type BatchPhase = "creating" | "payment" | "full" | "uploading" | "countdown" | "held" | "submitting" | "processing" | "error";
 
 export type Batch = {
   key: string;
@@ -24,6 +29,10 @@ export type Batch = {
   transfers: Transfer[];
   checkoutUrl?: string;
   checkoutOpened?: boolean;
+  /** The plan chosen for payment, or null for pay as you go. */
+  plan?: string | null;
+  /** A new payment link is on its way after the plan changed. */
+  preparing?: boolean;
   countdown?: number;
   error?: string;
   /** New files count down to processing; files added to a hosted space wait for a click. */
@@ -33,7 +42,8 @@ export type Batch = {
 const AUTO_START_SECONDS = 10;
 export const awaitingPaymentKey = "sphr-awaiting-payment";
 
-const busyPhases = new Set<BatchPhase>(["creating", "payment", "uploading", "countdown", "held", "submitting"]);
+const busyPhases = new Set<BatchPhase>(["creating", "payment", "full", "uploading", "countdown", "held", "submitting"]);
+const openPhases = ["creating", "payment", "full", "uploading", "countdown", "held"];
 export const batchActive = (batch: Batch) => busyPhases.has(batch.phase);
 const moving = (transfer: Transfer) => transfer.state === "waiting" || transfer.state === "uploading" || transfer.state === "retrying";
 
@@ -110,12 +120,9 @@ export function useUploadBatches(onChange: () => void) {
     setTimeout(() => pump(key), 0);
   }, [patch, pump]);
 
-  /** Creates a space titled after the files, then pays (if needed) and uploads. */
-  const startNew = useCallback(async (files: PickedFile[]) => {
-    const key = `batch-${Date.now()}`;
-    const title = titleFromFiles(files);
-    setBatches(items => [...items, { key, title, phase: "creating", transfers: [], autoStart: true }]);
-    enqueue(key, files);
+  /** Creates the space, then pays (if needed) and uploads. A full plan holds the files until the plan changes. */
+  const create = useCallback(async (key: string, title: string) => {
+    patch(key, { phase: "creating", error: undefined });
     try {
       const result = await accountRequest("/api/account/spaces", { title });
       spaceOf.current.set(key, result.space.id);
@@ -123,14 +130,57 @@ export function useUploadBatches(onChange: () => void) {
       change.current();
       const checkout = result.checkout ?? result.portal;
       if (result.space.status === "unpaid") {
-        patch(key, { phase: "payment", checkoutUrl: checkout, error: result.error });
+        // An open payment keeps the plan chosen for it.
+        patch(key, { phase: "payment", checkoutUrl: checkout, plan: result.plan ?? null, error: result.error });
         remember(result.space.id);
       } else begin(key);
     } catch (failure) {
-      patch(key, { phase: "error", error: (failure as Error).message });
+      const { message, data } = failure as Error & { data?: { planFull?: boolean } };
+      patch(key, { phase: data?.planFull ? "full" : "error", error: message });
     }
+  }, [begin, patch]);
+
+  /** Starts a space titled after the files. */
+  const startNew = useCallback(async (files: PickedFile[]) => {
+    const key = `batch-${Date.now()}`;
+    const title = titleFromFiles(files);
+    setBatches(items => [...items, { key, title, phase: "creating", transfers: [], autoStart: true }]);
+    enqueue(key, files);
+    await create(key, title);
     return key;
-  }, [begin, enqueue, patch]);
+  }, [create, enqueue]);
+
+  /**
+   * Chooses how a first space is paid for. Payment opens from a plain link, so a new link
+   * is prepared as soon as the plan changes rather than after the click.
+   */
+  const choosePlan = useCallback(async (key: string, plan: string) => {
+    const batch = latest.current.find(item => item.key === key);
+    if (!batch || batch.phase !== "payment") return;
+    patch(key, { plan, preparing: true, checkoutOpened: false, error: undefined });
+    try {
+      const result = await accountRequest("/api/account/billing/checkout", { plan });
+      if (result.paid) { begin(key); change.current(); return; }
+      patch(key, item => item.plan === plan ? { checkoutUrl: result.url, preparing: false } : {});
+    } catch (failure) {
+      patch(key, item => item.plan === plan ? { preparing: false, checkoutUrl: undefined, error: (failure as Error).message } : {});
+    }
+  }, [begin, patch]);
+
+  /** Moves a full plan to one with room, then creates the waiting space. */
+  const switchPlan = useCallback(async (key: string, plan: string) => {
+    const batch = latest.current.find(item => item.key === key);
+    if (!batch || batch.phase !== "full") return;
+    patch(key, { preparing: true, error: undefined });
+    try {
+      await accountRequest("/api/account/billing/plan", { plan });
+      change.current();
+      patch(key, { preparing: false });
+      await create(key, batch.title);
+    } catch (failure) {
+      patch(key, { preparing: false, error: (failure as Error).message });
+    }
+  }, [create, patch]);
 
   /** Adds files to a space that already exists. A hosted space is reprocessed only on request. */
   const startExisting = useCallback((space: { id: string; title: string; status: string }, files: PickedFile[]) => {
@@ -144,9 +194,9 @@ export function useUploadBatches(onChange: () => void) {
 
   const addFiles = useCallback((key: string, files: PickedFile[]) => {
     const batch = latest.current.find(item => item.key === key);
-    if (!batch || !["creating", "payment", "uploading", "countdown", "held"].includes(batch.phase)) return;
+    if (!batch || !openPhases.includes(batch.phase)) return;
     enqueue(key, files);
-    if (batch.phase !== "creating" && batch.phase !== "payment") setTimeout(() => pump(key), 0);
+    if (!["creating", "payment", "full"].includes(batch.phase)) setTimeout(() => pump(key), 0);
   }, [enqueue, pump]);
 
   const submit = useCallback(async (key: string) => {
@@ -258,7 +308,7 @@ export function useUploadBatches(onChange: () => void) {
   }, [paying, begin]);
 
   // Leaving the page stops uploads that are still running.
-  const unfinished = batches.some(batch => batch.phase === "payment" || batch.transfers.some(moving));
+  const unfinished = batches.some(batch => batch.phase === "payment" || batch.phase === "full" || batch.transfers.some(moving));
   useEffect(() => {
     if (!unfinished) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -266,7 +316,7 @@ export function useUploadBatches(onChange: () => void) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [unfinished]);
 
-  return { batches, startNew, startExisting, addFiles, submit, hold, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened };
+  return { batches, startNew, startExisting, addFiles, submit, hold, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
 }
 
 export type Uploads = ReturnType<typeof useUploadBatches>;
@@ -314,7 +364,18 @@ function Meter({ value, label }: { value: number; label: string }) {
   </span>;
 }
 
-export default function UploadModal({ open, onClose, uploads, batchKey, onBatch, existing, maxBytes, priceHint }: {
+/** How new spaces are paid for, shown when they are created. */
+export type PlanChoice = {
+  plans: Plan[];
+  /** The plan the account is on, if hosting is active. */
+  current: string | null;
+  /** Spaces the account has, which a plan must cover. */
+  spaces: number;
+  brand: string;
+  sourceUrl: string | null;
+};
+
+export default function UploadModal({ open, onClose, uploads, batchKey, onBatch, existing, maxBytes, priceHint, billing }: {
   open: boolean;
   onClose: () => void;
   uploads: Uploads;
@@ -324,6 +385,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   existing?: SpaceView;
   maxBytes: number;
   priceHint?: string;
+  billing?: PlanChoice;
 }) {
   const [dragging, setDragging] = useState(false);
   const [reading, setReading] = useState(false);
@@ -333,7 +395,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   const receive = useCallback(async (files: PickedFile[]) => {
     const usable = keepCaptures(files);
     if (!usable.length) return;
-    if (batch && ["creating", "payment", "uploading", "countdown", "held"].includes(batch.phase)) uploads.addFiles(batch.key, usable);
+    if (batch && openPhases.includes(batch.phase)) uploads.addFiles(batch.key, usable);
     else onBatch(existing ? uploads.startExisting(existing, usable) : await uploads.startNew(usable));
   }, [batch, existing, onBatch, uploads]);
 
@@ -377,7 +439,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   if (!open) return null;
 
   const heading = existing ? `Add files to ${existing.title}` : batch?.phase === "processing" ? "Space added" : "Add a space";
-  const canAdd = !batch || ["creating", "payment", "uploading", "countdown", "held"].includes(batch.phase);
+  const canAdd = !batch || openPhases.includes(batch.phase);
 
   return <div className={`upload-modal${dragging ? " upload-modal-over" : ""}`} role="dialog" aria-modal="true" aria-labelledby="upload-modal-title"
     ref={dialog} tabIndex={-1}
@@ -387,7 +449,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
     <div className="upload-modal-bar">
       <h2 id="upload-modal-title">{heading}</h2>
       <button type="button" className="upload-modal-close" onClick={onClose}>
-        {batch && batchActive(batch) && batch.phase !== "payment" ? "Close, keep uploading" : "Close"}<span aria-hidden="true">✕</span>
+        {batch && batchActive(batch) && batch.phase !== "payment" && batch.phase !== "full" ? "Close, keep uploading" : "Close"}<span aria-hidden="true">✕</span>
       </button>
     </div>
 
@@ -410,7 +472,8 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
           <p className="site-hint">Taken from your file names. You can change it any time.</p>
         </div>}
 
-        <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={onClose} existing={Boolean(existing)} />
+        <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={onClose} existing={Boolean(existing)}
+          billing={billing} />
 
         {transfers.length > 0 && <ul className="upload-files" aria-label="Files">
           {transfers.map(item => <li key={item.key} className={`upload-file upload-file-${item.state}`}>
@@ -432,28 +495,66 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   </div>;
 }
 
-function Status({ batch, uploads, total, sent, done, failed, left, onClose, existing }: {
+/** A new space the current plan has no room for: the files wait while the customer picks a plan with room. */
+function PlanFull({ batch, uploads, billing }: { batch: Batch; uploads: Uploads; billing?: PlanChoice }) {
+  const plans = billing?.plans ?? [];
+  const needed = (billing?.spaces ?? 0) + 1;
+  // The cheapest plan with room comes chosen.
+  const cost = (plan: Plan) => plan.spaces === null ? plan.amount * needed : plan.amount;
+  const fits = plans.filter(plan => plan.id !== billing?.current && (plan.spaces === null || plan.spaces >= needed)).sort((a, b) => cost(a) - cost(b));
+  const [choice, setChoice] = useState<string | null>(null);
+  const selected = choice ?? fits[0]?.id ?? null;
+  const target = plans.find(plan => plan.id === selected);
+  const current = plans.find(plan => plan.id === billing?.current);
+  return <div className="upload-status upload-status-action upload-status-plans">
+    <h3>Your plan is full</h3>
+    <p>{current?.spaces ? `${current.name} covers ${current.spaces} spaces and all of them are in use.` : batch.error}
+      {" "}Pick a plan with room and your files upload right after.</p>
+    {plans.length > 0 && <PlanPicker plans={plans} selected={selected} needed={needed} current={billing?.current} name={`switch-${batch.key}`}
+      label="Plans with room" disabled={batch.preparing} onSelect={id => { if (id !== billing?.current) setChoice(id); }} />}
+    <div className="site-actions">
+      {target && <button type="button" className="site-button" disabled={batch.preparing}
+        onClick={() => void uploads.switchPlan(batch.key, target.id)}>{batch.preparing ? "Changing plans…" : `Switch to ${target.spaces === null ? "pay as you go" : target.name}`}
+        <span aria-hidden="true">→</span></button>}
+      <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Cancel</button>
+    </div>
+    <p className="site-hint">The change applies now, and your next invoice is prorated for the rest of this period.</p>
+  </div>;
+}
+
+function Status({ batch, uploads, total, sent, done, failed, left, onClose, existing, billing }: {
   batch: Batch; uploads: Uploads; total: number; sent: number; done: number; failed: number; left: number | null; onClose: () => void; existing: boolean;
+  billing?: PlanChoice;
 }) {
   const count = batch.transfers.length;
   const files = `${count} ${count === 1 ? "file" : "files"}`;
   if (batch.phase === "creating") return <div className="upload-status"><h3>Setting up the space</h3><p>{files}, {formatBytes(total)}</p></div>;
 
-  if (batch.phase === "payment") return <div className="upload-status upload-status-action">
-    <h3>{batch.checkoutOpened ? "Waiting for payment" : "Start hosting"}</h3>
-    <p>{batch.checkoutOpened ? "Finish paying in the other tab. Your files start uploading here as soon as payment goes through."
-      : "Payment opens in a new tab. Your files start uploading here as soon as it goes through."}</p>
-    {batch.error && <p className="site-alert" role="alert">{batch.error}</p>}
-    <div className="site-actions">
-      {batch.checkoutUrl ? <a className="site-button" href={batch.checkoutUrl} target="_blank" rel="noopener" onClick={() => uploads.markCheckoutOpened(batch.key)}>
-        {batch.checkoutOpened ? "Open payment again" : "Continue to payment"}<span aria-hidden="true">↗</span></a>
-        : <button type="button" className="site-button" onClick={async () => {
-          try { const { url } = await accountRequest("/api/account/billing/checkout"); if (url) { window.open(url, "_blank", "noopener"); uploads.markCheckoutOpened(batch.key); } }
-          catch { /* The status poll picks up a payment that went through. */ }
-        }}>Try payment again<span aria-hidden="true">↗</span></button>}
-      <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Cancel</button>
-    </div>
-  </div>;
+  if (batch.phase === "payment") {
+    const plans = billing?.plans ?? [];
+    const plan = plans.find(item => item.id === batch.plan) ?? plans[0];
+    const price = plan && `${formatMoney(plan.amount, plan.currency)} ${formatPeriod(plan.interval, plan.intervalCount)}`;
+    return <div className="upload-status upload-status-action upload-status-plans">
+      <h3>{batch.checkoutOpened ? "Waiting for payment" : "Start hosting"}</h3>
+      {plan && <p>{plan.spaces === null ? `You're on pay as you go, so each space you upload adds ${price}.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}`
+        : `${plan.name} covers up to ${plan.spaces} spaces for ${price}.`}</p>}
+      {plans.length > 1 && <PlanPicker plans={plans} selected={plan?.id ?? null} needed={billing?.spaces || 1} name={`plan-${batch.key}`}
+        label="How you pay" disabled={batch.preparing} onSelect={id => void uploads.choosePlan(batch.key, id)} />}
+      {billing && <OpenSourceNote brand={billing.brand} sourceUrl={billing.sourceUrl} />}
+      {batch.error && <p className="site-alert" role="alert">{batch.error}</p>}
+      <div className="site-actions">
+        {batch.preparing ? <button type="button" className="site-button" disabled>Preparing payment…</button>
+          : batch.checkoutUrl ? <a className="site-button" href={batch.checkoutUrl} target="_blank" rel="noopener" onClick={() => uploads.markCheckoutOpened(batch.key)}>
+            {batch.checkoutOpened ? "Open payment again" : "Continue to payment"}<span aria-hidden="true">↗</span></a>
+          : <button type="button" className="site-button" onClick={() => void uploads.choosePlan(batch.key, plan?.id ?? "")}>Try payment again</button>}
+        <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Cancel</button>
+      </div>
+      <p className="site-hint">{batch.checkoutOpened ? "Finish paying in the other tab. Your files start uploading here as soon as payment goes through."
+        : "Payment opens in a new tab. Your files start uploading here as soon as it goes through."}</p>
+    </div>;
+  }
+
+  if (batch.phase === "full") return <PlanFull batch={batch} uploads={uploads} billing={billing} />;
 
   if (batch.phase === "uploading" && !count) return <div className="upload-status"><h3>Add your files</h3><p>Drop them on this sheet or choose them below.</p></div>;
 

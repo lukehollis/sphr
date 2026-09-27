@@ -15,8 +15,10 @@
 .spaces-plus::after { top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; }
 .spaces-billing { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap;
   margin: 0 0 var(--space-4); padding-bottom: var(--space-2); border-bottom: var(--rule-hair); font-size: 14px; }
-.spaces-billing p { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: 0; color: var(--site-muted); }
+.spaces-billing p { display: flex; gap: 4px var(--space-3); flex-wrap: wrap; margin: 0; color: var(--site-muted); }
 .spaces-billing strong { color: var(--text-heading); }
+.spaces-billing-offer { color: var(--text-heading); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
+.spaces-billing-actions { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
 
 /* Grid of spaces */
 .spaces-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-5) var(--space-3); }
@@ -136,6 +138,56 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
 .upload-more p { margin: 0; color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-body); }
 .upload-more strong { display: block; margin-bottom: 4px; color: var(--text-heading); font-size: 15px; }
 .upload-more .upload-pickers { justify-content: flex-start; }
+
+/* Plans: a row of cards, pay as you go first. A blue rule and a filled square mark the choice. */
+.plan-picker { min-width: 0; margin: 0; padding: 0; border: 0; container: plans / inline-size; }
+.plan-picker-legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.plan-options { display: grid; grid-template-columns: repeat(var(--plans, 4), minmax(0, 1fr)); gap: 2px; }
+.plan-option { position: relative; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; min-width: 0; padding: 14px 16px 16px;
+  border-top: 3px solid var(--site-line); background: var(--paper-tint); color: var(--text-body); cursor: pointer;
+  transition: border-color 120ms, background-color 120ms; }
+.plan-option:hover { background: #22211e; }
+.plan-option input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.plan-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan-option-selected { border-top-color: var(--accent); background: #22211e; }
+.plan-option-small { cursor: default; }
+.plan-option-small > span { opacity: .45; }
+.plan-option-small:hover { background: var(--paper-tint); }
+.plan-option-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; color: var(--text-heading); font-size: 15px;
+  font-weight: var(--weight-bold); line-height: var(--leading-heading); }
+.plan-option-name > span { flex: 1 1 0; min-width: 0; }
+.plan-option-name i { width: 10px; height: 10px; flex: none; border: 1.5px solid var(--site-muted); transition: background-color 120ms, border-color 120ms; }
+.plan-option-selected .plan-option-name i { border-color: var(--accent); background: var(--accent); }
+.plan-option-name em { flex-basis: 100%; padding-left: 20px; color: var(--site-muted); font-size: 11px; font-style: normal; white-space: nowrap; }
+.plan-option-selected .plan-option-name em { color: var(--text-heading); }
+.plan-option-price { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; align-self: end; }
+.plan-option-price b { color: var(--text-heading); font-size: 34px; line-height: 1; letter-spacing: var(--tracking-tight); font-variant-numeric: tabular-nums; }
+.plan-option-price span { color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-heading); }
+.plan-option-detail { padding-top: 10px; border-top: var(--rule-hair); color: var(--text-body); font-size: var(--size-caption); line-height: var(--leading-heading); }
+@container plans (max-width: 660px) {
+  .plan-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container plans (max-width: 360px) {
+  .plan-options { grid-template-columns: minmax(0, 1fr); }
+  .plan-option { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 6px 12px; padding: 12px 14px; }
+  .plan-option-name { grid-column: 1; }
+  .plan-option-price { grid-column: 2; grid-row: 1 / span 2; align-items: flex-end; align-self: center; gap: 4px; text-align: right; }
+  .plan-option-price b { font-size: 26px; }
+  .plan-option-price span { max-width: 12ch; }
+  .plan-option-detail { grid-column: 1; padding-top: 0; border-top: 0; color: var(--site-muted); }
+}
+.plan-note { max-width: 680px; margin: 0; padding-top: 12px; border-top: var(--rule-hair); color: var(--site-muted); font-size: 14px; line-height: var(--leading-body); }
+.plan-note a { color: var(--text-heading); text-decoration-color: var(--accent); text-underline-offset: 4px; }
+.upload-status-plans { gap: 14px; }
+.upload-status-plans .plan-picker { margin: 4px 0; }
+.upload-status-plans .plan-option { background: #1f1e1b; }
+.upload-status-plans .plan-option:hover, .upload-status-plans .plan-option-selected { background: #292825; }
+.upload-status-plans .plan-option-small:hover { background: #1f1e1b; }
+
+/* Plan page */
+.plan-lead { max-width: 680px; margin: 0 0 var(--space-4); color: var(--text-body); font-size: 17px; line-height: var(--leading-body); }
+.plan-actions { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); }
+.plan-hint { margin: 12px 0 var(--space-5); }
 
 @media (max-width: 1000px) {
   .upload-batch { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
