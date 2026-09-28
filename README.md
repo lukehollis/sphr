@@ -1,6 +1,6 @@
 ![SPHR logo](https://github.com/user-attachments/assets/bcc6126e-4c6d-48ec-ac76-7018d6149043)
 
-
+[![Live version](https://img.shields.io/badge/Live_version-spacery.dev-e03c31)](https://spacery.dev/)
 [![Live demo (E57)](https://img.shields.io/badge/LIVE_DEMO-E57_observatory-e03c31)](https://app.spacery.dev/s/bc8d61ff42cf/loomis-michael-telescope-observatory)
 [![Live demo (3DGS)](https://img.shields.io/badge/LIVE_DEMO-3DGS_garden-e03c31)](https://app.spacery.dev/?demo=garden)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)
@@ -12,6 +12,8 @@
 # SPHR
 
 SPHR is an open source 3D space viewer you can host yourself. It is built for lidar scans, 3D Gaussian Splatting (3DGS) captures, and 360 image or video tours, and it runs entirely in the browser. Clone it, point it at your own scans, and serve tours from your own domain.
+
+Self-host SPHR with this repository, or use paid hosting at [spacery.dev](https://spacery.dev/).
 
 - **[LIVE DEMO (E57)](https://app.spacery.dev/s/bc8d61ff42cf/loomis-michael-telescope-observatory)**: a campus observatory converted from a Matterport E57 export.
 - **[LIVE DEMO (3DGS)](https://app.spacery.dev/?demo=garden)**: a garden captured as 3D Gaussian splats.
