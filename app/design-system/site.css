@@ -55,12 +55,9 @@
 /* Header */
 .site-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 64px;
   padding: 0 var(--page-margin); border-bottom: var(--rule-section); }
-.site-wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--text-heading); font-size: 17px; font-weight: var(--weight-bold);
-  line-height: 1; text-decoration: none; }
-.site-cube { flex: none; }
-.site-cube path { stroke-width: 1.5; stroke-linejoin: round; }
-.site-cube-top { stroke: var(--text-heading); }
-.site-cube-sides { stroke: var(--text-heading); }
+/* The site name is the one element in the pixel face, as on the homepage; Wordmark adds the font's class. */
+.site-wordmark { display: inline-flex; align-items: center; color: var(--text-heading); font-size: 16px; font-weight: var(--weight-regular);
+  line-height: 1; letter-spacing: 0.02em; text-transform: uppercase; text-decoration: none; }
 .site-nav { display: flex; align-items: center; gap: var(--space-3); min-width: 0; font-size: var(--size-caption); }
 .site-nav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--site-muted); text-decoration: none;
   border-bottom: 2px solid transparent; transition: color 120ms, border-color 120ms; }
