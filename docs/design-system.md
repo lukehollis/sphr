@@ -24,6 +24,10 @@ Photographic and 3D scene content retain their colors.
 - Use the supplied Helvetica → Helvetica Neue → Arimo → Arial fallback stack.
   System fonts keep viewing independent of a Google Fonts request; the optional
   reference `fonts.css` import is intentionally omitted.
+- The site name in page headers is the one exception: uppercase Silkscreen, the
+  homepage's pixel face, with no icon beside it. The font is bundled in
+  `app/design-system/fonts/` under the SIL Open Font License and loaded through
+  `next/font/local` (`app/design-system/fonts.ts`), so it needs no font service either.
 - Adapt native React components to these tokens. Do not load the reference's
   browser-global React bundle or duplicate React in the application.
 
