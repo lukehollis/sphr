@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { accountRequest } from "./AccountAuth";
 import SiteHeader from "./site/SiteHeader";
-import { ConstructionDrawing, SiteFooter, StatusMark } from "./site/Chrome";
+import { ConstructionDrawing, SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
 import UploadModal, { awaitingPaymentKey, batchActive, useUploadBatches, type Batch } from "./UploadModal";
 import { cheaperPlan, currentPlan, hostingActive, periodTotal } from "./PlanPicker";
 import { getJson } from "./uploads";
 import { formatBytes } from "@/lib/bytes";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
+import type { AgentToken } from "@/lib/server/accounts-store";
 import type { Plan } from "@/lib/server/billing";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
@@ -162,8 +163,28 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   </article>;
 }
 
-export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand }:
-  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string }) {
+/** Agents on the customer's own computers that can add spaces and upload for them, each of which can be unlinked. */
+function LinkedAgents({ initial }: { initial: AgentToken[] }) {
+  const [agents, setAgents] = useState(initial);
+  const [error, setError] = useState("");
+  async function unlink(id: string) {
+    setError("");
+    try { await accountRequest(`/api/account/agents/${id}`, undefined, "DELETE"); setAgents(list => list.filter(agent => agent.id !== id)); }
+    catch (failure) { setError((failure as Error).message); }
+  }
+  if (!agents.length) return null;
+  return <section className="linked-agents" aria-labelledby="linked-agents-title">
+    <SectionHeader title={<span id="linked-agents-title">Linked agents</span>} />
+    {error && <p className="site-alert" role="alert">{error}</p>}
+    <ul>{agents.map(agent => <li key={agent.id}>
+      <span><strong>{agent.client}</strong><small>{`Linked ${shortDate(agent.created)}${agent.used ? `, last used ${shortDate(agent.used)}` : ""}`}</small></span>
+      <button type="button" className="site-button site-button-secondary" onClick={() => unlink(agent.id)}>Unlink</button>
+    </li>)}</ul>
+  </section>;
+}
+
+export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [] }:
+  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[] }) {
   const [spaces, setSpaces] = useState(initial);
   const [account, setAccount] = useState(initialAccount);
   const [error, setError] = useState("");
@@ -278,6 +299,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
           <span className="site-button" aria-hidden="true">Add a space</span>
         </span>
       </button>}
+      <LinkedAgents initial={agents} />
     </main>
     <SiteFooter brand={brand} links={legalLinks} />
     <UploadModal open={modal} onClose={() => setModal(false)} uploads={uploads} batchKey={current ? batchKey : null}

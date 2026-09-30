@@ -109,7 +109,7 @@ export type CheckoutStart = { url: string; plan: string } | { paid: true } | { p
  * is sent to the billing portal instead, so a customer is never subscribed twice. Without
  * a plan named, an open session keeps its plan while that plan still covers every space.
  */
-export function startCheckout(user: User, origin: string, planId?: unknown): Promise<CheckoutStart> {
+export function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false): Promise<CheckoutStart> {
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
     const count = payableSpaceCount(current.id);
@@ -141,7 +141,8 @@ export function startCheckout(user: User, origin: string, planId?: unknown): Pro
       mode: "subscription", customer, client_reference_id: user.id,
       line_items: [{ price: plan.id, quantity }],
       subscription_data: { metadata: { sphr_user: user.id } },
-      success_url: `${origin}/account?checkout={CHECKOUT_SESSION_ID}`,
+      // An agent is waiting to upload; the page tells the customer to go back to it.
+      success_url: `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`,
       cancel_url: `${origin}/account`,
       ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
     });

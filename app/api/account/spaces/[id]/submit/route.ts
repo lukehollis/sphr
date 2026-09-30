@@ -8,7 +8,7 @@ import { siteBrand } from "@/lib/server/brand";
 
 /** Queues the uploaded files for processing. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { user, body, error } = await accountRequest(request, 8192);
+  const { user, body, error } = await accountRequest(request, 8192, { agents: true });
   if (error) return error;
   const space = readCustomerSpace((await params).id);
   if (!space || space.userId !== user.id || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);

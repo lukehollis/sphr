@@ -5,7 +5,7 @@ import { chunkSize, maxSpaceBytes, objectName, safeFileName, startUploadSession 
 
 /** Registers one file and returns the resumable session the browser uploads it to. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { user, body, error } = await accountRequest(request);
+  const { user, body, error } = await accountRequest(request, 4096, { agents: true });
   if (error) return error;
   const space = readCustomerSpace((await params).id);
   if (!space || space.userId !== user.id || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { accessControlled, isScenePublic } from "./admin-store";
-import { createUserSession, createUserToken, deleteUserSession, hostingActive, readCustomerSpace, spaceForScene, userFromSession,
+import { createUserSession, createUserToken, deleteUserSession, hostingActive, readCustomerSpace, spaceForScene, userFromAgentToken, userFromSession,
   type CustomerSpace, type User } from "./accounts-store";
 import { adminResponse, cookieOptions, isAdmin, readAdminBody, sameOrigin } from "./auth";
 import { billingEnabled } from "./billing";
@@ -19,6 +19,23 @@ export const sessionCookie = process.env.NODE_ENV === "production" ? "__Host-sph
 export async function currentUser() {
   if (!accountsEnabled()) return undefined;
   return userFromSession((await cookies()).get(sessionCookie)?.value);
+}
+
+/** The bearer token an agent sends, `undefined` when there is none (an empty string when it is malformed). */
+export function bearerToken(request: Request) {
+  const header = request.headers.get("authorization");
+  if (header === null) return undefined;
+  return header.match(/^Bearer\s+(\S+)$/i)?.[1] ?? "";
+}
+
+/**
+ * The customer behind a request. Routes an agent may use pass `agents`: a request with a
+ * bearer token is then that agent's customer (or no one), never the browser session.
+ */
+export async function requestUser(request: Request, agents = false) {
+  const token = agents ? bearerToken(request) : undefined;
+  if (token !== undefined) return accountsEnabled() ? userFromAgentToken(token) : undefined;
+  return currentUser();
 }
 
 export async function startUserSession(userId: string) {
@@ -43,7 +60,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/plan|\/spaces\/[a-f0-9]{12}(?:\/edit)?)?|s\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?)?$/;
+const returnPattern = /^\/(?:account(?:\/plan|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit)?)?|s\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?)?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }
@@ -71,18 +88,22 @@ export async function notifyOwner(user: User | undefined, content: MailContent) 
 
 export { adminResponse as accountResponse, readAdminBody as readAccountBody, sameOrigin };
 
-/** Reads a same-origin JSON body and the signed-in customer, or returns the error response. */
-export async function accountRequest(request: Request, maxBytes = 4096) {
+/**
+ * Reads a JSON body and the signed-in customer, or returns the error response. Browser
+ * requests must be same-origin; with `agents`, a linked agent's bearer token also works.
+ */
+export async function accountRequest(request: Request, maxBytes = 4096, { agents = false } = {}) {
   if (!accountsEnabled()) return { error: adminResponse({ error: "Accounts are unavailable." }, 404) } as const;
-  const user = await currentUser();
-  if (!user) return { error: adminResponse({ error: "Sign in to continue." }, 401) } as const;
+  const agent = agents && bearerToken(request) !== undefined;
+  const user = await requestUser(request, agents);
+  if (!user) return { error: adminResponse({ error: agent ? "This agent is no longer linked. Link it again." : "Sign in to continue." }, 401) } as const;
   let body;
-  try { body = await readAdminBody(request, maxBytes); } catch { return { error: adminResponse({ error: "Invalid request." }, 400) } as const; }
-  return { user, body } as const;
+  try { body = await readAdminBody(request, maxBytes, !agent); } catch { return { error: adminResponse({ error: "Invalid request." }, 400) } as const; }
+  return { user, body, agent } as const;
 }
 
-export async function ownedSpace(id: string) {
-  const user = await currentUser();
+export async function ownedSpace(id: string, request?: Request) {
+  const user = request ? await requestUser(request, true) : await currentUser();
   const space = readCustomerSpace(id);
   return user && space && space.userId === user.id && space.status !== "deleted" ? { user, space } : undefined;
 }

@@ -20,6 +20,7 @@
     "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v",
     "test:accounts": "node --test scripts/test-accounts.mjs",
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
+    "test:agents": "node scripts/test-agent-connector.mjs",
     "worker": "node scripts/worker/agent-runner.mjs"
   },
   "dependencies": {
