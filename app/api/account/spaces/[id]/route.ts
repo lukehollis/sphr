@@ -8,21 +8,22 @@ import { removePublishedScene } from "@/lib/server/published-assets";
 
 type Params = { params: Promise<{ id: string }> };
 
-async function owned(request: Request, params: Params["params"]) {
-  const { user, body, error } = await accountRequest(request);
+async function owned(request: Request, params: Params["params"], agents = false) {
+  const { user, body, error } = await accountRequest(request, 4096, { agents });
   if (error) return { error };
   const space = readCustomerSpace((await params).id);
   if (!space || space.userId !== user.id || space.status === "deleted") return { error: accountResponse({ error: "Space not found." }, 404) };
   return { user, body, space };
 }
 
-export async function GET(_request: Request, { params }: Params) {
-  const owned = await ownedSpace((await params).id);
+export async function GET(request: Request, { params }: Params) {
+  const owned = await ownedSpace((await params).id, request);
   return owned ? accountResponse({ space: await describeSpace(owned.space) }) : accountResponse({ error: "Space not found." }, 404);
 }
 
+/** Renames a space or changes who can open it. A linked agent may do this; deleting stays with the browser. */
 export async function PATCH(request: Request, { params }: Params) {
-  const { space, body, error } = await owned(request, params);
+  const { space, body, error } = await owned(request, params, true);
   if (error) return error;
   if (body?.title !== undefined) {
     const title = cleanText(body.title, 200);

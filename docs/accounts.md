@@ -55,6 +55,36 @@ customer has. If a subscription ends or stays unpaid, the customer's spaces go o
 until billing restarts; `past_due` subscriptions stay online while Stripe retries the payment. The operator's `/admin`
 login is separate and continues to see and manage every space.
 
+## Publishing from a customer's own agent
+
+A customer can let their own agent (Claude, Codex, Grok Build, Antigravity and others that run MCP
+servers) publish captures for them. Two connectors share the same account routes, limits and billing:
+
+- **The local connector** (`connector/`) is a dependency-free MCP server that runs on the customer's
+  computer, so it can read multi-gigabyte captures from disk. It uploads in the background, in the
+  same resumable chunks as the browser, keeps going if the chat ends and submits the space when the
+  upload finishes. `node connector/build.mjs` packages it for one site: a Claude Desktop extension
+  (`.mcpb`), a versioned tarball for `npx -y <url>`, a skill and a setup page for agents. The site's
+  name and addresses are stamped in at build time, so none are committed.
+- **The hosted endpoint** (`/mcp`, Streamable HTTP) serves agents that run in the cloud and take a
+  connector URL (Meta Muse, claude.ai, ChatGPT). It cannot read the customer's disk: it uploads files
+  the agent holds itself and otherwise sends the customer to the space's page to drop files. Set
+  `SPHR_AGENT_CONNECTOR_URL` to the setup page to have it mention the local connector.
+
+Agents link the way a TV signs in. The agent asks `/api/agent/link` for a code and opens
+`/account/connect/<code>` in the customer's browser, where they sign in and approve it; the agent
+then collects a bearer token from `/api/agent/token`. Tokens (`sphr_…`, stored hashed) can add and
+read spaces, upload, submit, change visibility and start Checkout. Deleting spaces, the billing
+portal, plan changes, account settings and approving other agents stay with the browser session.
+Tokens are listed under *Linked agents* on *Your spaces*, where the customer can unlink them, and are
+revoked with the customer's sessions on a password reset. Payment always happens in Stripe
+Checkout in the customer's browser; the agent never handles card details. Checkout started by an
+agent returns to a page that tells the customer to go back to it. A hosted session keeps its link
+code and token sealed with a key derived from the session ID, which only the agent holds.
+
+`node scripts/test-agent-connector.mjs` drives both connectors end to end against a development
+server with local stand-ins for Stripe, Google and email.
+
 ## Runtime settings
 
 Accounts build on access control. Add these to the runtime environment

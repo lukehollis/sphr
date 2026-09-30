@@ -3,7 +3,7 @@ import { accountRequest, accountResponse } from "@/lib/server/accounts";
 import { uploadOffset, verifyUpload } from "@/lib/server/uploads";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { user, error } = await accountRequest(request);
+  const { user, error } = await accountRequest(request, 4096, { agents: true });
   if (error) return error;
   const upload = readUpload((await params).id);
   const space = upload && readCustomerSpace(upload.spaceId);

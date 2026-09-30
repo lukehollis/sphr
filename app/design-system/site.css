@@ -270,6 +270,23 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 .site-auth-switch { margin: var(--space-3) 0 0; padding-top: var(--space-2); border-top: var(--rule-hair); color: var(--site-muted); font-size: 14px; }
 .site-auth-switch a { color: var(--text-heading); text-underline-offset: 4px; text-decoration-color: var(--site-faint); }
 .site-auth-switch a:hover { text-decoration-color: var(--accent); }
+/* Linked agents on Your spaces */
+.linked-agents { margin-top: var(--space-6); }
+.linked-agents ul { margin: 0; padding: 0; list-style: none; }
+.linked-agents li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 12px 0; border-bottom: var(--rule-hair); }
+.linked-agents li > span { display: grid; gap: 2px; min-width: 0; }
+.linked-agents strong { color: var(--text-heading); font-size: 15px; overflow-wrap: anywhere; }
+.linked-agents small { color: var(--site-muted); font-size: var(--size-caption); }
+
+/* An agent's link code, read against the code the agent shows */
+.site-agent-code { display: grid; gap: 6px; margin-bottom: var(--space-3); padding: var(--space-3); background: var(--site-paper), var(--paper-cream);
+  border-top: var(--rule-strong); }
+.site-agent-code span { color: var(--text-label); font-size: var(--size-caption); font-weight: var(--weight-bold); }
+.site-agent-code strong { color: var(--text-heading); font-size: 34px; line-height: 1.1; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+.site-agent-code p { margin: 0; color: var(--site-muted); font-size: 14px; line-height: var(--leading-body); }
+.site-link-button { padding: 0; border: 0; background: none; color: var(--text-heading); font: inherit; text-decoration: underline;
+  text-underline-offset: 4px; text-decoration-color: var(--site-faint); cursor: pointer; }
+.site-link-button:hover { text-decoration-color: var(--accent); }
 .site-legal { margin: var(--space-2) 0 0; color: var(--gray-label); font-size: 12px; line-height: var(--leading-body); }
 .site-legal a { color: inherit; }
 

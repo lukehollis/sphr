@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { db, hashPassword, verifyPassword } from "./admin-store";
 import { formatBytes } from "../bytes";
 
@@ -35,6 +35,12 @@ function store() {
       status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, worker TEXT, message TEXT, progress TEXT, created TEXT NOT NULL, started TEXT, finished TEXT);
     CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
     CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, received TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS agent_links (code TEXT PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, client TEXT NOT NULL,
+      user_id TEXT, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS agent_tokens (id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL,
+      client TEXT NOT NULL, created TEXT NOT NULL, used TEXT);
+    CREATE INDEX IF NOT EXISTS agent_tokens_user ON agent_tokens(user_id);
+    CREATE TABLE IF NOT EXISTS mcp_sessions (id TEXT PRIMARY KEY, client TEXT NOT NULL, secret TEXT, expires INTEGER NOT NULL);
   `);
   // Databases from before plans were added gain the column; their subscriptions are per space.
   if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "plan")) {
@@ -131,6 +137,7 @@ export async function resetUserPassword(userId: string, password: string) {
     store().prepare("UPDATE users SET password=?, email_verified=1 WHERE id=?").run(digest, userId);
     store().prepare("DELETE FROM user_sessions WHERE user_id=?").run(userId);
     store().prepare("DELETE FROM user_tokens WHERE user_id=?").run(userId);
+    store().prepare("DELETE FROM agent_tokens WHERE user_id=?").run(userId);
   });
 }
 
@@ -175,6 +182,142 @@ export function consumeUserToken(token: unknown, purpose: "verify" | "reset") {
     store().prepare("DELETE FROM user_tokens WHERE token=?").run(hash(token));
     return row?.user_id;
   });
+}
+
+// ---- Agents ----
+// A person's own agent (Claude, Codex and the like) links to their account the way a TV
+// signs in: it shows a short code, the person approves it in a signed-in browser, and the
+// agent collects a bearer token. The agent never sees a password or a card.
+
+const linkLifetime = 10 * 60 * 1000;
+export const maxAgentTokens = 20;
+// No vowels, so codes never spell words; no 0/O or 1/I.
+const codeLetters = "BCDFGHJKLMNPQRSTVWXZ23456789";
+
+export function normalizeUserCode(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const code = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return code.length === 8 && [...code].every(letter => codeLetters.includes(letter)) ? `${code.slice(0, 4)}-${code.slice(4)}` : undefined;
+}
+
+export function createAgentLink(client: string) {
+  const code = randomId(32);
+  const letters = [...randomBytes(8)].map(byte => codeLetters[byte % codeLetters.length]).join("");
+  const userCode = `${letters.slice(0, 4)}-${letters.slice(4)}`;
+  store().prepare("DELETE FROM agent_links WHERE expires<=?").run(Date.now());
+  store().prepare("INSERT INTO agent_links(code, user_code, client, expires) VALUES (?, ?, ?, ?)").run(hash(code), userCode, client, Date.now() + linkLifetime);
+  return { code, userCode, expiresIn: linkLifetime / 1000 };
+}
+
+export function readAgentLink(userCode: unknown) {
+  const code = normalizeUserCode(userCode);
+  const row = code ? store().prepare("SELECT client, user_id FROM agent_links WHERE user_code=? AND expires>?").get(code, Date.now()) as
+    { client: string; user_id: string | null } | undefined : undefined;
+  return row && { userCode: code!, client: row.client, approved: row.user_id !== null };
+}
+
+/** Approves a waiting link for the signed-in customer. A link approved once cannot move to another account. */
+export function approveAgentLink(userCode: unknown, userId: string) {
+  const code = normalizeUserCode(userCode);
+  if (!code) return false;
+  return store().prepare("UPDATE agent_links SET user_id=? WHERE user_code=? AND expires>? AND user_id IS NULL").run(userId, code, Date.now()).changes === 1;
+}
+
+export function denyAgentLink(userCode: unknown) {
+  const code = normalizeUserCode(userCode);
+  if (code) store().prepare("DELETE FROM agent_links WHERE user_code=? AND user_id IS NULL").run(code);
+}
+
+/** The agent's poll. An approved link becomes a token exactly once; the oldest tokens past the limit are dropped. */
+export function claimAgentLink(code: unknown): { status: "pending" } | { status: "expired" } | { status: "approved"; token: string; user: User } {
+  if (typeof code !== "string" || !/^[a-f0-9]{64}$/.test(code)) return { status: "expired" };
+  return transaction(() => {
+    const row = store().prepare("SELECT client, user_id FROM agent_links WHERE code=? AND expires>?").get(hash(code), Date.now()) as
+      { client: string; user_id: string | null } | undefined;
+    if (!row) return { status: "expired" as const };
+    if (!row.user_id) return { status: "pending" as const };
+    store().prepare("DELETE FROM agent_links WHERE code=?").run(hash(code));
+    const token = `sphr_${randomId(32)}`;
+    store().prepare("INSERT INTO agent_tokens(id, token, user_id, client, created) VALUES (?, ?, ?, ?, ?)").run(randomId(8), hash(token), row.user_id, row.client, now());
+    store().prepare(`DELETE FROM agent_tokens WHERE user_id=? AND id NOT IN
+      (SELECT id FROM agent_tokens WHERE user_id=? ORDER BY coalesce(used, created) DESC LIMIT ?)`).run(row.user_id, row.user_id, maxAgentTokens);
+    return { status: "approved" as const, token, user: readUser(row.user_id)! };
+  });
+}
+
+export function userFromAgentToken(token: string | undefined) {
+  if (!token || !/^sphr_[a-f0-9]{64}$/.test(token)) return undefined;
+  const row = store().prepare("SELECT agent_tokens.id AS token_id, agent_tokens.used AS token_used, users.* FROM agent_tokens JOIN users ON users.id=agent_tokens.user_id WHERE agent_tokens.token=?")
+    .get(hash(token)) as (UserRow & { token_id: string; token_used: string | null }) | undefined;
+  if (!row) return undefined;
+  // Last use is shown on the account page; a minute's precision is plenty.
+  if (!row.token_used || Date.parse(row.token_used) < Date.now() - 60000) store().prepare("UPDATE agent_tokens SET used=? WHERE id=?").run(now(), row.token_id);
+  return toUser(row);
+}
+
+// Hosted MCP sessions (the /mcp endpoint for agents that run in the cloud). A session remembers
+// its link code while the person approves it, then the agent token. Both are sealed with a key
+// derived from the session ID, which only the agent holds, so the database alone cannot use them.
+const mcpSessionLifetime = 30 * 24 * 60 * 60 * 1000;
+export type McpSecret = { token?: string; link?: string };
+const sessionKey = (id: string) => createHash("sha256").update(`sphr-mcp-session:${id}`).digest();
+
+function seal(id: string, value: McpSecret) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", sessionKey(id), iv);
+  const data = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+  return [iv, cipher.getAuthTag(), data].map(part => part.toString("base64url")).join(".");
+}
+
+function unseal(id: string, value: string | null): McpSecret {
+  if (!value) return {};
+  try {
+    const [iv, tag, data] = value.split(".").map(part => Buffer.from(part, "base64url"));
+    const decipher = createDecipheriv("aes-256-gcm", sessionKey(id), iv);
+    decipher.setAuthTag(tag);
+    return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8")) as McpSecret;
+  } catch { return {}; }
+}
+
+export function createMcpSession(client: string) {
+  const id = randomBytes(24).toString("base64url");
+  store().prepare("DELETE FROM mcp_sessions WHERE expires<=?").run(Date.now());
+  store().prepare("INSERT INTO mcp_sessions(id, client, expires) VALUES (?, ?, ?)").run(hash(id), client, Date.now() + mcpSessionLifetime);
+  return id;
+}
+
+/** The session's client and sealed values; each use extends it. */
+export function readMcpSession(id: unknown) {
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{32}$/.test(id)) return undefined;
+  const row = store().prepare("SELECT client, secret FROM mcp_sessions WHERE id=? AND expires>?").get(hash(id), Date.now()) as
+    { client: string; secret: string | null } | undefined;
+  if (!row) return undefined;
+  store().prepare("UPDATE mcp_sessions SET expires=? WHERE id=?").run(Date.now() + mcpSessionLifetime, hash(id));
+  return { id, client: row.client, ...unseal(id, row.secret) };
+}
+
+export function saveMcpSecret(id: string, value: McpSecret) {
+  store().prepare("UPDATE mcp_sessions SET secret=? WHERE id=?").run(value.token || value.link ? seal(id, value) : null, hash(id));
+}
+
+export function deleteMcpSession(id: string) {
+  store().prepare("DELETE FROM mcp_sessions WHERE id=?").run(hash(id));
+}
+
+export type AgentToken = { id: string; client: string; created: string; used: string | null };
+
+export function listAgentTokens(userId: string): AgentToken[] {
+  return (store().prepare("SELECT id, client, created, used FROM agent_tokens WHERE user_id=? ORDER BY created DESC").all(userId) as AgentToken[])
+    .map(({ id, client, created, used }) => ({ id, client, created, used }));
+}
+
+/** An agent unlinking itself. */
+export function deleteAgentToken(token: string | undefined) {
+  return Boolean(token && /^sphr_[a-f0-9]{64}$/.test(token) && store().prepare("DELETE FROM agent_tokens WHERE token=?").run(hash(token)).changes === 1);
+}
+
+export function revokeAgentToken(userId: string, id: unknown) {
+  return typeof id === "string" && store().prepare("DELETE FROM agent_tokens WHERE id=? AND user_id=?").run(id, userId).changes === 1;
 }
 
 export function createOAuthState(provider: string, returnPath: string) {
@@ -222,6 +365,7 @@ export function signInWithIdentity(profile: ExternalProfile) {
         store().prepare("UPDATE users SET password=NULL WHERE id=?").run(id);
         store().prepare("DELETE FROM user_sessions WHERE user_id=?").run(id);
         store().prepare("DELETE FROM user_tokens WHERE user_id=?").run(id);
+        store().prepare("DELETE FROM agent_tokens WHERE user_id=?").run(id);
       }
     }
     store().prepare("INSERT INTO identities(provider, subject, user_id, created) VALUES (?, ?, ?, ?)").run(profile.provider, profile.subject, id, now());

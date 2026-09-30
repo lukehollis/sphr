@@ -12,8 +12,9 @@ export function sameOrigin(request: Request) {
   return request.headers.get("origin") === new URL(expected).origin;
 }
 
-export async function readAdminBody(request: Request, maxBytes = 4096) {
-  if (!sameOrigin(request)) throw new Error("Invalid origin");
+/** Browser requests must come from this site. Agent requests carry a bearer token instead of a cookie, so they skip that check. */
+export async function readAdminBody(request: Request, maxBytes = 4096, checkOrigin = true) {
+  if (checkOrigin && !sameOrigin(request)) throw new Error("Invalid origin");
   if (!request.headers.get("content-type")?.startsWith("application/json")) throw new Error("Invalid content type");
   const reader = request.body?.getReader();
   if (!reader) throw new Error("Missing body");

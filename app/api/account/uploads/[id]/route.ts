@@ -1,14 +1,15 @@
 import { readCustomerSpace, readUpload, setUploadStatus } from "@/lib/server/accounts-store";
-import { accountResponse, accountsEnabled, currentUser, sameOrigin } from "@/lib/server/accounts";
+import { accountResponse, accountsEnabled, bearerToken, requestUser, sameOrigin } from "@/lib/server/accounts";
 import { editableStatus } from "@/lib/server/customer-spaces";
 import { deleteStoredUpload, uploadBucket, uploadOffset, writeLocalChunk } from "@/lib/server/uploads";
 
 type Params = { params: Promise<{ id: string }> };
 
 // Browsers omit Origin on same-origin GET requests; reads need only the session.
+// A linked agent's bearer token stands in for both.
 async function ownedUpload(request: Request, params: Params["params"], checkOrigin = true) {
-  if (!accountsEnabled() || (checkOrigin && !sameOrigin(request))) return undefined;
-  const user = await currentUser();
+  if (!accountsEnabled() || (checkOrigin && bearerToken(request) === undefined && !sameOrigin(request))) return undefined;
+  const user = await requestUser(request, true);
   const upload = readUpload((await params).id);
   const space = upload && readCustomerSpace(upload.spaceId);
   return user && upload && space && space.userId === user.id && upload.status !== "deleted" && space.status !== "deleted" ? { upload, space } : undefined;
