@@ -276,7 +276,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
         {error && <p className="site-alert" role="alert">{error}</p>}
       </div>
       {blocked && <div className="site-callout site-callout-action">
-        <p>Confirm your email address to add spaces. We sent a link to <strong>{account.email}</strong>.</p>
+        <p>Confirm your email address to add spaces. We sent a link to <strong>{account.email}</strong>. If it is not in your inbox, look in spam or junk.</p>
         <button type="button" className="site-button site-button-secondary" onClick={resend}>Send a new link</button>
       </div>}
       <BillingBar account={account} spaces={spaces} plans={plans} />
