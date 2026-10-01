@@ -370,7 +370,7 @@ try {
   assert.ok(teamMessages.some(embed => embed.title === 'Agent linked' && field(embed, 'Agent') === 'Meta Muse'));
   assert.ok(teamMessages.some(embed => embed.title === 'Space created' && field(embed, 'Title') === 'Riverside studio' && field(embed, 'From') === 'Their agent'));
   assert.ok(teamMessages.some(embed => embed.title === 'Space uploaded for processing' && field(embed, 'Title') === 'Riverside studio'
-    && field(embed, 'From') === 'Their agent' && /^2 files, 17\.\d MB$/.test(field(embed, 'Files'))));
+    && field(embed, 'From') === 'Their agent' && /^2 files, 18 MB$/.test(field(embed, 'Files'))));
   assert.equal(teamMessages.filter(embed => embed.title === 'New subscription').length, 2, 'Alice and Bob each subscribed once');
 
   console.log('Agent connector: linking, plans, Checkout, background upload, submission and unlinking all passed.');
