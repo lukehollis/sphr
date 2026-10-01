@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isAdmin } from "./auth";
-import { analyticsEnabled, clean, cleanProps, cookieDomain, externalReferrer, keepDays, otherOrigins, ownOrigin, saveEvent, seeVisitor,
+import { reportClientError } from "./error-report";
+import { analyticsEnabled, clean, cleanProps, cookieDomain, describeDevice, externalReferrer, keepDays, otherOrigins, ownOrigin, saveEvent, seeVisitor,
   serverEvents, setInternal, visitorCookie, type Props } from "./analytics-store";
 
 // The request side of the site's own analytics (see analytics-store.ts): the visitor cookie,
@@ -77,7 +78,10 @@ export async function collect(request: Request) {
   const origin = request.headers.get("origin");
   const headers = { "Cache-Control": "no-store", ...corsHeaders(request) };
   if (!analyticsEnabled()) return new Response(null, { status: 404 });
-  if (!origin || (origin !== ownOrigin() && !otherOrigins().includes(origin))) return new Response(null, { status: 403 });
+  // Pages that send no referrer (the email confirmation page) make Safari and Firefox send Origin: null;
+  // the browser's own Sec-Fetch-Site still says whether the page is this site's.
+  const sameSite = origin === "null" && request.headers.get("sec-fetch-site") === "same-origin";
+  if (!sameSite && (!origin || (origin !== ownOrigin() && !otherOrigins().includes(origin)))) return new Response(null, { status: 403 });
   const agent = request.headers.get("user-agent") ?? "";
   const done = () => new Response(null, { status: 204, headers });
   if (!agent || bots.test(agent) || !allowed(request.headers.get("x-real-ip") || "local")) return done();
@@ -98,6 +102,7 @@ export async function collect(request: Request) {
       if (linked) props.ref = linked;
     }
     saveEvent(event.name, { visitor, path: clean(event.path, 200) || null, props });
+    if (event.name === "client_error") reportClientError(props, clean(event.path, 200) || null, describeDevice(agent));
   }
   const response = new NextResponse(null, { status: 204, headers });
   // Renewed on each visit; the domain lets a sibling site (the homepage) share it.

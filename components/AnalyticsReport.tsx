@@ -11,7 +11,8 @@ const names: Record<string, string> = {
   checkout_started: "Payment page prepared", checkout_failed: "Payment could not start", plan_chosen: "Chose a plan", checkout_opened: "Opened payment",
   subscription_started: "Paid", subscription_ended: "Billing ended", plan_full: "Plan was full", upload_error: "Upload problem",
   upload_closed: "Closed the upload sheet", upload_cancelled: "Cancelled the space", space_submitted: "Uploaded files", space_ready: "Space went live",
-  space_failed: "Space needs attention", space_deleted: "Deleted a space", agent_linked: "Linked an agent"
+  space_failed: "Space needs attention", space_deleted: "Deleted a space", agent_linked: "Linked an agent",
+  client_error: "Error in their browser", server_error: "Server error"
 };
 const percent = (part: number, whole: number) => whole ? `${Math.round((part / whole) * 100)}%` : "";
 

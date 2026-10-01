@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { accountRequest } from "./AccountAuth";
-import { track } from "./Analytics";
+import { reportError, track } from "./Analytics";
 import { ConstructionDrawing } from "./site/Chrome";
 import PlanPicker, { OpenSourceNote } from "./PlanPicker";
 import { formatBytes } from "@/lib/bytes";
@@ -42,6 +42,7 @@ export type Batch = {
 
 const AUTO_START_SECONDS = 10;
 export const awaitingPaymentKey = "sphr-awaiting-payment";
+export const uploadsChannel = "sphr-uploads";
 
 const busyPhases = new Set<BatchPhase>(["creating", "payment", "full", "uploading", "countdown", "held", "submitting"]);
 const openPhases = ["creating", "payment", "full", "uploading", "countdown", "held"];
@@ -233,8 +234,11 @@ export function useUploadBatches(onChange: () => void) {
     setTimeout(() => pump(key), 0);
   }, [patch, pump]);
 
-  /** Drops the failed files and carries on with the rest. */
+  /** Drops the failed files (and their unfinished records, which would hold up processing) and carries on with the rest. */
   const skipFailed = useCallback((key: string) => {
+    for (const entry of latest.current.find(item => item.key === key)?.transfers ?? []) {
+      if (entry.state === "failed" && entry.uploadId) void accountRequest(`/api/account/uploads/${entry.uploadId}`, undefined, "DELETE").catch(() => undefined);
+    }
     setBatches(items => items.map(item => {
       if (item.key !== key) return item;
       const transfers = item.transfers.filter(entry => entry.state !== "failed");
@@ -327,6 +331,19 @@ export function useUploadBatches(onChange: () => void) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [unfinished]);
 
+  // The tab Checkout returns to asks whether this one still holds files waiting to upload, so it
+  // can say honestly where the upload is (a phone may have suspended or discarded this tab).
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(uploadsChannel);
+    channel.onmessage = event => {
+      if (event.data?.type === "who-has-files" && latest.current.some(batch => batchActive(batch) && batch.transfers.some(entry => entry.state !== "done"))) {
+        channel.postMessage({ type: "has-files" });
+      }
+    };
+    return () => channel.close();
+  }, []);
+
   return { batches, startNew, startExisting, addFiles, submit, hold, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
 }
 
@@ -361,9 +378,12 @@ function Pickers({ onFiles, compact = false }: { onFiles: (files: PickedFile[]) 
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   const take = (list: FileList | null) => { if (list?.length) onFiles(keepCaptures(fromList(list))); };
+  // Phones and tablets ignore folder picking and would show the ordinary file picker under a misleading label.
+  const [folders, setFolders] = useState(true);
+  useEffect(() => setFolders(!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && !(/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)), []);
   return <div className="upload-pickers">
     <button type="button" className={`site-button${compact ? " site-button-secondary" : ""}`} onClick={() => files.current?.click()}>Upload files</button>
-    <button type="button" className="site-button site-button-secondary" onClick={() => folder.current?.click()}>Upload a folder</button>
+    {folders && <button type="button" className="site-button site-button-secondary" onClick={() => folder.current?.click()}>Upload a folder</button>}
     <input ref={files} type="file" multiple hidden onChange={event => { take(event.target.files); event.target.value = ""; }} />
     <input ref={folder} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={event => { take(event.target.files); event.target.value = ""; }} />
   </div>;
@@ -422,7 +442,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
     event.preventDefault();
     setDragging(false);
     setReading(true);
-    readDrop(event.dataTransfer).then(receive).finally(() => setReading(false));
+    readDrop(event.dataTransfer).then(receive).catch(failure => reportError("drop", failure)).finally(() => setReading(false));
   }
 
   useEffect(() => {

@@ -1,7 +1,7 @@
-import { AccountError, createUploadRecord, readCustomerSpace, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
+import { AccountError, createUploadRecord, listUploads, readCustomerSpace, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { editableStatus } from "@/lib/server/customer-spaces";
-import { chunkSize, maxSpaceBytes, objectName, safeFileName, startUploadSession } from "@/lib/server/uploads";
+import { chunkSize, maxSpaceBytes, objectName, safeFileName, startUploadSession, uploadOffset } from "@/lib/server/uploads";
 
 /** Registers one file and returns the resumable session the browser uploads it to. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +17,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!name) return accountResponse({ error: "Invalid file name." }, 400);
   if (!Number.isSafeInteger(size) || size < 1 || size > maxSpaceBytes()) return accountResponse({ error: "This file is empty or too large." }, 400);
   const type = typeof body?.type === "string" && /^[\w.+-]{1,100}\/[\w.+-]{1,100}$/.test(body.type) ? body.type : "application/octet-stream";
+  // The same file chosen again (after a reload, a dropped connection or "Try again") carries on
+  // from what storage already holds instead of starting over.
+  const unfinished = listUploads(space.id).find(item => item.status === "uploading" && item.name === name && item.size === size && item.session);
+  if (unfinished) {
+    try {
+      const offset = await uploadOffset(unfinished);
+      return accountResponse({ ok: true, upload: { id: unfinished.id, name, size, status: unfinished.status }, url: unfinished.session, chunkSize, offset });
+    } catch { setUploadStatus(unfinished.id, "deleted"); }
+  }
   let upload;
   try { upload = createUploadRecord(space.id, name, size, type, id => objectName(space.id, id, name), maxSpaceBytes()); }
   catch (failure) {

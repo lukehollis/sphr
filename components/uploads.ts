@@ -6,24 +6,40 @@ export type PickedFile = { file: File; path: string };
 export type Transfer = {
   key: string; name: string; size: number; sent: number;
   state: "waiting" | "uploading" | "retrying" | "done" | "failed"; error?: string;
+  /** The server's record, once the upload has started. */
+  uploadId?: string;
 };
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** Resolves when the browser is back online, or after a minute in case it never says so. */
+const online = () => new Promise<void>(resolve => {
+  const done = () => { window.removeEventListener("online", done); clearTimeout(timer); resolve(); };
+  const timer = setTimeout(done, 60000);
+  window.addEventListener("online", done);
+});
 
 /** Sends one chunk with the resumable protocol; resolves with the status and any persisted offset. */
 function sendChunk(url: string, blob: Blob, start: number, total: number, progress: (bytes: number) => void) {
   return new Promise<{ status: number; offset?: number }>((resolve, reject) => {
     const request = new XMLHttpRequest();
+    // A connection that stops moving (a network handoff, a captive portal) is dropped and retried, not left hanging.
+    let stalled: ReturnType<typeof setTimeout> | undefined;
+    const watch = () => { clearTimeout(stalled); stalled = setTimeout(() => request.abort(), 60000); };
     request.open("PUT", url);
     request.setRequestHeader("Content-Range", `bytes ${start}-${start + blob.size - 1}/${total}`);
-    request.upload.onprogress = event => progress(event.loaded);
-    request.onerror = () => reject(new Error("Network error"));
+    request.upload.onprogress = event => { watch(); progress(event.loaded); };
+    request.onerror = () => { clearTimeout(stalled); reject(new Error("Network error")); };
+    request.onabort = () => { clearTimeout(stalled); reject(new Error("The connection stalled")); };
     request.onload = () => {
-      const range = request.getResponseHeader("Range")?.match(/^bytes=0-(\d+)$/);
+      clearTimeout(stalled);
+      // Cloud Storage does not expose Range to pages, and asking for it anyway logs an error in Chrome;
+      // without it the persisted offset comes from the application.
+      const range = /^range:/im.test(request.getAllResponseHeaders()) ? request.getResponseHeader("Range")?.match(/^bytes=0-(\d+)$/) : undefined;
       let offset = range ? Number(range[1]) + 1 : undefined;
       try { offset ??= JSON.parse(request.responseText).offset; } catch { /* Cloud Storage replies with object metadata. */ }
       resolve({ status: request.status, offset });
     };
+    watch();
     request.send(blob);
   });
 }
@@ -35,22 +51,22 @@ export async function getJson(url: string) {
   return data;
 }
 
-/** Uploads one file in resumable chunks, resuming from what storage kept after an interruption. */
+/**
+ * Uploads one file in resumable chunks, resuming from what storage kept after an interruption.
+ * A file that fails keeps its server record, so choosing it again (after a reload, a lost
+ * connection or "Try again") carries on where it stopped; "Skip" removes the record.
+ */
 export async function uploadFile(spaceId: string, file: File, update: (patch: Partial<Transfer>) => void) {
-  const { upload, url, chunkSize } = await accountRequest(`/api/account/spaces/${spaceId}/uploads`, { name: file.name, size: file.size, type: file.type });
-  try { await sendFile(upload.id, url, chunkSize, file, update); }
-  catch (failure) {
-    // A file that gives up leaves nothing half-finished behind to block processing.
-    await accountRequest(`/api/account/uploads/${upload.id}`, undefined, "DELETE").catch(() => undefined);
-    throw failure;
-  }
+  const { upload, url, chunkSize, offset } = await accountRequest(`/api/account/spaces/${spaceId}/uploads`, { name: file.name, size: file.size, type: file.type });
+  update({ uploadId: upload.id });
+  await sendFile(upload.id, url, chunkSize, file, update, Number(offset) || 0);
   await accountRequest(`/api/account/uploads/${upload.id}/complete`);
   update({ sent: file.size, state: "done" });
 }
 
-async function sendFile(uploadId: string, url: string, chunkSize: number, file: File, update: (patch: Partial<Transfer>) => void) {
-  let offset = 0, failures = 0;
-  update({ state: "uploading" });
+async function sendFile(uploadId: string, url: string, chunkSize: number, file: File, update: (patch: Partial<Transfer>) => void, start = 0) {
+  let offset = Math.min(start, file.size), failures = 0;
+  update({ state: "uploading", sent: offset });
   while (offset < file.size) {
     const end = Math.min(offset + chunkSize, file.size);
     try {
@@ -62,9 +78,12 @@ async function sendFile(uploadId: string, url: string, chunkSize: number, file: 
       failures = 0;
       update({ sent: offset, state: "uploading" });
     } catch (failure) {
-      if ((failure as { final?: boolean }).final || ++failures > 8) throw failure;
+      if ((failure as { final?: boolean }).final) throw failure;
       update({ state: "retrying" });
-      await wait(Math.min(30000, 1000 * 2 ** failures));
+      // Time offline (a train tunnel, a laptop asleep) does not count against the file.
+      if (navigator.onLine === false) await online();
+      else if (++failures > 12) throw new Error("The connection kept dropping. Try again to carry on where it stopped.");
+      else await wait(Math.min(30000, 1000 * 2 ** failures));
       // Resume from what the storage service actually kept.
       offset = await getJson(`/api/account/uploads/${uploadId}`).then(result => result.offset).catch(() => offset);
     }
@@ -90,15 +109,17 @@ export function readDrop(transfer: DataTransfer): Promise<PickedFile[]> {
   const entries = Array.from(transfer.items ?? []).filter(item => item.kind === "file").map(item => item.webkitGetAsEntry?.() ?? null);
   if (!entries.length || entries.some(entry => !entry)) return Promise.resolve(fromList(transfer.files));
   const files: PickedFile[] = [];
+  // A file that cannot be read (no permission, a cloud placeholder, a very long path) is left out
+  // instead of losing the whole drop.
   async function walk(entry: FileSystemEntry, prefix: string): Promise<void> {
     if (entry.isFile) {
-      const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
-      files.push({ file, path: prefix + file.name });
+      const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)).catch(() => undefined);
+      if (file) files.push({ file, path: prefix + file.name });
       return;
     }
     const reader = (entry as FileSystemDirectoryEntry).createReader();
     for (;;) {
-      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject)).catch(() => [] as FileSystemEntry[]);
       if (!batch.length) return;
       for (const child of batch) await walk(child, `${prefix}${entry.name}/`);
     }

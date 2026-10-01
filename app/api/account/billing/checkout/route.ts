@@ -2,6 +2,7 @@ import { AccountError, hostingStatuses, payableSpaceCount, readSubscription } fr
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout } from "@/lib/server/billing";
 import { recordEvent } from "@/lib/server/analytics";
+import { reportProblem } from "@/lib/server/error-report";
 
 /**
  * Starts or resumes payment for waiting spaces, on the plan the customer chose (pay as you
@@ -22,6 +23,8 @@ export async function POST(request: Request) {
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
     console.error("Unable to start Checkout:", failure instanceof Error ? failure.message : failure);
+    await recordEvent("checkout_failed", { userId: user.id });
+    reportProblem("Payment could not start", failure instanceof Error ? failure.message : String(failure), [["Account", user.email]]);
     return accountResponse({ error: "Payment could not start. Try again." }, 502);
   }
 }

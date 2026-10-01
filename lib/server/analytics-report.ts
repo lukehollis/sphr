@@ -162,7 +162,7 @@ export function analyticsReport(days: number) {
     sections: people(events.filter(event => event.name === "section_view"), event => String(event.data.section ?? ""), event => event.person),
     closes: count(events.filter(event => event.name === "upload_closed" || event.name === "upload_cancelled"),
       event => `${event.name === "upload_cancelled" ? "Cancelled" : "Closed"} ${phases[String(event.data.phase)] ?? String(event.data.phase)}${event.data.paymentOpened ? ", payment opened" : ""}`),
-    problems: count(events.filter(event => ["upload_error", "files_rejected", "plan_full", "checkout_failed", "login_failed", "space_failed"].includes(event.name)),
+    problems: count(events.filter(event => ["upload_error", "files_rejected", "plan_full", "checkout_failed", "login_failed", "space_failed", "client_error", "server_error"].includes(event.name)),
       event => [event.name.replaceAll("_", " "), event.data.message ?? event.data.kinds ?? ""].filter(Boolean).join(", ")),
     countries: people(events, event => firstVisitor.get(event.person)?.country, event => event.person),
     devices: people(events, event => firstVisitor.get(event.person)?.device, event => event.person),

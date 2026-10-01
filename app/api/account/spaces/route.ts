@@ -6,6 +6,7 @@ import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billin
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
+import { reportProblem } from "@/lib/server/error-report";
 
 function announceSpace(user: { id: string; email: string }, title: string, status: "unpaid" | "draft", agent: boolean) {
   void recordEvent("space_created", { userId: user.id, props: { from: agent ? "agent" : "web", first: status === "unpaid" } });
@@ -58,7 +59,8 @@ export async function POST(request: Request) {
     catch (failure) {
       console.error("Unable to start Checkout:", failure instanceof Error ? failure.message : failure);
       await recordEvent("checkout_failed", { userId: user.id });
-      return accountResponse({ ok: true, space: await describeSpace(space), error: "Payment could not start. Use Complete payment to try again." });
+      reportProblem("Payment could not start", failure instanceof Error ? failure.message : String(failure), [["Account", user.email]]);
+      return accountResponse({ ok: true, space: await describeSpace(space), error: "Payment could not start. Try again in a moment." });
     }
   } catch (failure) {
     // The page offers the plans that fit when the current plan is full.
