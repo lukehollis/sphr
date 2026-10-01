@@ -102,7 +102,7 @@ function webhook(event, secret = webhookSecret) {
 const location = response => response.headers.get('location');
 const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 // What a page sends with navigator.sendBeacon: plain text, from the page's own origin.
-const beacon = (browser, events, extra = {}, { origin = base, agent = safari } = {}) => browser.request('/api/analytics', { method: 'POST',
+const beacon = (browser, events, extra = {}, { origin = base, agent = safari } = {}) => browser.request('/api/steps', { method: 'POST',
   headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8', 'User-Agent': agent }, body: JSON.stringify({ events, ...extra }) });
 const database = () => new DatabaseSync(path.join(state, 'admin.sqlite'));
 
@@ -162,6 +162,14 @@ try {
   assert.equal(new Set(danaLinks).size, 2);
   assert.equal((await anonymous.post('/api/account/verify', { token: danaLinks[0] })).status, 200, 'the earlier link still confirms');
   assert.equal((await anonymous.post('/api/account/verify', { token: danaLinks[1] })).status, 400, 'once confirmed, the other links are spent');
+  // The confirmation page sends no referrer, so Safari and Firefox send its beacon with Origin: null.
+  assert.equal((await beacon(dana, [{ name: 'page_view', path: '127.0.0.1/account/verify' }], {}, { origin: 'null' })).status, 403, 'a null origin alone is refused');
+  assert.equal((await dana.request('/api/steps', { method: 'POST', headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'text/plain', 'User-Agent': safari },
+    body: JSON.stringify({ events: [{ name: 'page_view', path: '127.0.0.1/account/verify' }] }) })).status, 204, 'the browser vouches for its own page');
+  // A JavaScript error in a visitor's browser reaches the operator once, however often it repeats.
+  for (let index = 0; index < 3; index++) await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'error', message: 'TypeError: x is undefined', source: '/_next/a.js:1' } }]);
+  // Paying in another browser: signing in there still lands on the payment's result.
+  assert.equal(location(await new Browser().get('/account?checkout=cs_test_elsewhere')), `/account/login?next=${encodeURIComponent('/account?checkout=cs_test_elsewhere')}`);
   // Someone who opens the agent address in a browser gets directions instead of an error.
   response = await fetch(`${base}/mcp`, { headers: { Accept: 'text/html,application/xhtml+xml' } });
   assert.equal(response.status, 200);
@@ -234,6 +242,9 @@ try {
   assert.equal(response.status, 416, 'chunks must continue from the stored offset');
   assert.equal((await response.json()).offset, chunkSize);
   assert.equal((await (await alice.get(`/api/account/uploads/${upload.id}`)).json()).offset, chunkSize, 'resume reads the stored offset');
+  // Choosing the same file again (after a reload or "Try again") continues the unfinished upload.
+  body = await (await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name: '../../Riverside scan.e57', size: bytes.length, type: 'application/octet-stream' })).json();
+  assert.deepEqual([body.upload.id, body.offset, body.url], [upload.id, chunkSize, uploadUrl], 'the same file resumes instead of starting over');
   assert.equal((await alice.post(`/api/account/uploads/${upload.id}/complete`)).status, 409, 'an incomplete upload cannot finish');
   assert.equal((await chunk(alice, chunkSize, bytes.length)).status, 200);
   assert.equal((await alice.post(`/api/account/uploads/${upload.id}/complete`)).status, 200);
@@ -497,6 +508,7 @@ try {
     'every notice is one embed that can mention no one');
   for (const email of ['alice@example.com', 'bob@example.com', 'carol@example.com', 'grace@example.com']) assert.equal(about('New account', 'Email', email).length, 1, `one sign-up notice for ${email}`);
   assert.equal(about('New account', 'Signed up with', 'Google').length >= 2, true);
+  assert.equal(about("Error in a visitor's browser").filter(item => item.description === 'TypeError: x is undefined').length, 1, 'a repeated browser error is reported once');
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');

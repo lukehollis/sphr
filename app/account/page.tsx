@@ -13,8 +13,10 @@ const log = (label: string) => (error: unknown) => console.error(label, error in
 export default async function AccountPage({ searchParams }: { searchParams: Promise<{ checkout?: string; verified?: string; agent?: string }> }) {
   if (!accountsEnabled()) notFound();
   const user = await currentUser();
-  if (!user) redirect("/account/login");
   const params = await searchParams;
+  // Someone who paid in another browser signs in there and still lands on the payment's result.
+  if (!user) redirect(typeof params.checkout === "string" && /^cs_[A-Za-z0-9_]{1,200}$/.test(params.checkout)
+    ? `/account/login?next=${encodeURIComponent(`/account?checkout=${params.checkout}${params.agent === "1" ? "&agent=1" : ""}`)}` : "/account/login");
   if (billingEnabled()) {
     // Returning from Checkout usually beats the webhook; apply the result now.
     if (typeof params.checkout === "string") await applyCheckoutSession(params.checkout, user.id).catch(log("Unable to apply Checkout:"));

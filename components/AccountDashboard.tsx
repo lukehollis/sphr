@@ -5,7 +5,7 @@ import { googleEvent } from "./Analytics";
 import { accountRequest } from "./AccountAuth";
 import SiteHeader from "./site/SiteHeader";
 import { ConstructionDrawing, SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
-import UploadModal, { awaitingPaymentKey, batchActive, useUploadBatches, type Batch } from "./UploadModal";
+import UploadModal, { awaitingPaymentKey, batchActive, uploadsChannel, useUploadBatches, type Batch } from "./UploadModal";
 import { cheaperPlan, currentPlan, hostingActive, periodTotal } from "./PlanPicker";
 import { getJson } from "./uploads";
 import { formatBytes } from "@/lib/bytes";
@@ -213,10 +213,23 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
     const plan = account.subscription?.plan;
     if (hostingActive(account) && plan) googleEvent("purchase", { transaction_id: new URLSearchParams(window.location.search).get("checkout") ?? "",
       currency: plan.currency.toUpperCase(), value: ((plan.amount ?? 0) * (plan.spaces ? 1 : account.subscription?.quantity ?? 1)) / 100 });
-    try {
-      const waiting = JSON.parse(localStorage.getItem(awaitingPaymentKey) ?? "null") as { at: number } | null;
-      if (waiting && Date.now() - waiting.at < 30 * 60 * 1000) setMessage("Payment received. Your files are uploading in the tab where you added the space, so you can close this one.");
-    } catch { /* The usual notice stays. */ }
+    // Ask the tab where the space was added whether it still holds the files. A phone may have
+    // suspended or discarded it, so the answer decides what to tell the customer.
+    let holding = false;
+    const channel = typeof BroadcastChannel === "undefined" ? undefined : new BroadcastChannel(uploadsChannel);
+    if (channel) channel.onmessage = event => { if (event.data?.type === "has-files") holding = true; };
+    channel?.postMessage({ type: "who-has-files" });
+    const timer = setTimeout(() => {
+      channel?.close();
+      let waiting = false;
+      try {
+        const marker = JSON.parse(localStorage.getItem(awaitingPaymentKey) ?? "null") as { at: number } | null;
+        waiting = Boolean(marker && Date.now() - marker.at < 30 * 60 * 1000);
+      } catch { /* The usual notice stays. */ }
+      if (holding) setMessage("Payment received. Your files are uploading in the tab where you added the space. Keep that tab open until they finish.");
+      else if (waiting) setMessage("Payment received. Go back to the tab where you added the space so your files can upload. If you closed it, add the files again below.");
+    }, 1500);
+    return () => { clearTimeout(timer); channel?.close(); };
   }, [fromCheckout]); // eslint-disable-line react-hooks/exhaustive-deps -- once, on arrival from Checkout
 
   // Cards follow the agent's progress.
@@ -226,6 +239,16 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
     const timer = setInterval(() => { void refresh(); }, 5000);
     return () => clearInterval(timer);
   }, [working, refresh]);
+
+  // Confirming the email on another device (often a phone) unlocks this page without a reload.
+  useEffect(() => {
+    if (account.emailVerified) return;
+    const check = () => { if (document.visibilityState === "visible") void refresh(); };
+    const timer = setInterval(check, 5000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => { clearInterval(timer); window.removeEventListener("focus", check); document.removeEventListener("visibilitychange", check); };
+  }, [account.emailVerified, refresh]);
 
   const current = uploads.batches.find(batch => batch.key === batchKey);
   // Every new sheet starts a new space; batches already running carry on in their cards.
@@ -240,11 +263,17 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
     const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
     const enter = (event: DragEvent) => { if (hasFiles(event) && !modal) openFresh(); };
     const over = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
+    // Files dropped before the email is confirmed would otherwise vanish without a word.
+    const dropped = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (blocked) setError("Confirm your email address first, then drop your files again. The link is in your inbox, or in spam or junk.");
+    };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragover", over);
-    window.addEventListener("drop", over);
-    return () => { window.removeEventListener("dragenter", enter); window.removeEventListener("dragover", over); window.removeEventListener("drop", over); };
-  }, [modal, openFresh]);
+    window.addEventListener("drop", dropped);
+    return () => { window.removeEventListener("dragenter", enter); window.removeEventListener("dragover", over); window.removeEventListener("drop", dropped); };
+  }, [modal, openFresh, blocked]);
 
   const active = hostingActive(account);
   const plan = currentPlan(plans, account.subscription);
