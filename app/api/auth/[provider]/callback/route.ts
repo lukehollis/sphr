@@ -7,6 +7,7 @@ import { appleName, exchangeCode, oauthProvider } from "@/lib/server/oauth";
 import { clearOAuthCookie, oauthCookie } from "@/lib/server/oauth-cookie";
 import { providerLinkedEmail } from "@/lib/server/emails";
 import { siteBrand } from "@/lib/server/brand";
+import { notifyTeam } from "@/lib/server/team-notify";
 
 export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ provider: string }> };
@@ -47,6 +48,9 @@ async function finish(request: Request, id: string, callback: Callback) {
   } catch (error) {
     if (error instanceof AccountError) return leave(`/account/login?error=email&provider=${provider.id}`);
     throw error;
+  }
+  if (result.created) {
+    void notifyTeam({ title: "New account", tone: "good", fields: [["Email", result.user.email], ["Name", result.user.name], ["Signed up with", provider.label]] });
   }
   if (result.passwordRemoved) {
     await notifyOwner(result.user, providerLinkedEmail(siteBrand(), origin, provider.label));

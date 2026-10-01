@@ -5,6 +5,7 @@ import { billingEnabled, syncQuantity } from "@/lib/server/billing";
 import { describeSpace } from "@/lib/server/customer-spaces";
 import { deleteStoredUpload } from "@/lib/server/uploads";
 import { removePublishedScene } from "@/lib/server/published-assets";
+import { notifyTeam } from "@/lib/server/team-notify";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -42,6 +43,7 @@ export async function DELETE(request: Request, { params }: Params) {
   const { user, space, error } = await owned(request, params);
   if (error) return error;
   deleteCustomerSpace(space.id);
+  void notifyTeam({ title: "Space deleted", tone: "warn", fields: [["Title", space.title], ["Account", user.email], ["Was", space.status]] });
   if (space.sceneId) setScenePublic(space.sceneId, false);
   if (billingEnabled()) {
     // A failure here is repaired the next time the account page loads.

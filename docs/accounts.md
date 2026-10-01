@@ -85,6 +85,17 @@ code and token sealed with a key derived from the session ID, which only the age
 `node scripts/test-agent-connector.mjs` drives both connectors end to end against a development
 server with local stand-ins for Stripe, Google and email.
 
+## Operator notifications
+
+With `SPHR_DISCORD_WEBHOOK_URL` set to a Discord channel webhook, the operator hears about new
+accounts, spaces created, spaces submitted for processing (from the website or an agent), spaces
+that are ready or need attention, deleted spaces, linked agents, and billing changes: a new
+subscription, a plan change, a failed payment, a scheduled or withdrawn cancellation, and hosting
+stopping. Billing notices compare the saved subscription with Stripe's latest state in one
+transaction, so repeated webhooks and returns from Checkout announce each change once. Delivery is
+best effort, queued one message at a time and retried when Discord asks to slow down; a failure is
+logged and never affects the customer. Notices never mention anyone, whatever a title says.
+
 ## Runtime settings
 
 Accounts build on access control. Add these to the runtime environment

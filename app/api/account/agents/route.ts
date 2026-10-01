@@ -1,6 +1,7 @@
 import { allowAttempt } from "@/lib/server/admin-store";
-import { approveAgentLink, denyAgentLink, listAgentTokens } from "@/lib/server/accounts-store";
+import { approveAgentLink, denyAgentLink, listAgentTokens, readAgentLink } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, accountsEnabled, attemptKey, currentUser } from "@/lib/server/accounts";
+import { notifyTeam } from "@/lib/server/team-notify";
 
 /** Agents linked to the signed-in account. */
 export async function GET() {
@@ -16,6 +17,8 @@ export async function POST(request: Request) {
   if (error) return error;
   if (!allowAttempt([[attemptKey("agent-approve", user.id), 30]], 60 * 60 * 1000)) return accountResponse({ error: "Too many attempts. Try again later." }, 429);
   if (body?.approve === false) { denyAgentLink(body?.code); return accountResponse({ ok: true }); }
+  const link = readAgentLink(body?.code);
   if (!approveAgentLink(body?.code, user.id)) return accountResponse({ error: "This code has expired or was already used. Ask your agent to start again." }, 410);
+  void notifyTeam({ title: "Agent linked", fields: [["Agent", link?.client], ["Account", user.email]] });
   return accountResponse({ ok: true });
 }

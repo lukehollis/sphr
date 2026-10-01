@@ -351,7 +351,7 @@ export function signInWithIdentity(profile: ExternalProfile) {
   return transaction(() => {
     const linked = store().prepare("SELECT user_id FROM identities WHERE provider=? AND subject=?")
       .get(profile.provider, profile.subject) as { user_id: string } | undefined;
-    if (linked) return { user: readUser(linked.user_id)!, passwordRemoved: false };
+    if (linked) return { user: readUser(linked.user_id)!, passwordRemoved: false, created: false };
     const email = normalizeEmail(profile.email);
     if (!email || !profile.emailVerified) throw new AccountError(`${profile.label} did not share a verified email address. Use another sign-in method.`);
     const existing = store().prepare("SELECT * FROM users WHERE email=?").get(email) as UserRow | undefined;
@@ -369,7 +369,7 @@ export function signInWithIdentity(profile: ExternalProfile) {
       }
     }
     store().prepare("INSERT INTO identities(provider, subject, user_id, created) VALUES (?, ?, ?, ?)").run(profile.provider, profile.subject, id, now());
-    return { user: readUser(id)!, passwordRemoved };
+    return { user: readUser(id)!, passwordRemoved, created: !existing };
   });
 }
 
@@ -412,11 +412,12 @@ export function planSpaceLimit(userId: string) {
   return subscription && hostingStatuses.has(subscription.status) ? subscription.plan?.spaces ?? null : null;
 }
 
+/** Saves Stripe's latest state and returns what it replaced, read in the same transaction so each change is seen once. */
 export function saveSubscription(userId: string, subscription: Subscription) {
-  transaction(() => {
+  return transaction(() => {
     const current = readSubscription(userId);
     // A late event for an older, ended subscription must not replace a live one.
-    if (current && current.id !== subscription.id && hostingStatuses.has(current.status) && !hostingStatuses.has(subscription.status)) return;
+    if (current && current.id !== subscription.id && hostingStatuses.has(current.status) && !hostingStatuses.has(subscription.status)) return { saved: false, previous: current };
     store().prepare("DELETE FROM subscriptions WHERE subscription=? AND user_id<>?").run(subscription.id, userId);
     store().prepare(`INSERT INTO subscriptions(user_id, subscription, item, status, quantity, period_end, cancel_at_period_end, updated, plan)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
@@ -424,6 +425,7 @@ export function saveSubscription(userId: string, subscription: Subscription) {
       period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, updated=excluded.updated, plan=excluded.plan`)
       .run(userId, subscription.id, subscription.item, subscription.status, subscription.quantity, subscription.periodEnd,
         Number(subscription.cancelAtPeriodEnd), now(), subscription.plan ? JSON.stringify(subscription.plan) : null);
+    return { saved: true, previous: current };
   });
 }
 

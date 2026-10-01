@@ -30,6 +30,15 @@ const idp = fakeIdentityProvider({ clients, applePublicKey: apple.publicKey });
 const idpServer = await listen(idp.handler);
 idp.state.base = idpServer.base;
 const mail = await smtpSink();
+// The operator's Discord channel, as a webhook that records what it is sent.
+const teamMessages = [];
+const teamHook = await listen(async (request, response) => {
+  let body = '';
+  for await (const chunk of request) body += chunk;
+  teamMessages.push(JSON.parse(body));
+  response.statusCode = 204;
+  response.end();
+});
 const signer = new Stripe('sk_test_signer');
 
 const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accounts-test', SPHR_PUBLIC_URL: base, SPHR_STATE_DIR: state,
@@ -41,7 +50,7 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_LINKEDIN_CLIENT_ID: clients.linkedin.id, SPHR_LINKEDIN_CLIENT_SECRET: clients.linkedin.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr',
-  SPHR_WORKER_TOKEN: workerToken, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
+  SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -54,7 +63,7 @@ async function cleanup() {
   const exited = new Promise(resolve => app.exitCode !== null ? resolve() : app.once('exit', resolve));
   app.kill('SIGTERM');
   await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
-  for (const server of [stripeServer.server, idpServer.server, mail.server]) server.close();
+  for (const server of [stripeServer.server, idpServer.server, mail.server, teamHook.server]) server.close();
   rmSync(path.join(root, 'public/datasets'), { recursive: true, force: true });
   rmSync(state, { recursive: true, force: true });
   rmSync(path.join(root, '.next-accounts-test'), { recursive: true, force: true });
@@ -428,6 +437,27 @@ try {
   assert.equal((await resetter.post('/api/account/logout')).status, 200);
   assert.equal((await resetter.get('/api/account/spaces/' + studio.id)).status, 404);
 
+  // ---- The operator hears about each change once ----
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const told = teamMessages.map(message => ({ title: message.embeds[0].title,
+    fields: Object.fromEntries((message.embeds[0].fields ?? []).map(field => [field.name, field.value])), description: message.embeds[0].description }));
+  const about = (title, field, value) => told.filter(item => item.title === title && (!field || item.fields[field] === value));
+  assert.ok(teamMessages.length > 10 && teamMessages.every(message => message.embeds.length === 1 && Array.isArray(message.allowed_mentions?.parse) && !message.allowed_mentions.parse.length),
+    'every notice is one embed that can mention no one');
+  for (const email of ['alice@example.com', 'bob@example.com', 'carol@example.com', 'grace@example.com']) assert.equal(about('New account', 'Email', email).length, 1, `one sign-up notice for ${email}`);
+  assert.equal(about('New account', 'Signed up with', 'Google').length >= 2, true);
+  assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
+  assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
+  assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
+  assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));
+  assert.ok(about('New subscription', 'Account', 'alice@example.com').length >= 1);
+  assert.equal(about('New subscription', 'Account', 'grace@example.com').length, 1, 'a subscription is announced once however often Stripe reports it');
+  assert.equal(about('Hosting stopped', 'Account', 'alice@example.com').length, 1);
+  assert.deepEqual(about('Plan changed', 'Account', 'grace@example.com').map(item => [item.fields.From.split(',')[0], item.fields.To.split(',')[0]]),
+    [['Starter', 'Pro'], ['Pro', 'Pay as you go']]);
+  assert.match(about('Plan changed', 'Account', 'grace@example.com')[1].fields.To, /^Pay as you go, \$1\.00 a month per space$/);
+
+  console.log('Passed: operator notifications for sign-ups, spaces, submissions, processing and billing changes.');
   console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities and plans, plan changes and full plans, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing, the worker API, and the agent runner with credential isolation.');
 } catch (error) {
   console.error(appLog.split('\n').slice(-60).join('\n'));

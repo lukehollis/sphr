@@ -30,6 +30,14 @@ const idp = fakeIdentityProvider({ clients });
 const idpServer = await listen(idp.handler);
 idp.state.base = idpServer.base;
 const mail = await smtpSink();
+const teamMessages = [];
+const teamHook = await listen(async (request, response) => {
+  let body = '';
+  for await (const chunk of request) body += chunk;
+  teamMessages.push(JSON.parse(body).embeds[0]);
+  response.statusCode = 204;
+  response.end();
+});
 const signer = new Stripe('sk_test_signer');
 
 const env = { ...process.env, SPHR_BUILD_DIR: '.next-agent-test', SPHR_PUBLIC_URL: base, SPHR_STATE_DIR: state,
@@ -38,7 +46,7 @@ const env = { ...process.env, SPHR_BUILD_DIR: '.next-agent-test', SPHR_PUBLIC_UR
   SPHR_OAUTH_TEST_BASE: idpServer.base, SPHR_GOOGLE_CLIENT_ID: clients.google.id, SPHR_GOOGLE_CLIENT_SECRET: clients.google.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_WORKER_TOKEN: randomBytes(24).toString('hex'),
-  SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
+  SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '', SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/hook` };
 delete env.NODE_ENV;
 for (const name of ['SPHR_APPLE_CLIENT_ID', 'SPHR_LINKEDIN_CLIENT_ID']) delete env[name];
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -53,7 +61,7 @@ async function cleanup() {
   const exited = new Promise(resolve => app.exitCode !== null ? resolve() : app.once('exit', resolve));
   app.kill('SIGTERM');
   await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
-  for (const server of [stripeServer.server, idpServer.server, mail.server]) server.close();
+  for (const server of [stripeServer.server, idpServer.server, mail.server, teamHook.server]) server.close();
   rmSync(state, { recursive: true, force: true });
   rmSync(path.join(root, '.next-agent-test'), { recursive: true, force: true });
   for (const [name, content] of Object.entries(generated)) writeFileSync(path.join(root, name), content);
@@ -355,6 +363,15 @@ try {
   assert.ok((await tool('space_status', {}, museSession)).error, 'an unlinked session must link again');
   assert.equal((await fetch(`${base}/mcp`, { method: 'DELETE', headers: museSession })).status, 204);
   assert.equal((await mcp({ jsonrpc: '2.0', id: 9, method: 'tools/list' }, museSession)).response.status, 404, 'a deleted session is gone');
+
+  // The operator hears that agents were linked and that they added and submitted spaces.
+  const field = (embed, name) => embed.fields.find(item => item.name === name)?.value;
+  assert.ok(teamMessages.some(embed => embed.title === 'Agent linked' && /^Claude on /.test(field(embed, 'Agent')) && field(embed, 'Account') === 'alice@example.com'));
+  assert.ok(teamMessages.some(embed => embed.title === 'Agent linked' && field(embed, 'Agent') === 'Meta Muse'));
+  assert.ok(teamMessages.some(embed => embed.title === 'Space created' && field(embed, 'Title') === 'Riverside studio' && field(embed, 'From') === 'Their agent'));
+  assert.ok(teamMessages.some(embed => embed.title === 'Space uploaded for processing' && field(embed, 'Title') === 'Riverside studio'
+    && field(embed, 'From') === 'Their agent' && /^2 files, 17\.\d MB$/.test(field(embed, 'Files'))));
+  assert.equal(teamMessages.filter(embed => embed.title === 'New subscription').length, 2, 'Alice and Bob each subscribed once');
 
   console.log('Agent connector: linking, plans, Checkout, background upload, submission and unlinking all passed.');
   console.log('Hosted endpoint: session and bearer linking, Checkout, resumable uploads, submission and unlinking all passed.');
