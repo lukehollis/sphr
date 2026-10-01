@@ -1,6 +1,6 @@
 import { allowAttempt } from "@/lib/server/admin-store";
 import { AccountError, createPasswordUser } from "@/lib/server/accounts-store";
-import { accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrigin, readAccountBody, sendVerification, startUserSession } from "@/lib/server/accounts";
+import { accountResponse, accountsEnabled, publicOrigin, readAccountBody, sendVerification, startUserSession } from "@/lib/server/accounts";
 import { mailConfigured } from "@/lib/server/mail";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { accountSource, recordEvent } from "@/lib/server/analytics";
@@ -9,7 +9,9 @@ export async function POST(request: Request) {
   if (!accountsEnabled() || !mailConfigured()) return accountResponse({ error: "Email sign-up is unavailable." }, 404);
   let body;
   try { body = await readAccountBody(request); } catch { return accountResponse({ error: "Invalid request." }, 400); }
-  if (!allowAttempt([[attemptKey("signup", clientAddress(request)), 10], ["account-signup", 500]], 60 * 60 * 1000)) {
+  // No limit per network: a university, office or phone carrier can put many real people behind one
+  // address. The site-wide cap only stops a flood of scripted sign-ups (and the emails they would send).
+  if (!allowAttempt([["account-signup", 500]], 60 * 60 * 1000)) {
     return accountResponse({ error: "Too many new accounts. Try again later." }, 429);
   }
   try {

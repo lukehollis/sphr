@@ -176,6 +176,11 @@ try {
   assert.ok((await response.text()).includes(`${base}/mcp`));
   assert.equal((await fetch(`${base}/mcp`, { headers: { Accept: 'text/event-stream' } })).status, 405, 'agents still learn there is no stream');
 
+  // Many people can share one network address (a university, an office, a phone carrier).
+  for (let index = 0; index < 12; index++) {
+    assert.equal((await new Browser().post('/api/account/signup', { email: `crowd${index}@example.com`, password: 'crowd password' })).status, 200, 'no sign-up limit per network');
+  }
+
   // ---- Email sign-up, verification and login ----
   const alice = new Browser();
   assert.equal((await alice.post('/api/account/signup', { email: 'Alice@Example.com', password: 'short' })).status, 400);
