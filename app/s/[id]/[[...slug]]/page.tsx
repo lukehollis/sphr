@@ -4,6 +4,7 @@ import SphrApp from "@/components/SphrApp";
 import { findScene, readAllScenes } from "@/lib/scene-catalog";
 import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath, sceneAccess } from "@/lib/server/accounts";
+import { siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string; slug?: string[] }> };
@@ -14,7 +15,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = scene.legacy?.kind === 'tour' ? `Take a guided tour of ${scene.title}.`
     : `Explore ${scene.title} in an interactive spatial viewer.`;
   return {
-    title: `${scene.title} · SPHR`, description,
+    title: `${scene.title} · ${siteBrand()}`, description,
     ...(!isScenePublic(scene.sceneId) ? { robots: { index: false, follow: false } } : {}),
     alternates: { canonical: scene.scenePath },
     openGraph: { type: "website", title: scene.title, description, url: scene.scenePath, images: [{ url: scene.thumbnail, alt: scene.title }] },
