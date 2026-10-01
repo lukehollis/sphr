@@ -1,6 +1,7 @@
 import { AccountError, hostingStatuses, payableSpaceCount, readSubscription } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout } from "@/lib/server/billing";
+import { recordEvent } from "@/lib/server/analytics";
 
 /**
  * Starts or resumes payment for waiting spaces, on the plan the customer chose (pay as you
@@ -16,6 +17,7 @@ export async function POST(request: Request) {
   if (!payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
   try {
     const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent);
+    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web" } });
     return accountResponse({ ok: true, ..."url" in next ? { url: next.url, plan: next.plan } : "portal" in next ? { url: next.portal } : { paid: true } });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);

@@ -167,7 +167,9 @@ export function deleteUserSession(token: string | undefined) {
 export function createUserToken(userId: string, purpose: "verify" | "reset", lifetime: number) {
   const token = randomId(32);
   transaction(() => {
-    store().prepare("DELETE FROM user_tokens WHERE expires<=? OR (user_id=? AND purpose=?)").run(Date.now(), userId, purpose);
+    // A new reset link replaces the old one. Confirmation links all stay valid: people often open the first email after asking for another.
+    if (purpose === "reset") store().prepare("DELETE FROM user_tokens WHERE user_id=? AND purpose='reset'").run(userId);
+    store().prepare("DELETE FROM user_tokens WHERE expires<=?").run(Date.now());
     store().prepare("INSERT INTO user_tokens(token, user_id, purpose, expires) VALUES (?, ?, ?, ?)").run(hash(token), userId, purpose, Date.now() + lifetime);
   });
   return token;

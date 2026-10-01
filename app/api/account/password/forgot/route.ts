@@ -4,6 +4,7 @@ import { accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrig
 import { mailConfigured, sendMail } from "@/lib/server/mail";
 import { passwordResetEmail } from "@/lib/server/emails";
 import { siteBrand } from "@/lib/server/brand";
+import { recordEvent } from "@/lib/server/analytics";
 
 export async function POST(request: Request) {
   if (!accountsEnabled() || !mailConfigured()) return accountResponse({ error: "Password reset is unavailable." }, 404);
@@ -21,5 +22,6 @@ export async function POST(request: Request) {
     void sendMail(user.email, passwordResetEmail(siteBrand(), origin, `${origin}/account/reset?token=${token}`))
       .catch(error => console.error("Unable to send password reset email:", error instanceof Error ? error.message : error));
   }
+  await recordEvent("password_reset", { userId: user?.id });
   return accountResponse({ ok: true });
 }

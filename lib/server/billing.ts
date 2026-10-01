@@ -3,6 +3,7 @@ import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses
   saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
+import { saveEvent } from "./analytics-store";
 
 let client: Stripe | undefined;
 const env = (name: string) => process.env[name]?.trim() || undefined;
@@ -207,10 +208,12 @@ async function announceBillingChange(userId: string, previous: Subscription | un
   const hosting = hostingStatuses.has(next.status);
   const fields: [string, string | number | null][] = [["Account", email], ["Plan", price], ["Status", next.status]];
   if (!wasHosting && hosting) {
+    saveEvent("subscription_started", { userId, props: { plan: next.plan?.price ?? "", amount: next.plan?.amount ?? 0, spaces: next.quantity } });
     return notifyTeam({ title: "New subscription", tone: "money", fields: [...fields, ["Spaces billed", next.plan?.spaces ? null : next.quantity]] });
   }
   if (!previous || previous.id !== next.id) return;
   if (wasHosting && !hosting) {
+    saveEvent("subscription_ended", { userId, props: { status: next.status } });
     return notifyTeam({ title: "Hosting stopped", tone: "bad", description: `The subscription is now ${next.status}, so this account's spaces are offline.`, fields });
   }
   if (previous.status !== "past_due" && next.status === "past_due") {

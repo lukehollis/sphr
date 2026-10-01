@@ -70,7 +70,7 @@ export default function AdminPanel({ scenes: initial, brand }: { scenes: Managed
   const filtered = scenes.filter(scene => `${scene.title} ${scene.sceneId}`.toLowerCase().includes(query.toLowerCase().trim()));
   const shared = scenes.filter(scene => scene.public).length;
   return <div className="site"><div className="site-frame">
-    <SiteHeader brand={brand} home="/" nav={[{ href: "/", label: "Collection" }, { href: "/admin", label: "Manage", current: true }]} signOut="admin" />
+    <SiteHeader brand={brand} home="/" nav={[{ href: "/", label: "Collection" }, { href: "/admin", label: "Manage", current: true }, { href: "/admin/analytics", label: "Analytics" }]} signOut="admin" />
     <main className="site-main">
       <div className="site-title">
         <div><span className="site-code">M</span><h1>Manage spaces</h1></div>

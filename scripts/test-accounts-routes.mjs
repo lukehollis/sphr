@@ -3,7 +3,7 @@
 //   node scripts/test-accounts-routes.mjs
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, scryptSync } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -50,6 +50,7 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_LINKEDIN_CLIENT_ID: clients.linkedin.id, SPHR_LINKEDIN_CLIENT_SECRET: clients.linkedin.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr',
+  NEXT_PUBLIC_SPHR_ANALYTICS: '1', SPHR_ANALYTICS_ORIGINS: 'https://home.example',
   SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
@@ -72,12 +73,12 @@ async function cleanup() {
 
 class Browser {
   cookies = new Map();
-  async request(route, { method = 'GET', json, form, headers = {} } = {}) {
+  async request(route, { method = 'GET', json, form, body: text, headers = {} } = {}) {
     const response = await fetch(route.startsWith('http') ? route : base + route, { method, redirect: 'manual', headers: {
       ...(method !== 'GET' ? { Origin: base } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}),
       ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
       ...(this.cookies.size ? { Cookie: [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ') } : {}), ...headers },
-      body: json ? JSON.stringify(json) : form ? new URLSearchParams(form).toString() : undefined });
+      body: json ? JSON.stringify(json) : form ? new URLSearchParams(form).toString() : text });
     for (const cookie of response.headers.getSetCookie()) {
       const [pair, ...attributes] = cookie.split(';');
       const [name, value] = [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)];
@@ -99,6 +100,10 @@ function webhook(event, secret = webhookSecret) {
     'Stripe-Signature': signer.webhooks.generateTestHeaderString({ payload, secret }) } });
 }
 const location = response => response.headers.get('location');
+const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+// What a page sends with navigator.sendBeacon: plain text, from the page's own origin.
+const beacon = (browser, events, extra = {}, { origin = base, agent = safari } = {}) => browser.request('/api/analytics', { method: 'POST',
+  headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8', 'User-Agent': agent }, body: JSON.stringify({ events, ...extra }) });
 const database = () => new DatabaseSync(path.join(state, 'admin.sqlite'));
 
 async function signInWith(browser, provider, claims, options = {}) {
@@ -122,13 +127,46 @@ try {
 
   // ---- Anonymous access and the existing admin index ----
   const anonymous = new Browser();
-  assert.equal(location(await anonymous.get('/')), '/admin/login?next=%2F', 'the collection remains an admin index');
+  assert.equal(location(await anonymous.get('/')), '/account', 'the bare address leads customers to their spaces, not the admin index');
   assert.equal(location(await anonymous.get('/account')), '/account/login');
   const loginPage = (await (await anonymous.get('/account/login')).text()).replaceAll('<!-- -->', '');
   for (const label of ['Continue with Google', 'Continue with Apple', 'Continue with LinkedIn', 'Forgot password?']) assert.ok(loginPage.includes(label), label);
   assert.equal((await anonymous.post('/api/account/spaces', { title: 'x' })).status, 401);
   assert.equal((await anonymous.get('/api/worker/jobs')).status, 401);
   assert.equal((await fetch(`${base}/api/worker/jobs`, { headers: { Authorization: 'Bearer wrong-token-wrong-token-wrong-token-00' } })).status, 401);
+
+  // ---- Analytics: where a visit came from, through to the account ----
+  const dana = new Browser();
+  let response = await beacon(dana, [{ name: 'page_view', path: 'home.example/' }, { name: 'sign_up' }],
+    { referrer: 'https://news.ycombinator.com/item?id=1', url: 'https://home.example/?utm_source=newsletter&utm_campaign=launch' }, { origin: 'https://home.example' });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('access-control-allow-origin'), 'https://home.example', 'the sibling site may send events');
+  assert.match(dana.cookies.get('sphr_vid') ?? '', /^[a-f0-9]{32}$/, 'a first visit gets the visitor cookie');
+  assert.equal((await beacon(new Browser(), [{ name: 'page_view' }], {}, { origin: 'https://evil.example' })).status, 403, 'other sites cannot send events');
+  const visitorCount = () => database().prepare('SELECT count(*) AS n FROM analytics_visitors').get().n;
+  const counted = visitorCount();
+  assert.equal((await beacon(new Browser(), [{ name: 'page_view' }], {}, { agent: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' })).status, 204);
+  assert.equal(visitorCount(), counted, 'crawlers are not counted');
+  await beacon(dana, [{ name: 'page_view', path: '127.0.0.1/account/signup' }], { referrer: 'https://home.example/' });
+  assert.equal((await dana.post('/api/account/signup', { email: 'dana@example.com', password: 'dana password', name: 'Dana' })).status, 200);
+  assert.equal((await dana.post('/api/account/login', { email: 'dana@example.com', password: 'not her password' })).status, 401);
+  const danaVisitor = database().prepare("SELECT v.* FROM analytics_visitors v JOIN users u ON u.id=v.user_id WHERE u.email='dana@example.com'").get();
+  assert.deepEqual([danaVisitor.id, danaVisitor.source, danaVisitor.medium, danaVisitor.campaign, danaVisitor.referrer, danaVisitor.landing, danaVisitor.device],
+    [dana.cookies.get('sphr_vid'), 'newsletter', 'campaign', 'launch', 'news.ycombinator.com/item', 'home.example/', 'Desktop, Safari'], 'the first touch is kept and tied to the account');
+  assert.deepEqual(database().prepare('SELECT name FROM analytics_events WHERE visitor=? ORDER BY id').all(danaVisitor.id).map(row => row.name),
+    ['page_view', 'page_view', 'sign_up', 'verify_sent', 'login_failed'], 'pages cannot claim server steps such as sign-up');
+  // A second confirmation email leaves the first link working.
+  assert.equal((await dana.post('/api/account/verify/resend')).status, 200);
+  const danaLinks = await mail.waitFor(() => mail.messages.filter(message => message.includes('To: dana@example.com')).length >= 2)
+    .then(() => mail.messages.filter(message => message.includes('To: dana@example.com')).map(message => message.match(/\/account\/verify\?token=([a-f0-9]{64})/)[1]));
+  assert.equal(new Set(danaLinks).size, 2);
+  assert.equal((await anonymous.post('/api/account/verify', { token: danaLinks[0] })).status, 200, 'the earlier link still confirms');
+  assert.equal((await anonymous.post('/api/account/verify', { token: danaLinks[1] })).status, 400, 'once confirmed, the other links are spent');
+  // Someone who opens the agent address in a browser gets directions instead of an error.
+  response = await fetch(`${base}/mcp`, { headers: { Accept: 'text/html,application/xhtml+xml' } });
+  assert.equal(response.status, 200);
+  assert.ok((await response.text()).includes(`${base}/mcp`));
+  assert.equal((await fetch(`${base}/mcp`, { headers: { Accept: 'text/event-stream' } })).status, 405, 'agents still learn there is no stream');
 
   // ---- Email sign-up, verification and login ----
   const alice = new Browser();
@@ -152,7 +190,7 @@ try {
   assert.equal((await aliceLaptop.post('/api/account/login', { email: 'ALICE@example.com', password: 'alice password' })).status, 200);
 
   // ---- First space: Checkout, then the return from Stripe applies the payment ----
-  let response = await alice.post('/api/account/spaces', { title: 'Riverside studio' });
+  response = await alice.post('/api/account/spaces', { title: 'Riverside studio' });
   let body = await response.json();
   assert.equal(response.status, 200);
   assert.match(body.checkout, /^https:\/\/checkout\.example\//);
@@ -437,6 +475,19 @@ try {
   assert.equal((await resetter.post('/api/account/logout')).status, 200);
   assert.equal((await resetter.get('/api/account/spaces/' + studio.id)).status, 404);
 
+  // ---- The operator's analytics page ----
+  const salt = randomBytes(32).toString('hex');
+  database().prepare('INSERT OR REPLACE INTO admin(id, username, password) VALUES (1, ?, ?)').run('operator', `${salt}:${scryptSync('operator password', salt, 64).toString('hex')}`);
+  assert.equal(location(await new Browser().get('/admin/analytics')), '/admin/login?next=%2Fadmin%2Fanalytics');
+  const operator = new Browser();
+  assert.equal((await operator.post('/api/admin/login', { username: 'operator', password: 'operator password' })).status, 200);
+  await beacon(operator, [{ name: 'page_view', path: '127.0.0.1/admin' }]);
+  assert.equal(database().prepare('SELECT internal FROM analytics_visitors WHERE id=?').get(operator.cookies.get('sphr_vid')).internal, 1, "the operator's visits are left out");
+  const report = (await (await operator.get('/admin/analytics?days=7')).text()).replaceAll('<!-- -->', '');
+  for (const text of ['From a first visit to a live space', 'Created an account', 'Where people came from', 'newsletter', 'dana@example.com',
+    'Where each account is now', 'Live', 'What recent people did']) assert.ok(report.includes(text), text);
+  console.log('Passed: first-touch analytics, sibling-site events, crawler filtering, the funnel report, repeat confirmation links and the agent address page.');
+
   // ---- The operator hears about each change once ----
   await new Promise(resolve => setTimeout(resolve, 1500));
   const told = teamMessages.map(message => ({ title: message.embeds[0].title,
@@ -446,6 +497,7 @@ try {
     'every notice is one embed that can mention no one');
   for (const email of ['alice@example.com', 'bob@example.com', 'carol@example.com', 'grace@example.com']) assert.equal(about('New account', 'Email', email).length, 1, `one sign-up notice for ${email}`);
   assert.equal(about('New account', 'Signed up with', 'Google').length >= 2, true);
+  assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);

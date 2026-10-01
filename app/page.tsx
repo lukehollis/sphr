@@ -3,6 +3,7 @@ import SceneLibrary from "@/components/SceneLibrary";
 import { readAllScenes, readSceneCatalog } from "@/lib/scene-catalog";
 import { accessControlled } from "@/lib/server/admin-store";
 import { isAdmin } from "@/lib/server/auth";
+import { accountsEnabled } from "@/lib/server/accounts";
 import { siteBrand } from "@/lib/server/brand";
 import { redirect } from "next/navigation";
 
@@ -19,7 +20,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     if (!(await isAdmin())) redirect("/admin/login");
   }
   if (params.config || params.demo !== undefined) return <SphrApp />;
-  // The collection is an admin index; public scenes remain reachable by their URLs.
-  if (accessControlled() && !(await isAdmin())) redirect("/admin/login?next=%2F");
+  // The collection is an admin index; public scenes remain reachable by their URLs. With customer
+  // accounts, someone who types the bare address is a customer looking for their spaces.
+  if (accessControlled() && !(await isAdmin())) redirect(accountsEnabled() ? "/account" : "/admin/login?next=%2F");
   return <SceneLibrary scenes={await readSceneCatalog()} showAdminLink={accessControlled()} brand={siteBrand()} />;
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { accountRequest } from "./AccountAuth";
+import { track } from "./Analytics";
 import { ConstructionDrawing } from "./site/Chrome";
 import PlanPicker, { OpenSourceNote } from "./PlanPicker";
 import { formatBytes } from "@/lib/bytes";
@@ -85,7 +86,10 @@ export function useUploadBatches(onChange: () => void) {
       const transferKey = next.key;
       running.current.set(key, (running.current.get(key) ?? 0) + 1);
       void uploadFile(spaceId, next.file, update => patchTransfer(key, transferKey, update))
-        .catch(failure => patchTransfer(key, transferKey, { state: "failed", error: (failure as Error).message }))
+        .catch(failure => {
+          track("upload_error", { step: "upload", message: (failure as Error).message });
+          patchTransfer(key, transferKey, { state: "failed", error: (failure as Error).message });
+        })
         .finally(() => {
           running.current.set(key, (running.current.get(key) ?? 1) - 1);
           pump(key);
@@ -136,6 +140,7 @@ export function useUploadBatches(onChange: () => void) {
       } else begin(key);
     } catch (failure) {
       const { message, data } = failure as Error & { data?: { planFull?: boolean } };
+      track(data?.planFull ? "plan_full" : "upload_error", { step: "create", message });
       patch(key, { phase: data?.planFull ? "full" : "error", error: message });
     }
   }, [begin, patch]);
@@ -158,6 +163,7 @@ export function useUploadBatches(onChange: () => void) {
     const batch = latest.current.find(item => item.key === key);
     if (!batch || batch.phase !== "payment") return;
     patch(key, { plan, preparing: true, checkoutOpened: false, error: undefined });
+    track("plan_chosen", { plan });
     try {
       const result = await accountRequest("/api/account/billing/checkout", { plan });
       if (result.paid) { begin(key); change.current(); return; }
@@ -208,6 +214,7 @@ export function useUploadBatches(onChange: () => void) {
       patch(key, { phase: "processing" });
       remember(null);
     } catch (failure) {
+      track("upload_error", { step: "submit", message: (failure as Error).message });
       patch(key, { phase: "error", error: (failure as Error).message });
     }
     change.current();
@@ -250,6 +257,7 @@ export function useUploadBatches(onChange: () => void) {
   /** Gives up before paying: the empty space is removed again. */
   const cancel = useCallback(async (key: string) => {
     const batch = latest.current.find(item => item.key === key);
+    track("upload_cancelled", { phase: batch?.phase ?? "unknown", paymentOpened: Boolean(batch?.checkoutOpened) });
     queues.current.delete(key);
     setBatches(items => items.filter(item => item.key !== key));
     remember(null);
@@ -261,7 +269,10 @@ export function useUploadBatches(onChange: () => void) {
 
   const dismiss = useCallback((key: string) => setBatches(items => items.filter(item => item.key !== key)), []);
 
-  const markCheckoutOpened = useCallback((key: string) => patch(key, { checkoutOpened: true }), [patch]);
+  const markCheckoutOpened = useCallback((key: string) => {
+    track("checkout_opened", { plan: latest.current.find(item => item.key === key)?.plan ?? "" });
+    patch(key, { checkoutOpened: true });
+  }, [patch]);
 
   // Countdown to processing.
   const counting = batches.some(batch => batch.phase === "countdown");
@@ -391,9 +402,17 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   const [reading, setReading] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
   const batch = uploads.batches.find(item => item.key === batchKey);
+  const close = useCallback(() => {
+    track("upload_closed", { phase: batch?.phase ?? "empty", files: batch?.transfers.length ?? 0, paymentOpened: Boolean(batch?.checkoutOpened) });
+    onClose();
+  }, [batch, onClose]);
+  useEffect(() => { if (open) track("upload_opened", { existing: Boolean(existing) }); }, [open, existing]);
 
   const receive = useCallback(async (files: PickedFile[]) => {
     const usable = keepCaptures(files);
+    const kinds = [...new Set(files.map(item => item.file.name.split(".").pop()?.toLowerCase() ?? ""))].filter(Boolean).slice(0, 10).join(",");
+    track(usable.length ? "files_chosen" : "files_rejected", { count: usable.length, skipped: files.length - usable.length, kinds,
+      bytes: usable.reduce((total, item) => total + item.file.size, 0) });
     if (!usable.length) return;
     if (batch && openPhases.includes(batch.phase)) uploads.addFiles(batch.key, usable);
     else onBatch(existing ? uploads.startExisting(existing, usable) : await uploads.startNew(usable));
@@ -411,7 +430,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.focus();
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") close();
       if (event.key !== "Tab" || !dialog.current) return;
       // Keep keyboard focus inside the sheet.
       const focusable = Array.from(dialog.current.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([type=file]):not([disabled])"));
@@ -427,7 +446,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
       document.documentElement.classList.remove("upload-modal-open");
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, close]);
 
   const transfers = batch?.transfers ?? [];
   const total = transfers.reduce((sum, item) => sum + item.size, 0);
@@ -448,7 +467,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
     onDrop={event => { if (canAdd) drop(event); }}>
     <div className="upload-modal-bar">
       <h2 id="upload-modal-title">{heading}</h2>
-      <button type="button" className="upload-modal-close" onClick={onClose}>
+      <button type="button" className="upload-modal-close" onClick={close}>
         {batch && batchActive(batch) && batch.phase !== "payment" && batch.phase !== "full" ? "Close, keep uploading" : "Close"}<span aria-hidden="true">✕</span>
       </button>
     </div>
@@ -472,7 +491,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
           <p className="site-hint">Taken from your file names. You can change it any time.</p>
         </div>}
 
-        <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={onClose} existing={Boolean(existing)}
+        <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={close} existing={Boolean(existing)}
           billing={billing} />
 
         {transfers.length > 0 && <ul className="upload-files" aria-label="Files">

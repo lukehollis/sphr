@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { googleEvent } from "./Analytics";
 import { accountRequest } from "./AccountAuth";
 import SiteHeader from "./site/SiteHeader";
 import { ConstructionDrawing, SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
@@ -208,11 +209,15 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
   // Checkout opened from the upload sheet lands here in a new tab; the upload goes on in the first one.
   useEffect(() => {
     if (!fromCheckout) return;
+    // Google Analytics counts the payment once per Checkout session; the server records it for the site's own numbers.
+    const plan = account.subscription?.plan;
+    if (hostingActive(account) && plan) googleEvent("purchase", { transaction_id: new URLSearchParams(window.location.search).get("checkout") ?? "",
+      currency: plan.currency.toUpperCase(), value: ((plan.amount ?? 0) * (plan.spaces ? 1 : account.subscription?.quantity ?? 1)) / 100 });
     try {
       const waiting = JSON.parse(localStorage.getItem(awaitingPaymentKey) ?? "null") as { at: number } | null;
       if (waiting && Date.now() - waiting.at < 30 * 60 * 1000) setMessage("Payment received. Your files are uploading in the tab where you added the space, so you can close this one.");
     } catch { /* The usual notice stays. */ }
-  }, [fromCheckout]);
+  }, [fromCheckout]); // eslint-disable-line react-hooks/exhaustive-deps -- once, on arrival from Checkout
 
   // Cards follow the agent's progress.
   const working = spaces.some(space => space.status === "queued" || space.status === "processing");
