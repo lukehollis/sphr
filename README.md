@@ -17,6 +17,7 @@ Self-host SPHR with this repository, or use paid hosting at [spacery.dev](https:
 
 - **[LIVE DEMO (E57)](https://app.spacery.dev/s/bc8d61ff42cf/loomis-michael-telescope-observatory)**: a campus observatory converted from a Matterport E57 export.
 - **[LIVE DEMO (3DGS)](https://app.spacery.dev/?demo=garden)**: a garden captured as 3D Gaussian splats.
+- **[Get started with your agent](https://spacery.dev/#start)** (optional): add the Spacery MCP server to Claude, Codex, Grok, Antigravity or Meta Muse and your agent uploads a capture from your computer and publishes it as a space. Setup for agents is at [spacery.dev/agents.md](https://spacery.dev/agents.md).
 
 This branch is the Next.js + Three.js migration. It removes the old separate backend requirement and ships as a client-rendered viewer that can load a default demo, a remote JSON config, or embedded bootstrap data from a host page.
 
