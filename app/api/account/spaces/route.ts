@@ -4,6 +4,12 @@ import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCust
 import { accountRequest, accountResponse, accountsEnabled, attemptKey, publicOrigin, requestUser } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
+import { notifyTeam } from "@/lib/server/team-notify";
+
+function announceSpace(email: string, title: string, status: "unpaid" | "draft", agent: boolean) {
+  void notifyTeam({ title: "Space created", fields: [["Title", title], ["Account", email],
+    ["Status", status === "unpaid" ? "Waiting for first payment" : "Ready for files"], ["From", agent ? "Their agent" : "The website"]] });
+}
 
 /** The customer's spaces, newest first, and the account, for refreshing the page while spaces upload and process. */
 export async function GET(request: Request) {
@@ -23,7 +29,11 @@ export async function POST(request: Request) {
   if (!allowAttempt([[attemptKey("space", user.id), 30]], 60 * 60 * 1000)) return accountResponse({ error: "Too many new spaces. Try again later." }, 429);
   try {
     const subscription = readSubscription(user.id);
-    if (!billingEnabled()) return accountResponse({ ok: true, space: await describeSpace(createCustomerSpace(user.id, title, "draft")) });
+    if (!billingEnabled()) {
+      const space = createCustomerSpace(user.id, title, "draft");
+      announceSpace(user.email, title, "draft", agent);
+      return accountResponse({ ok: true, space: await describeSpace(space) });
+    }
     if (subscription && hostingStatuses.has(subscription.status)) {
       const space = createCustomerSpace(user.id, title, "draft", subscription.plan?.spaces ?? null);
       try { await syncQuantity(user.id); }
@@ -32,9 +42,11 @@ export async function POST(request: Request) {
         console.error("Unable to update the subscription quantity:", failure instanceof Error ? failure.message : failure);
         return accountResponse({ error: "Billing could not be updated. Try again." }, 502);
       }
+      announceSpace(user.email, title, "draft", agent);
       return accountResponse({ ok: true, space: await describeSpace(space) });
     }
     const space = createCustomerSpace(user.id, title, "unpaid");
+    announceSpace(user.email, title, "unpaid", agent);
     try {
       const next = await startCheckout(user, publicOrigin(request), undefined, agent);
       const view = await describeSpace(readCustomerSpace(space.id)!);

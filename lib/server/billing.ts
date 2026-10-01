@@ -1,7 +1,8 @@
 import Stripe from "stripe";
 import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses, payableSpaceCount, readSubscription, readUser,
-  saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type SubscriptionPlan, type User } from "./accounts-store";
+  saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
+import { describePrice, notifyTeam } from "./team-notify";
 
 let client: Stripe | undefined;
 const env = (name: string) => process.env[name]?.trim() || undefined;
@@ -187,12 +188,42 @@ export async function syncSubscription(id: string) {
     console.error(`Customer ${userId} has two live subscriptions (${stored.id}, ${subscription.id}); keeping ${stored.id}. Cancel one in Stripe.`);
     return;
   }
-  saveSubscription(userId, { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
-    periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, plan: subscriptionPlan(item.price) });
+  const next = { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
+    periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, plan: subscriptionPlan(item.price) };
+  const { saved, previous } = saveSubscription(userId, next);
+  if (saved) void announceBillingChange(userId, previous, next);
   if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
     activateUnpaidSpaces(userId);
     await syncQuantity(userId);
   }
+}
+
+/** Tells the operator when hosting starts, changes plan, stops paying, is cancelled or ends. Repeated events change nothing and say nothing. */
+async function announceBillingChange(userId: string, previous: Subscription | undefined, next: Subscription) {
+  const email = readUser(userId)?.email ?? userId;
+  const plans = await readPlans().catch(() => []);
+  const price = describePrice(next.plan, plans);
+  const wasHosting = Boolean(previous && previous.id === next.id && hostingStatuses.has(previous.status));
+  const hosting = hostingStatuses.has(next.status);
+  const fields: [string, string | number | null][] = [["Account", email], ["Plan", price], ["Status", next.status]];
+  if (!wasHosting && hosting) {
+    return notifyTeam({ title: "New subscription", tone: "money", fields: [...fields, ["Spaces billed", next.plan?.spaces ? null : next.quantity]] });
+  }
+  if (!previous || previous.id !== next.id) return;
+  if (wasHosting && !hosting) {
+    return notifyTeam({ title: "Hosting stopped", tone: "bad", description: `The subscription is now ${next.status}, so this account's spaces are offline.`, fields });
+  }
+  if (previous.status !== "past_due" && next.status === "past_due") {
+    return notifyTeam({ title: "Payment failed", tone: "warn", description: "Stripe is retrying the payment; spaces stay online meanwhile.", fields });
+  }
+  if (previous.plan?.price !== next.plan?.price && hosting) {
+    return notifyTeam({ title: "Plan changed", tone: "money", fields: [["Account", email], ["From", describePrice(previous.plan, plans)], ["To", price]] });
+  }
+  if (!previous.cancelAtPeriodEnd && next.cancelAtPeriodEnd) {
+    return notifyTeam({ title: "Cancellation scheduled", tone: "warn",
+      fields: [...fields, ["Ends", next.periodEnd ? new Date(next.periodEnd * 1000).toISOString().slice(0, 10) : null]] });
+  }
+  if (previous.cancelAtPeriodEnd && !next.cancelAtPeriodEnd && hosting) return notifyTeam({ title: "Cancellation withdrawn", tone: "good", fields });
 }
 
 /**
