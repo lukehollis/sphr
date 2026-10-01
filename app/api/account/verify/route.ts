@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { consumeUserToken, markEmailVerified } from "@/lib/server/accounts-store";
 import { accountResponse, accountsEnabled, publicOrigin, readAccountBody } from "@/lib/server/accounts";
+import { recordEvent } from "@/lib/server/analytics";
 
 /** Links open a confirmation page; link scanners that prefetch URLs confirm nothing. */
 export async function GET(request: Request) {
@@ -16,5 +17,6 @@ export async function POST(request: Request) {
   const userId = consumeUserToken(body?.token, "verify");
   if (!userId) return accountResponse({ error: "This link has expired or was already used. Sign in to send a new one." }, 400);
   markEmailVerified(userId);
+  await recordEvent("email_verified", { userId });
   return accountResponse({ ok: true });
 }

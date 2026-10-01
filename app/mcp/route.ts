@@ -1,5 +1,5 @@
 import { createMcpSession, deleteMcpSession, readMcpSession } from "@/lib/server/accounts-store";
-import { accountsEnabled, bearerToken } from "@/lib/server/accounts";
+import { accountsEnabled, bearerToken, publicOrigin } from "@/lib/server/accounts";
 import { hostedInstructions, hostedTools, runHostedTool, type McpContext } from "@/lib/server/agent-mcp";
 import { siteBrand } from "@/lib/server/brand";
 
@@ -85,9 +85,26 @@ export async function POST(request: Request) {
   return Response.json(Array.isArray(parsed) ? replies : replies[0], { headers: { ...headers, ...sessionHeader } });
 }
 
-/** No server-initiated stream is offered. */
-export function GET() {
-  return new Response(null, { status: 405, headers: { ...headers, Allow: "POST, DELETE" } });
+const escape = (text: string) => text.replace(/[&<>"]/g, character => `&#${character.charCodeAt(0)};`);
+
+/**
+ * No server-initiated stream is offered. A person who opens this address in a browser
+ * (it is shown on the homepage for agents) gets a short page instead of an error.
+ */
+export function GET(request: Request) {
+  if (!request.headers.get("accept")?.includes("text/html")) return new Response(null, { status: 405, headers: { ...headers, Allow: "POST, DELETE" } });
+  const brand = escape(siteBrand());
+  const address = escape(`${publicOrigin(request)}/mcp`);
+  const guide = process.env.SPHR_AGENT_CONNECTOR_URL?.trim();
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${brand} for agents</title><meta name="robots" content="noindex">
+<style>body{margin:0;padding:48px 16px;background:#f4f2ec;color:#111;font:16px/1.6 system-ui,sans-serif}main{max-width:600px;margin:0 auto}
+code{padding:2px 6px;background:#fff;border:1px solid #ccc;overflow-wrap:anywhere}a{color:#111}</style></head><body><main>
+<h1>This address is for your AI agent.</h1>
+<p>Add <code>${address}</code> as a connector in Claude, ChatGPT, Meta Muse or another agent that takes a connector address. The agent links to your ${brand} account and helps you add your capture.</p>
+<p>${guide ? `<a href="${escape(guide)}">How to connect an agent</a> or ` : ""}<a href="/account">add a space yourself</a>.</p>
+</main></body></html>`;
+  return new Response(page, { status: 200, headers: { ...headers, "Content-Type": "text/html; charset=utf-8" } });
 }
 
 export function DELETE(request: Request) {

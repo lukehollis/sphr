@@ -1,5 +1,6 @@
 import { allowAttempt } from "@/lib/server/admin-store";
 import { checkUserPassword } from "@/lib/server/accounts-store";
+import { recordEvent } from "@/lib/server/analytics";
 import { accountResponse, accountsEnabled, attemptKey, clientAddress, readAccountBody, startUserSession } from "@/lib/server/accounts";
 
 export async function POST(request: Request) {
@@ -13,7 +14,11 @@ export async function POST(request: Request) {
     return accountResponse({ error: "Too many sign-in attempts. Try again in 15 minutes." }, 429);
   }
   const user = await checkUserPassword(body.email, body.password);
-  if (!user) return accountResponse({ error: "Invalid email or password." }, 401);
+  if (!user) {
+    await recordEvent("login_failed");
+    return accountResponse({ error: "Invalid email or password." }, 401);
+  }
   await startUserSession(user.id);
+  await recordEvent("login", { userId: user.id, props: { method: "email" } });
   return accountResponse({ ok: true });
 }

@@ -5,9 +5,11 @@ import { accountRequest, accountResponse, accountsEnabled, attemptKey, publicOri
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { notifyTeam } from "@/lib/server/team-notify";
+import { recordEvent } from "@/lib/server/analytics";
 
-function announceSpace(email: string, title: string, status: "unpaid" | "draft", agent: boolean) {
-  void notifyTeam({ title: "Space created", fields: [["Title", title], ["Account", email],
+function announceSpace(user: { id: string; email: string }, title: string, status: "unpaid" | "draft", agent: boolean) {
+  void recordEvent("space_created", { userId: user.id, props: { from: agent ? "agent" : "web", first: status === "unpaid" } });
+  void notifyTeam({ title: "Space created", fields: [["Title", title], ["Account", user.email],
     ["Status", status === "unpaid" ? "Waiting for first payment" : "Ready for files"], ["From", agent ? "Their agent" : "The website"]] });
 }
 
@@ -31,7 +33,7 @@ export async function POST(request: Request) {
     const subscription = readSubscription(user.id);
     if (!billingEnabled()) {
       const space = createCustomerSpace(user.id, title, "draft");
-      announceSpace(user.email, title, "draft", agent);
+      announceSpace(user, title, "draft", agent);
       return accountResponse({ ok: true, space: await describeSpace(space) });
     }
     if (subscription && hostingStatuses.has(subscription.status)) {
@@ -42,18 +44,20 @@ export async function POST(request: Request) {
         console.error("Unable to update the subscription quantity:", failure instanceof Error ? failure.message : failure);
         return accountResponse({ error: "Billing could not be updated. Try again." }, 502);
       }
-      announceSpace(user.email, title, "draft", agent);
+      announceSpace(user, title, "draft", agent);
       return accountResponse({ ok: true, space: await describeSpace(space) });
     }
     const space = createCustomerSpace(user.id, title, "unpaid");
-    announceSpace(user.email, title, "unpaid", agent);
+    announceSpace(user, title, "unpaid", agent);
     try {
       const next = await startCheckout(user, publicOrigin(request), undefined, agent);
+      if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web" } });
       const view = await describeSpace(readCustomerSpace(space.id)!);
       return accountResponse({ ok: true, space: view, ...("url" in next ? { checkout: next.url, plan: next.plan } : "portal" in next ? { portal: next.portal } : {}) });
     }
     catch (failure) {
       console.error("Unable to start Checkout:", failure instanceof Error ? failure.message : failure);
+      await recordEvent("checkout_failed", { userId: user.id });
       return accountResponse({ ok: true, space: await describeSpace(space), error: "Payment could not start. Use Complete payment to try again." });
     }
   } catch (failure) {

@@ -6,6 +6,7 @@ import { announceJob } from "@/lib/server/job-signal";
 import { filesReceivedEmail } from "@/lib/server/emails";
 import { siteBrand } from "@/lib/server/brand";
 import { filesSummary, notifyTeam } from "@/lib/server/team-notify";
+import { recordEvent } from "@/lib/server/analytics";
 
 /** Queues the uploaded files for processing. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -23,6 +24,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     submitCustomerSpace(space.id, cleanText(body?.notes, 2000));
     announceJob();
     const files = listUploads(space.id).filter(upload => upload.status === "complete");
+    await recordEvent("space_submitted", { userId: user.id, props: { files: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0),
+      from: agent ? "agent" : "web" } });
     void notifyTeam({ title: "Space uploaded for processing", fields: [["Title", space.title], ["Account", user.email], ["Files", filesSummary(files)],
       ["Kinds", [...new Set(files.map(file => file.name.split(".").pop()?.toLowerCase()).filter(Boolean))].slice(0, 8).join(", ")],
       ["From", agent ? "Their agent" : "The website"], ["Notes", cleanText(body?.notes, 300)]] });

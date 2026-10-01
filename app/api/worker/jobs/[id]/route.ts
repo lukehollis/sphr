@@ -6,6 +6,7 @@ import { listingRevision, removePublishedScene } from "@/lib/server/published-as
 import { spaceFailedEmail, spaceReadyEmail } from "@/lib/server/emails";
 import { siteBrand } from "@/lib/server/brand";
 import { notifyTeam } from "@/lib/server/team-notify";
+import { recordEvent } from "@/lib/server/analytics";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -61,6 +62,7 @@ export async function POST(request: Request, { params }: Params) {
         void removePublishedScene(job.sceneId, revision).catch(error => console.error("Unable to remove earlier revisions:", error instanceof Error ? error.message : error));
       }
       if (result.job.status === "done") {
+        await recordEvent("space_ready", { userId: result.space.userId });
         void notifyTeam({ title: "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
           ["Account", readUser(result.space.userId)?.email], ["Link", `${publicOrigin(request)}${listing.scenePath}`], ["Note", message]] });
         await notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
@@ -72,6 +74,7 @@ export async function POST(request: Request, { params }: Params) {
       if (!message) return workerResponse({ error: "Explain the failure for the customer." }, 400);
       const result = finishJob(job.id, { ok: false, message });
       if (result.job.status === "failed") {
+        await recordEvent("space_failed", { userId: result.space.userId });
         void notifyTeam({ title: "Space needs attention", tone: "bad", description: message,
           fields: [["Title", result.space.title], ["Account", readUser(result.space.userId)?.email]] });
         await notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message));

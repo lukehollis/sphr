@@ -3,6 +3,7 @@ import { AccountError, createPasswordUser } from "@/lib/server/accounts-store";
 import { accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrigin, readAccountBody, sendVerification, startUserSession } from "@/lib/server/accounts";
 import { mailConfigured } from "@/lib/server/mail";
 import { notifyTeam } from "@/lib/server/team-notify";
+import { accountSource, recordEvent } from "@/lib/server/analytics";
 
 export async function POST(request: Request) {
   if (!accountsEnabled() || !mailConfigured()) return accountResponse({ error: "Email sign-up is unavailable." }, 404);
@@ -13,8 +14,10 @@ export async function POST(request: Request) {
   }
   try {
     const user = await createPasswordUser(body?.email, body?.password, body?.name);
-    void notifyTeam({ title: "New account", tone: "good", fields: [["Email", user.email], ["Name", user.name], ["Signed up with", "Email and password"]] });
-    await sendVerification(user, publicOrigin(request)).catch(error => console.error("Unable to send verification email:", error instanceof Error ? error.message : error));
+    await recordEvent("sign_up", { userId: user.id, props: { method: "email" } });
+    void notifyTeam({ title: "New account", tone: "good", fields: [["Email", user.email], ["Name", user.name], ["Signed up with", "Email and password"],
+      ["Came from", accountSource(user.id)]] });
+    await sendVerification(user, publicOrigin(request)).then(() => recordEvent("verify_sent", { userId: user.id })).catch(error => console.error("Unable to send verification email:", error instanceof Error ? error.message : error));
     await startUserSession(user.id);
     return accountResponse({ ok: true });
   } catch (error) {

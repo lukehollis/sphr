@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import AuthShell, { customerFacts } from "./site/AuthShell";
+import { googleEvent } from "./Analytics";
 
 type Provider = { id: string; label: string };
 
@@ -46,6 +47,7 @@ export default function AccountAuth({ mode: initialMode, providers, passwordEnab
       }
       await accountRequest(mode === "signup" ? "/api/account/signup" : "/api/account/login",
         { email: form.get("email"), password: form.get("password"), ...(mode === "signup" ? { name: form.get("name") } : {}) });
+      googleEvent(mode === "signup" ? "sign_up" : "login", { method: "email" });
       window.location.assign(returnPath);
     } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
