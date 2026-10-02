@@ -350,9 +350,11 @@ try {
     SPHR_WORKER_URL: base, SPHR_WORKER_TOKEN: workerToken, SPHR_WORKER_DIR: path.join(state, 'jobs'), SPHR_WORKER_PUBLISH: 'local', SPHR_WORKER_LOCAL_DATASETS: datasets,
     SPHR_AGENT_COMMAND: JSON.stringify([process.execPath, path.join(root, 'scripts/test-support/fake-agent.mjs'), '{job}']) }, stdio: 'ignore' });
   assert.equal(await new Promise(resolve => held.on('exit', resolve)), 0);
-  assert.equal((await (await aliceLaptop.get(`/api/account/spaces/${odd.id}`)).json()).space.status, 'processing');
+  body = await (await aliceLaptop.get(`/api/account/spaces/${odd.id}`)).json();
+  assert.equal(body.space.status, 'failed', 'a held job shows the customer a reason instead of endless processing');
+  assert.ok(body.space.message, 'the held space carries a customer-facing message');
   jobs = (await (await worker('/api/worker/jobs?status=held')).json()).jobs;
-  assert.equal(jobs.length, 1, 'the job waits for an operator');
+  assert.equal(jobs.length, 1, 'the job still waits for an operator');
   assert.equal((await worker(`/api/worker/jobs/${jobs[0].id}`, { action: 'complete' })).status, 400, 'completion needs a published listing');
   const foreign = { sceneId: reserved, titleSlug: 'x', scenePath: `/s/${reserved}/x`, slug: `customer-${studio.id}`, title: 'X',
     bootstrapUrl: `/datasets/matterport/customer-${studio.id}/bootstrap.json`, thumbnail: `/datasets/matterport/customer-${studio.id}/preview.jpg` };
@@ -378,7 +380,7 @@ try {
   tamperRun.stderr.on('data', chunk => { tamperLog += chunk; });
   assert.equal(await new Promise(resolve => tamperRun.on('exit', resolve)), 0);
   assert.match(tamperLog, /failed validation: .*(Unlisted files|linked file)/, tamperLog);
-  assert.equal((await (await aliceLaptop.get(`/api/account/spaces/${tampered.id}`)).json()).space.status, 'processing', 'held for an operator');
+  assert.equal((await (await aliceLaptop.get(`/api/account/spaces/${tampered.id}`)).json()).space.status, 'failed', 'held for an operator, surfaced to the customer');
   assert.ok(!existsSync(path.join(datasets, `customer-${tampered.id}`)), 'nothing was published');
 
   // Deleting a space mid-processing cancels its job.
