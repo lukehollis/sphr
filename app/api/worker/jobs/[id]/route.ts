@@ -46,7 +46,16 @@ export async function POST(request: Request, { params }: Params) {
       return setJobProgress(job.id, message.slice(0, 300)) ? workerResponse({ ok: true }) : workerResponse({ error: "This job is not running." }, 409);
     }
     if (body?.action === "hold") {
-      return holdJob(job.id, message) ? workerResponse({ job: jobDetails(readJob(job.id)!) }) : workerResponse({ error: "This job is not running." }, 409);
+      const held = holdJob(job.id, message);
+      if (!held) return workerResponse({ error: "This job is not running." }, 409);
+      // The job waits for an operator, but the customer is told their space stalled rather than left watching it process forever.
+      if (held.transitioned) {
+        await recordEvent("space_failed", { userId: held.space.userId });
+        void notifyTeam({ title: "Space held for review", tone: "warn", description: message ?? undefined,
+          fields: [["Title", held.space.title], ["Account", readUser(held.space.userId)?.email]] });
+        await notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? ""));
+      }
+      return workerResponse({ job: jobDetails(readJob(job.id)!) });
     }
     if (body?.action === "complete") {
       // The listing stays in the application database, out of the shared public catalog.

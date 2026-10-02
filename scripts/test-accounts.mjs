@@ -154,11 +154,17 @@ test('spaces, uploads and the processing queue', async () => {
   const redo = store.submitCustomerSpace(space.id, null);
   assert.equal(redo.sceneId, job.sceneId);
   store.claimJob(redo.id, 'worker-a');
-  assert.equal(store.holdJob(redo.id, 'Unfamiliar format.'), true);
+  const held = store.holdJob(redo.id, 'Unfamiliar format.');
+  assert.ok(held?.transitioned, 'holding a job reports the space moved out of processing');
   assert.equal(store.readJob(redo.id).status, 'held');
-  assert.equal(store.readCustomerSpace(space.id).status, 'processing', 'customers see held jobs as processing');
+  assert.equal(store.readCustomerSpace(space.id).status, 'failed', 'a held job shows the customer a reason, not endless processing');
+  assert.equal(store.readCustomerSpace(space.id).message, store.heldSpaceMessage);
   store.expireJobLeases(-1);
   assert.equal(store.readJob(redo.id).status, 'held', 'held jobs wait for an operator, not the lease');
+  // An operator can put a held job back in the queue, clearing the customer-facing error.
+  assert.equal(store.releaseJob(redo.id), true);
+  assert.equal(store.readCustomerSpace(space.id).status, 'queued');
+  store.claimJob(redo.id, 'worker-a');
   const failed = store.finishJob(redo.id, { ok: false, message: 'The ZIP contained no E57 file.' });
   assert.equal(failed.space.status, 'failed');
   assert.equal(failed.space.sceneId, job.sceneId, 'a failed reprocess keeps the published scene');
@@ -186,7 +192,7 @@ test('spaces, uploads and the processing queue', async () => {
     store.expireJobLeases(-1);
     assert.equal(store.readJob(lease.id).status, attempt < store.maxJobAttempts ? 'queued' : 'held');
   }
-  assert.equal(store.readCustomerSpace(stalled.id).status, 'processing');
+  assert.equal(store.readCustomerSpace(stalled.id).status, 'failed', 'a job that gives up stops the space processing');
 });
 
 test('ID tokens: signature, issuer, audience, lifetime, nonce and key rotation', async () => {

@@ -591,6 +591,8 @@ type JobRow = { id: string; space_id: string; scene_id: string; status: JobStatu
 const toJob = (row: JobRow): Job => ({ id: row.id, spaceId: row.space_id, sceneId: row.scene_id, status: row.status, attempts: row.attempts,
   worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished });
 export const maxJobAttempts = 3;
+/** Shown on a space whose job was held or gave up, so the customer sees a reason rather than endless processing. */
+export const heldSpaceMessage = "We couldn't finish building this space. Check that your files are a capture and try again, or contact support if it keeps happening.";
 
 function unusedSceneId() {
   for (;;) {
@@ -648,7 +650,8 @@ export function releaseJob(id: string) {
     const job = readJob(id);
     if (!job || (job.status !== "running" && job.status !== "held")) return false;
     store().prepare("UPDATE jobs SET status='queued', worker=NULL, started=NULL WHERE id=?").run(id);
-    store().prepare("UPDATE customer_spaces SET status='queued', updated=? WHERE id=? AND status='processing'").run(now(), job.spaceId);
+    // A held job may have moved its space to failed; requeueing brings it back into the pipeline.
+    store().prepare("UPDATE customer_spaces SET status='queued', message=NULL, updated=? WHERE id=? AND status IN ('processing','failed')").run(now(), job.spaceId);
     return true;
   });
 }
@@ -658,13 +661,22 @@ export function setJobProgress(id: string, progress: string) {
   return store().prepare("UPDATE jobs SET progress=? WHERE id=? AND status='running'").run(progress, id).changes > 0;
 }
 
-/** Parks a running job for an operator, keeping the space in processing. */
+/**
+ * Parks a running job for an operator. The job waits in 'held' for a human, but the space is
+ * moved out of processing to a failed state so the customer sees a reason instead of a spinner
+ * that never resolves. Returns the space and whether it just transitioned, for notifications.
+ */
 export function holdJob(id: string, message: string | null) {
   return transaction(() => {
     const job = readJob(id);
-    if (!job || job.status !== "running") return false;
+    if (!job || job.status !== "running") return null;
     store().prepare("UPDATE jobs SET status='held', message=? WHERE id=?").run(message, id);
-    return true;
+    const before = readCustomerSpace(job.spaceId)!;
+    const transitioned = before.status === "processing" || before.status === "queued";
+    if (transitioned) {
+      store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=?").run(heldSpaceMessage, now(), job.spaceId);
+    }
+    return { space: readCustomerSpace(job.spaceId)!, transitioned };
   });
 }
 
@@ -679,6 +691,8 @@ export function expireJobLeases(hours: number) {
     for (const job of stale) {
       if (job.attempts >= maxJobAttempts) {
         store().prepare("UPDATE jobs SET status='held', message=? WHERE id=?").run(`Stopped after ${job.attempts} attempts without a result.`, job.id);
+        // Don't leave the customer's space processing forever once the job has given up.
+        store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=? AND status IN ('processing','queued')").run(heldSpaceMessage, now(), job.space_id);
       } else {
         store().prepare("UPDATE jobs SET status='queued', worker=NULL, started=NULL WHERE id=?").run(job.id);
         store().prepare("UPDATE customer_spaces SET status='queued', updated=? WHERE id=? AND status='processing'").run(now(), job.space_id);
