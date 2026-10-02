@@ -22,7 +22,7 @@ import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { PanoramaLayer } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
-import { selectNavigationTarget } from "@/lib/three/navigation";
+import { selectDirectionalTarget, selectNavigationTarget, selectSpotTarget } from "@/lib/three/navigation";
 import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
@@ -33,6 +33,14 @@ type CameraPose = {
   target: THREE.Vector3;
   fov: number;
 };
+
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
+
+function isTypingTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  return Boolean(element?.isContentEditable || element?.closest?.("input, textarea, select, [contenteditable]"));
+}
 
 export class SphrRuntime {
   readonly scene = new THREE.Scene();
@@ -46,6 +54,9 @@ export class SphrRuntime {
   private readonly pointerDown = new THREE.Vector2();
   private activePointerId: number | null = null;
   private pointerMoved = false;
+  // Held arrow/A/D keys turn the view: +1 left, -1 right.
+  private readonly turnKeys = new Map<string, number>();
+  private lastFrameTime = 0;
   private controls: OrbitControls;
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
@@ -272,7 +283,8 @@ export class SphrRuntime {
     this.sceneGraph?.setViewMode(this.state.viewMode, this.state.debug);
 
     const returningFromOverview = fromOverview && nextViewMode === "FPV" && !instant;
-    const teleport = nodeChanged && !fromOverview && Boolean(outgoingNode?.neighbors && !outgoingNode.neighbors.includes(node!.uuid));
+    // Moves the visitor chose are always in sight; only tour steps between unlinked scans cut.
+    const teleport = nodeChanged && !fromOverview && !preserveHeading && Boolean(outgoingNode && this.nav && !this.nav.canFlyTo(node!.uuid));
     const navigationMs = teleport ? 700 : this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
     const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV"
       ? this.beginNavigationTransition(outgoingNode)
@@ -490,6 +502,8 @@ export class SphrRuntime {
     this.canvas.addEventListener("dblclick", this.handleDoubleClick);
     this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
     window.addEventListener("keydown", this.handleKeyDown);
+    window.addEventListener("keyup", this.handleKeyUp);
+    window.addEventListener("blur", this.handleWindowBlur);
   }
 
   private detachEvents() {
@@ -500,6 +514,8 @@ export class SphrRuntime {
     this.canvas.removeEventListener("dblclick", this.handleDoubleClick);
     this.canvas.removeEventListener("wheel", this.handleWheel);
     window.removeEventListener("keydown", this.handleKeyDown);
+    window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.handleWindowBlur);
   }
 
   private handlePointerDown = (event: PointerEvent) => {
@@ -512,17 +528,18 @@ export class SphrRuntime {
 
   private handlePointerMove = (event: PointerEvent) => {
     if (this.activePointerId === event.pointerId && Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y) > 5) this.pointerMoved = true;
-    if (event.buttons || this.isNavigating) { this.cursor?.hide(); return; }
-    const targets = this.sceneGraph?.getRaycastObjects() ?? [];
-    if (!targets.length) return;
-
+    if (event.buttons || this.isNavigating) { this.cursor?.hide(); this.nav?.setHovered(null); return; }
     const rect = this.canvas.getBoundingClientRect();
     const pointer = new THREE.Vector2(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
-    const canNavigate = Boolean(this.nav?.getIntersectedNode(this.raycaster) || this.findPanoramaNavigationNode());
+    const hoveredNode = this.nav?.getIntersectedNode(this.raycaster) ?? null;
+    this.nav?.setHovered(hoveredNode && hoveredNode.uuid !== this.currentNode?.uuid ? hoveredNode.uuid : null);
+    const targets = this.sceneGraph?.getRaycastObjects() ?? [];
+    if (!targets.length) { this.canvas.style.cursor = hoveredNode ? "pointer" : ""; return; }
+    const canNavigate = Boolean(hoveredNode || this.findPanoramaNavigationNode());
     this.canvas.style.cursor = canNavigate ? "pointer" : "grab";
     if (!this.panorama || canNavigate) this.cursor?.updateFromRaycaster(this.raycaster, targets, Boolean(this.panorama));
     else this.cursor?.hide();
@@ -554,7 +571,7 @@ export class SphrRuntime {
       return;
     }
 
-    const directionalNode = this.findPanoramaNavigationNode();
+    const directionalNode = this.findPanoramaNavigationNode(true);
     if (directionalNode) {
       this.navigateToNode(directionalNode);
       return;
@@ -598,8 +615,42 @@ export class SphrRuntime {
   };
 
   private handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "\\") this.toggleDebug();
+    if (event.key === "\\") { this.toggleDebug(); return; }
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const step = key === "ArrowUp" || key === "w" ? 1 : key === "ArrowDown" || key === "s" ? -1 : 0;
+    const turn = key === "ArrowLeft" || key === "a" ? 1 : key === "ArrowRight" || key === "d" ? -1 : 0;
+    if ((!step && !turn) || this.state.viewMode !== "FPV" || !this.state.loading.ready) return;
+    event.preventDefault();
+    if (turn) this.turnKeys.set(key, turn);
+    // Holding forward keeps walking: repeats are ignored while a move is in flight.
+    else void this.stepInDirection(step);
   };
+
+  private handleKeyUp = (event: KeyboardEvent) => {
+    this.turnKeys.delete(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+  };
+
+  private handleWindowBlur = () => this.turnKeys.clear();
+
+  /** Up/W walks to the reachable scan ahead, Down/S to the one behind, keeping the heading. */
+  private async stepInDirection(direction: number) {
+    if (this.isNavigating || !this.currentNode || !this.nav) return;
+    const heading = this.camera.getWorldDirection(new THREE.Vector3());
+    // Looking at the floor or sky, "ahead" is the top of the screen.
+    if (Math.abs(heading.y) > 0.95) heading.copy(new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion)).multiplyScalar(-Math.sign(heading.y));
+    const node = selectDirectionalTarget(
+      heading.multiplyScalar(direction),
+      this.nav.getNavigableNodes().map((item) => ({ value: item, floor: this.nav!.getWorldFloorPosition(item) })),
+      this.nav.getWorldFloorPosition(this.currentNode)
+    );
+    if (node) await this.navigateToNode(node);
+  }
+
+  private turnView(radians: number) {
+    const look = this.controls.target.clone().sub(this.camera.position).applyAxisAngle(WORLD_UP, radians);
+    this.controls.target.copy(this.camera.position).add(look);
+  }
 
   navigateNode(uuid: string) {
     const node = this.resolveNode(uuid);
@@ -710,22 +761,30 @@ export class SphrRuntime {
     return null;
   }
 
-  private findPanoramaNavigationNode() {
-    if (this.state.viewMode !== "FPV" || !this.currentNode || !this.nav) return null;
+  /** Sightlines are only tested on click; hovering assumes the spot can be reached. */
+  private findPanoramaNavigationNode(checkSightlines = false) {
+    const nav = this.nav;
+    const currentNode = this.currentNode;
+    if (this.state.viewMode !== "FPV" || !currentNode || !nav) return null;
     const hit = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
     let floorHit: THREE.Vector3 | null = null;
     if (hit?.face) {
       const normal = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
       if (Math.abs(normal.y) >= 0.7) floorHit = hit.point;
     }
-    return selectNavigationTarget(
-      this.raycaster.ray,
-      // Unknown floors use directly selectable camera spheres, not inferred floor targets.
-      this.nav.getNavigableNodes().filter((node) => !node.floorUnobserved)
-        .map((node) => ({ value: node, floor: this.nav!.getWorldFloorPosition(node) })),
-      this.nav.getWorldFloorPosition(this.currentNode),
-      floorHit
-    );
+    // Unknown floors use directly selectable camera spheres, not inferred floor targets.
+    const candidates = (nodes: NodeData[]) => nodes.filter((node) => !node.floorUnobserved)
+      .map((node) => ({ value: node, floor: nav.getWorldFloorPosition(node) }));
+    const currentFloor = nav.getWorldFloorPosition(currentNode);
+    const navigable = nav.getNavigableNodes();
+    if (hit) {
+      // Any visible spot on the mesh, however far, travels to the scan nearest it.
+      const reachable = new Set(navigable.map((node) => node.uuid));
+      const spot = selectSpotTarget(hit.point, Boolean(floorHit), candidates(this.getNodes().filter((node) => node.uuid !== currentNode.uuid)), currentFloor,
+        (node) => reachable.has(node.uuid) || !checkSightlines || nav.canSee(currentNode, node));
+      if (spot) return spot;
+    }
+    return selectNavigationTarget(this.raycaster.ray, candidates(navigable), currentFloor, floorHit);
   }
 
   private startAnimationLoop() {
@@ -734,6 +793,10 @@ export class SphrRuntime {
     this.renderer.setAnimationLoop(() => {
       if (this.disposed) return;
       const now = performance.now();
+      const elapsed = Math.min(0.1, Math.max(0, (now - (this.lastFrameTime || now)) / 1000));
+      this.lastFrameTime = now;
+      const turn = Math.sign([...this.turnKeys.values()].reduce((sum, value) => sum + value, 0));
+      if (turn && !this.cameraTween && this.controls.enabled && this.state.viewMode === "FPV") this.turnView(turn * KEY_TURN_SPEED * elapsed);
       this.tweens = this.tweens.filter((tween) => tween.update(now));
       if (this.cameraTween && !this.cameraTween.update(now)) this.cameraTween = null;
       if (this.transitionMeshTween && !this.transitionMeshTween.update(now)) this.transitionMeshTween = null;
@@ -742,6 +805,7 @@ export class SphrRuntime {
       if (!this.cameraTween) this.controls.update();
       this.skybox?.update(this.camera);
       this.panorama?.update(this.camera);
+      this.nav?.update(this.camera, this.canvas.clientHeight);
       this.cursor?.update(now);
       this.renderer.render(this.scene, this.camera);
       this.cursor?.render(this.renderer, this.camera);

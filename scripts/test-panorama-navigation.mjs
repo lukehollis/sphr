@@ -89,6 +89,62 @@ test('arrival restores wall occlusion and the destination puck is hidden only at
   nav.dispose(); wall.geometry.dispose(); wall.material.dispose();
 });
 
+test('capture links work both ways and hold beyond the distance used for unlinked scans', () => {
+  const scene = new THREE.Scene();
+  const far = [scan('a', 0, ['b']), scan('b', 12, []), scan('c', 3, ['a'])];
+  const nav = new NavigationLayer(scene, { navigation: { ...navigation, maxDistance: 5 } }, far);
+  nav.init();
+  nav.setActive('a');
+  assert.deepEqual(nav.getNavigableNodes().map(node => node.uuid), ['b', 'c'], 'a 12 m sightline and a one-way link both show');
+  nav.setActive('b');
+  assert.deepEqual(nav.getNavigableNodes().map(node => node.uuid), ['a'], 'a scan whose own list is empty is not a dead end');
+  assert.equal(nav.canFlyTo('a'), true);
+  assert.equal(nav.canFlyTo('c'), false, 'unlinked tour stops still cut instead of flying through walls');
+  nav.dispose();
+});
+
+test('an unlinked scan offers its nearest scans, and a sealed doorway still leaves one way on', () => {
+  const scene = new THREE.Scene();
+  const island = [scan('a', 0, ['b']), scan('b', 2, ['a']), scan('lone', 30, [])];
+  const nav = new NavigationLayer(scene, { navigation: { ...navigation, maxDistance: 5 } }, island);
+  nav.init();
+  nav.setActive('lone');
+  assert.deepEqual(nav.getNavigableNodes().map(node => node.uuid), ['b']);
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(.1, 4, 4), new THREE.MeshBasicMaterial());
+  wall.position.set(1, 1.6, 0);
+  scene.add(wall);
+  nav.setOccluders([wall]);
+  nav.setActive('a');
+  assert.deepEqual(nav.getNavigableNodes().map(node => node.uuid), ['b']);
+  nav.dispose(); wall.geometry.dispose(); wall.material.dispose();
+});
+
+test('distant pucks grow to stay visible while near and overview pucks keep their size', () => {
+  const scene = new THREE.Scene();
+  const spread = [scan('a', 0, ['near', 'far']), scan('near', 1.5, ['a']), scan('far', 9, ['a'])];
+  const nav = new NavigationLayer(scene, { navigation }, spread);
+  nav.init();
+  nav.setActive('a');
+  scene.updateMatrixWorld(true);
+  const camera = new THREE.PerspectiveCamera(75);
+  camera.position.set(0, 1.6, 0);
+  nav.update(camera, 800);
+  const scale = uuid => nav.group.getObjectByName(`nav-${uuid}`).scale.x;
+  assert.equal(scale('near'), 1);
+  const focal = 800 / (2 * Math.tan(THREE.MathUtils.degToRad(37.5)));
+  const distance = Math.hypot(9, 1.575);
+  assert.ok(Math.abs(scale('far') * .15 * focal / distance - 20) < 1e-9, 'a 9 m puck is 20 px in radius');
+  nav.setOrbit(true);
+  nav.update(camera, 800);
+  assert.equal(scale('far'), 1);
+  nav.setHovered('near');
+  const ring = nav.group.getObjectByName('nav-near').children[2].material;
+  assert.equal(ring.opacity, 1);
+  nav.setHovered(null);
+  assert.ok(ring.opacity < 1);
+  nav.dispose();
+});
+
 test('projected travel keeps the outgoing photo in mesh gaps until the late handoff', async t => {
   let now = 0;
   t.mock.method(performance, 'now', () => now);
@@ -244,3 +300,29 @@ for (const indexed of [true, false]) {
     });
   }
 }
+
+test('arrow keys walk forward and back along the heading and turn the view', async t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const { runtime, dispose } = await runtimeHarness(false, 75);
+  runtime.controls.target.set(.1, 1.6, 0);
+  runtime.camera.lookAt(runtime.controls.target);
+  const settle = () => { for (now of [now, now + 2000]) { runtime.cameraTween.update(now); runtime.navigationReleaseTween.update(now); } };
+  await runtime.stepInDirection(-1);
+  assert.equal(runtime.currentNode.uuid, 'side', 'down steps back while still facing ahead');
+  settle();
+  assert.ok(runtime.camera.getWorldDirection(new THREE.Vector3()).x > .99);
+  await runtime.stepInDirection(1);
+  assert.equal(runtime.currentNode.uuid, 'entry');
+  settle();
+  await runtime.stepInDirection(1);
+  assert.equal(runtime.currentNode.uuid, 'middle');
+  settle();
+  runtime.turnView(Math.PI / 2);
+  const look = runtime.controls.target.clone().sub(runtime.camera.position);
+  assert.ok(Math.abs(look.x) < 1e-9 && look.z < 0, 'a left turn faces -z');
+  runtime.camera.lookAt(runtime.controls.target); // OrbitControls does this every frame
+  await runtime.stepInDirection(1);
+  assert.equal(runtime.currentNode.uuid, 'middle', 'nothing lies that way, so the camera stays');
+  dispose();
+});

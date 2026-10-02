@@ -45,3 +45,52 @@ export function selectNavigationTarget<T>(
   }
   return best;
 }
+
+/** Arrow-key travel: the reachable scan best aligned with a heading, within a 60° cone. */
+export function selectDirectionalTarget<T>(
+  heading: THREE.Vector3,
+  candidates: NavigationCandidate<T>[],
+  currentFloor: THREE.Vector3
+): T | null {
+  const bearing = new THREE.Vector3(heading.x, 0, heading.z);
+  if (bearing.lengthSq() < 0.0001) return null;
+  bearing.normalize();
+  let best: T | null = null;
+  let bestCost = Infinity;
+  for (const candidate of candidates) {
+    const direction = candidate.floor.clone().sub(currentFloor).setY(0);
+    const distance = direction.length();
+    if (distance < 0.05) continue;
+    const angle = bearing.angleTo(direction);
+    if (angle > Math.PI / 3) continue;
+    // A degree off the heading weighs about the same as a metre further away.
+    const cost = angle + distance * THREE.MathUtils.DEG2RAD;
+    if (cost < bestCost) { best = candidate.value; bestCost = cost; }
+  }
+  return best;
+}
+
+/**
+ * A click on the mesh travels to the scan nearest that spot, however far, if `reachable` allows it.
+ * Only the closest few are tested, so sightline checks stay cheap in large captures.
+ */
+export function selectSpotTarget<T>(
+  spot: THREE.Vector3,
+  onFloor: boolean,
+  candidates: NavigationCandidate<T>[],
+  currentFloor: THREE.Vector3,
+  reachable: (value: T) => boolean,
+  maxChecks = 6
+): T | null {
+  // Floor clicks keep to the clicked level; wall clicks prefer the current one.
+  const score = (floor: THREE.Vector3) => (floor.x - spot.x) ** 2 + (floor.z - spot.z) ** 2
+    + (onFloor ? 16 * (floor.y - spot.y) ** 2 : 4 * (floor.y - currentFloor.y) ** 2);
+  const here = score(currentFloor);
+  const ranked = candidates
+    .filter((candidate) => !onFloor || Math.abs(candidate.floor.y - spot.y) <= 0.75)
+    .map((candidate) => ({ value: candidate.value, score: score(candidate.floor) }))
+    .filter((candidate) => candidate.score < here)
+    .sort((a, b) => a.score - b.score);
+  for (const candidate of ranked.slice(0, maxChecks)) if (reachable(candidate.value)) return candidate.value;
+  return null;
+}

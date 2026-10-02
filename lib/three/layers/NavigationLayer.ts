@@ -10,7 +10,11 @@ export class NavigationLayer {
   private transitionVisibleIds: Set<string> | null = null;
   private occluders: THREE.Object3D[] = [];
   private orbit = false;
+  private hoveredNodeId: string | null = null;
   private readonly occlusionRay = new THREE.Raycaster();
+  // Capture sightlines, made two-way. Empty when the space has no navigation graph.
+  private readonly links = new Map<string, Set<string>>();
+  private readonly markerWorld = new THREE.Vector3();
 
   setOccluders(objects: THREE.Object3D[]) {
     this.occluders = objects;
@@ -19,6 +23,15 @@ export class NavigationLayer {
   }
 
   setOrbit(orbit: boolean) { this.orbit = orbit; this.setActive(this.activeNodeId); }
+
+  /** Linked scans fly with the projected photo; unlinked tour stops cut instead of passing through walls. */
+  canFlyTo(nodeId: string) {
+    return !this.links.size || this.navigableNodeIds.has(nodeId);
+  }
+
+  canSee(from: NodeData, to: NodeData) {
+    return !this.occluders.length || this.unobstructed(this.getWorldPosition(from), this.getWorldPosition(to));
+  }
 
   getNavigableNodes() {
     return this.nodes.filter((node) => this.navigableNodeIds.has(node.uuid) && node.uuid !== this.activeNodeId);
@@ -61,6 +74,7 @@ export class NavigationLayer {
   }
 
   init() {
+    this.linkNodes();
     const settings = sceneGroupSettings("nodes", this.data);
     this.nodes.forEach((node) => {
       const marker = this.createMarker(node);
@@ -69,7 +83,7 @@ export class NavigationLayer {
       marker.userData.node = node;
       marker.visible = true;
       // Draw over the projected transition photo, with depth testing against its geometry.
-      marker.traverse((child) => { if ((child as THREE.Mesh).isMesh) child.renderOrder = 20; });
+      marker.traverse((child) => { if ((child as THREE.Mesh).isMesh) child.renderOrder += 20; });
       this.group.add(marker);
       this.markers.set(node.uuid, marker);
 
@@ -97,30 +111,32 @@ export class NavigationLayer {
   setActive(nodeId?: string | null) {
     this.activeNodeId = nodeId ?? null;
     const activeNode = this.nodes.find((node) => node.uuid === this.activeNodeId) ?? null;
-    const visibleNeighborIds = this.visibleNeighborIds(activeNode);
     this.navigableNodeIds.clear();
+    this.reachableIds(activeNode).forEach((id) => this.navigableNodeIds.add(id));
     this.markers.forEach((marker, id) => {
-      marker.visible = this.orbit ? id !== this.activeNodeId : visibleNeighborIds ? visibleNeighborIds.has(id) : id !== this.activeNodeId;
-      if (marker.visible && !this.orbit && activeNode && this.occluders.length) {
-        const targetNode = marker.userData.node as NodeData;
-        marker.visible = this.unobstructed(this.getWorldPosition(activeNode), this.getWorldPosition(targetNode));
-      }
-      if (marker.visible) this.navigableNodeIds.add(id);
       // Keep the departure pucks, including the destination, until the camera arrives.
       // Visual continuity must not broaden the next scan's navigation/prefetch choices.
-      marker.visible ||= this.transitionVisibleIds?.has(id) ?? false;
-      marker.traverse((child) => {
-        const mesh = child as THREE.Mesh;
-        const material = mesh.material as THREE.MeshBasicMaterial | undefined;
-        if (!material || !("color" in material)) return;
-        if (id === this.activeNodeId && !this.transitionVisibleIds) {
-          material.color.set(0xe7f18c);
-          material.opacity = 0.95;
-        } else {
-          material.color.set(0xffffff);
-          material.opacity = 0.55;
-        }
-      });
+      marker.visible = this.navigableNodeIds.has(id) || (this.transitionVisibleIds?.has(id) ?? false);
+    });
+    this.applyMarkerStyles();
+  }
+
+  setHovered(nodeId: string | null) {
+    if (nodeId === this.hoveredNodeId) return;
+    this.hoveredNodeId = nodeId;
+    this.applyMarkerStyles();
+  }
+
+  /** Keep distant pucks large enough to see and click; nearby ones keep their measured size. */
+  update(camera: THREE.PerspectiveCamera, viewportHeight: number) {
+    if (!this.group.visible || viewportHeight <= 0) return;
+    const radius = (this.data.navigation?.markerRadius ?? 0.15) * this.group.scale.x;
+    const focalPixels = viewportHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    this.markers.forEach((marker) => {
+      if (!marker.visible) return;
+      if (this.orbit) { marker.scale.setScalar(1); return; }
+      const distance = marker.getWorldPosition(this.markerWorld).distanceTo(camera.position);
+      marker.scale.setScalar(THREE.MathUtils.clamp(distance * MIN_PUCK_RADIUS_PX / focalPixels / radius, 1, 8));
     });
   }
 
@@ -165,38 +181,52 @@ export class NavigationLayer {
     this.transitionVisibleIds = null;
   }
 
+  private applyMarkerStyles() {
+    this.markers.forEach((marker, id) => {
+      const active = id === this.activeNodeId && !this.transitionVisibleIds;
+      const hovered = id === this.hoveredNodeId && !active;
+      marker.traverse((child) => {
+        const material = (child as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+        const style = material?.userData.puck as { opacity: number; hover: number; tint: boolean } | undefined;
+        if (!material || !style) return;
+        if (style.tint) material.color.set(active ? 0xe7f18c : 0xffffff);
+        material.opacity = hovered ? style.hover : style.opacity;
+      });
+    });
+  }
+
   private createMarker(node: NodeData) {
     const group = new THREE.Group();
     group.name = `nav-${node.uuid}`;
 
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.55,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
+    // A dark rim keeps the white ring legible on sand, snow and bright sky.
+    const puckMaterial = (color: number, opacity: number, hover: number) => {
+      const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+      material.userData.puck = { opacity, hover, tint: color === 0xffffff };
+      return material;
+    };
     const radius = this.data.navigation?.markerRadius ?? 0.15;
     if (node.floorUnobserved) {
       // Preserve direct access to a measured camera without inventing a floor.
-      const cameraPoint = new THREE.Mesh(new THREE.SphereGeometry(radius * .6, 16, 12), ringMaterial);
+      const cameraPoint = new THREE.Mesh(new THREE.SphereGeometry(radius * .6, 16, 12), puckMaterial(0xffffff, 0.75, 0.95));
       cameraPoint.userData.node = node;
       group.add(cameraPoint);
       return group;
     }
-    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.78, radius, 48), ringMaterial);
-    ring.rotation.x = -Math.PI / 2;
-    ring.userData.node = node;
-    group.add(ring);
-
-    const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(radius * 0.23, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-    );
-    dot.rotation.x = -Math.PI / 2;
-    dot.position.y = 0.006;
-    dot.userData.node = node;
-    group.add(dot);
+    const layers: [THREE.BufferGeometry, number, number, number, number][] = [
+      [new THREE.RingGeometry(radius * 0.66, radius * 1.14, 48), 0x000000, 0.3, 0.4, 0.002],
+      [new THREE.CircleGeometry(radius * 0.74, 48), 0xffffff, 0.16, 0.38, 0.004],
+      [new THREE.RingGeometry(radius * 0.74, radius, 48), 0xffffff, 0.92, 1, 0.006],
+      [new THREE.CircleGeometry(radius * 0.2, 24), 0xffffff, 0.92, 1, 0.008]
+    ];
+    layers.forEach(([geometry, color, opacity, hover, lift], index) => {
+      const mesh = new THREE.Mesh(geometry, puckMaterial(color, opacity, hover));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = lift;
+      mesh.renderOrder = index;
+      mesh.userData.node = node;
+      group.add(mesh);
+    });
 
     // Raycast the entire marker, including the empty space inside its ring.
     // Invisible hit geometry slightly enlarges the target without changing the photo.
@@ -211,25 +241,58 @@ export class NavigationLayer {
     return group;
   }
 
-  private visibleNeighborIds(activeNode: NodeData | null) {
+  private linkNodes() {
+    this.links.clear();
+    if (!this.nodes.some((node) => Array.isArray(node.neighbors))) return;
+    this.nodes.forEach((node) => this.links.set(node.uuid, new Set()));
+    for (const node of this.nodes) {
+      for (const id of node.neighbors ?? []) {
+        if (id === node.uuid || !this.links.has(id)) continue;
+        this.links.get(node.uuid)!.add(id);
+        this.links.get(id)!.add(node.uuid);
+      }
+    }
+  }
+
+  private reachableIds(activeNode: NodeData | null) {
+    if (this.orbit || !activeNode) return new Set([...this.markers.keys()].filter((id) => id !== this.activeNodeId));
+    const candidates = this.visibleNeighborIds(activeNode) ?? this.nodes.filter((node) => node.uuid !== activeNode.uuid);
+    if (!this.occluders.length) return new Set(candidates.map((node) => node.uuid));
+    const from = this.getWorldPosition(activeNode);
+    const clear = candidates.filter((node) => this.unobstructed(from, this.getWorldPosition(node)));
+    // The reduced mesh can seal a doorway. Never leave a scan without a way on.
+    if (!clear.length && candidates.length) clear.push(this.byDistance(activeNode, candidates)[0].node);
+    return new Set(clear.map((node) => node.uuid));
+  }
+
+  private byDistance(activeNode: NodeData, nodes: NodeData[]) {
+    const activePosition = vectorFromLike(activeNode.floorPosition ?? activeNode.position);
+    return nodes
+      .map((node) => ({ node, distance: activePosition.distanceTo(vectorFromLike(node.floorPosition ?? node.position)) }))
+      .sort((a, b) => a.distance - b.distance);
+  }
+
+  private visibleNeighborIds(activeNode: NodeData) {
     const config = this.data.navigation;
-    if (config?.mode !== "neighbors" || !activeNode) return null;
+    if (config?.mode !== "neighbors") return null;
 
     const maxVisible = Math.max(1, Math.floor(config.maxVisible ?? 6));
-    const minVisible = Math.max(0, Math.floor(config.minVisible ?? 1));
+    const minVisible = Math.max(1, Math.floor(config.minVisible ?? 1));
     const maxDistance = config.maxDistance ?? Number.POSITIVE_INFINITY;
-    const activePosition = vectorFromLike(activeNode.floorPosition ?? activeNode.position);
-    const distances = this.nodes
-      .filter((node) => !activeNode.neighbors || activeNode.neighbors.includes(node.uuid))
-      .filter((node) => !(config.hideActive ?? true) || node.uuid !== activeNode.uuid)
-      .map((node) => ({
-        node,
-        distance: activePosition.distanceTo(vectorFromLike(node.floorPosition ?? node.position))
-      }))
-      .sort((a, b) => a.distance - b.distance);
+    const self = (config.hideActive ?? true) ? [] : [activeNode];
+    const linked = this.links.get(activeNode.uuid);
+    if (linked?.size) {
+      // The capture's own sightlines hold at any distance; open sites space their scans widely.
+      return [...self, ...this.byDistance(activeNode, this.nodes.filter((node) => linked.has(node.uuid))).slice(0, maxVisible).map((item) => item.node)];
+    }
 
+    // Without sightlines (or for a scan the capture left unlinked), offer the nearest scans.
+    const distances = this.byDistance(activeNode, this.nodes.filter((node) => node.uuid !== activeNode.uuid));
     let visible = distances.filter((item) => item.distance <= maxDistance).slice(0, maxVisible);
-    if (visible.length < minVisible) visible = distances.slice(0, Math.max(minVisible, visible.length));
-    return new Set(visible.map((item) => item.node.uuid));
+    if (visible.length < minVisible) visible = distances.slice(0, minVisible);
+    return [...self, ...visible.map((item) => item.node)];
   }
 }
+
+// Smallest on-screen puck radius, in CSS pixels, before distant pucks grow to stay visible.
+const MIN_PUCK_RADIUS_PX = 20;
