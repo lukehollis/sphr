@@ -407,3 +407,25 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 @media (prefers-reduced-motion: reduce) {
   .site *, .site-auth * { transition: none !important; }
 }
+
+/* Connect an agent band on the account page (mirrors the homepage agent band). */
+.connect { margin-bottom: var(--space-6); }
+.connect-lead { max-width: 640px; margin: 0 0 var(--space-3); color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-body); }
+.connect-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-3); }
+.connect-tab { min-height: 36px; padding: 8px 14px; border: 0; background: var(--paper-tint); color: var(--site-muted);
+  font: inherit; font-size: var(--size-caption); font-weight: var(--weight-bold); cursor: pointer; transition: background-color 120ms, color 120ms; }
+.connect-tab:hover { color: var(--text-heading); }
+.connect-tab[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+.connect-panel { padding: var(--space-3) var(--space-4) var(--space-4); background: var(--site-panel); outline: 1px solid var(--site-line); }
+.connect-ways { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+.connect-way { min-width: 0; }
+.connect-way-label { color: var(--text-heading); font-size: var(--size-caption); font-weight: var(--weight-bold); }
+.connect-way-text { margin: 2px 0 10px; color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-body); }
+.connect-copy { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.connect-code { flex: 1; min-width: 0; overflow-x: auto; padding: 10px 12px; background: var(--paper); outline: 1px solid var(--site-line);
+  color: var(--text-heading); font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 13px; line-height: 1.5; white-space: nowrap; }
+.connect-copy-button, .connect-download { min-height: 40px; padding: 8px 16px; font-size: 13px; flex: none; }
+.connect-download { align-self: start; }
+.connect-ask { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: var(--space-3) 0 0; padding-top: var(--space-3);
+  border-top: 1px dashed var(--site-faint); color: var(--text-body); font-size: var(--size-caption); line-height: var(--leading-body); }
+.connect-ask span { color: var(--site-muted); font-weight: var(--weight-bold); }

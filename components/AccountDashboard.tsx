@@ -8,6 +8,7 @@ import { ConstructionDrawing, SectionHeader, SiteFooter, StatusMark } from "./si
 import UploadModal, { awaitingPaymentKey, batchActive, uploadsChannel, useUploadBatches, type Batch } from "./UploadModal";
 import { cheaperPlan, currentPlan, hostingActive, periodTotal } from "./PlanPicker";
 import { getJson } from "./uploads";
+import ConnectAgents from "./ConnectAgents";
 import { formatBytes } from "@/lib/bytes";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
 import type { AgentToken } from "@/lib/server/accounts-store";
@@ -291,6 +292,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
   return <div className="site"><div className="site-frame">
     <SiteHeader brand={brand} nav={accountNav(account, "spaces")} account={account.email} signOut="account" />
     <main className="site-main">
+      <ConnectAgents />
       <div className="spaces-head">
         <div>
           <h1>Your spaces</h1>
