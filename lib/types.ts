@@ -56,6 +56,11 @@ export type SplatConfig = TransformConfig & {
   lod?: boolean | "quality";
   opacity?: number;
   reveal?: boolean;
+  /**
+   * "sketch" marks a companion splat trained on line drawings of the same photos.
+   * It stays hidden until a sketch effect reveals it.
+   */
+  role?: "color" | "sketch";
 };
 
 export type IiifConfig = TransformConfig & {

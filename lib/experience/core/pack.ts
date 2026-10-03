@@ -45,6 +45,25 @@ const core: Pack = {
       load: () => import("@/lib/experience/core/scan")
     },
     {
+      type: "sketch",
+      label: "Sketch to color",
+      description: "The space appears as a pencil drawing on paper, then a radial scan paints the real colors back in from the target, or turns color into a drawing.",
+      targets: ["scene", "point", "object"],
+      params: [
+        { key: "mode", label: "Behavior", type: "select", default: "reveal", options: [
+          { value: "reveal", label: "Draw, then paint in color" },
+          { value: "sketch", label: "Stay a drawing" },
+          { value: "toSketch", label: "Turn color into a drawing" }
+        ] },
+        { key: "speed", label: "Speed (m/s)", type: "number", min: 0.5, max: 30, step: 0.5, default: 4 },
+        { key: "hold", label: "Pause as a drawing (s)", type: "number", min: 0, max: 20, step: 0.5, default: 2 },
+        { key: "width", label: "Edge softness (m)", type: "number", min: 0.1, max: 4, step: 0.1, default: 0.8 },
+        { key: "ink", label: "Ink", type: "color", default: "#2b2a27" },
+        { key: "paper", label: "Paper", type: "color", default: "#f2efe6" }
+      ],
+      load: () => import("@/lib/experience/core/sketch")
+    },
+    {
       type: "dust",
       label: "Floating dust",
       description: "Slow motes of dust drifting in the air, catching the light, around the target or through the whole space.",

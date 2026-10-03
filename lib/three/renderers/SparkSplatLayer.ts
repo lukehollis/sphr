@@ -17,7 +17,8 @@ export class SparkSplatLayer {
   };
   private disposed = false;
   private dyno: SparkDyno | null = null;
-  private readonly modifiers: SplatModifier[] = [];
+  private readonly modifiers: { modifier: SplatModifier; role: "color" | "sketch" }[] = [];
+  private readonly roles = new WeakMap<object, "color" | "sketch">();
   private unpack: typeof import("@sparkjsdev/spark").unpackSplat | null = null;
   private bounds: THREE.Box3 | null = null;
   private regenerate = false;
@@ -72,7 +73,10 @@ export class SparkSplatLayer {
         });
 
         applyTransform(mesh, config);
+        const role = config.role === "sketch" ? "sketch" : "color";
+        this.roles.set(mesh, role);
         mesh.opacity = config.reveal ? 0 : config.opacity ?? 1;
+        if (role === "sketch") mesh.visible = false;
         if (this.modifiers.length) this.applyModifiers(mesh);
         this.scene.add(mesh);
         this.splats.push(mesh);
@@ -172,14 +176,19 @@ export class SparkSplatLayer {
     if (!dyno) return null;
     return {
       dyno,
-      addModifier: (modifier) => {
-        this.modifiers.push(modifier);
+      addModifier: (modifier, role = "color") => {
+        const entry = { modifier, role };
+        this.modifiers.push(entry);
         this.splats.forEach((mesh) => this.applyModifiers(mesh));
         return () => {
-          const index = this.modifiers.indexOf(modifier);
+          const index = this.modifiers.indexOf(entry);
           if (index >= 0) this.modifiers.splice(index, 1);
           this.splats.forEach((mesh) => this.applyModifiers(mesh));
         };
+      },
+      hasSketch: this.configs.some((config) => config.role === "sketch"),
+      showSketch: (visible) => {
+        this.splats.forEach((mesh) => { if (this.roles.get(mesh) === "sketch") mesh.visible = visible; });
       },
       invalidate: () => { this.regenerate = true; }
     };
@@ -193,7 +202,7 @@ export class SparkSplatLayer {
   }
 
   getMeshes(): THREE.Object3D[] {
-    return this.splats;
+    return this.splats.filter((mesh) => this.roles.get(mesh) !== "sketch");
   }
 
   /**
@@ -208,14 +217,16 @@ export class SparkSplatLayer {
     const xs: number[] = [], ys: number[] = [], zs: number[] = [];
     const point = new THREE.Vector3();
     for (const mesh of this.splats) {
-      const packed = mesh.packedSplats;
+      if (this.roles.get(mesh) === "sketch") continue;
+      // After building its level of detail, Spark may keep only the LoD splats.
+      const packed = mesh.packedSplats?.packedArray && mesh.packedSplats.getNumSplats() ? mesh.packedSplats : mesh.packedSplats?.lodSplats;
       const array = packed?.packedArray;
       const count = packed?.getNumSplats() ?? 0;
       if (!array || !count) continue;
       mesh.updateMatrixWorld(true);
       const step = Math.max(1, Math.floor(count / 20000));
       for (let index = 0; index < count; index += step) {
-        const splat = unpack(array, index, packed.splatEncoding);
+        const splat = unpack(array, index, packed!.splatEncoding);
         if (splat.opacity < 0.2) continue;
         point.copy(splat.center).applyMatrix4(mesh.matrixWorld);
         xs.push(point.x); ys.push(point.y); zs.push(point.z);
@@ -234,7 +245,8 @@ export class SparkSplatLayer {
   private applyModifiers(mesh: SplatMeshInstance) {
     const dyno = this.dyno;
     if (!dyno) return;
-    const modifiers = [...this.modifiers];
+    const role = this.roles.get(mesh) ?? "color";
+    const modifiers = this.modifiers.filter((entry) => entry.role === role).map((entry) => entry.modifier);
     mesh.worldModifiers = modifiers.length ? [dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, ({ gsplat }) => {
       if (!gsplat) throw new Error("No splat input");
       let value = gsplat;
@@ -248,7 +260,7 @@ export class SparkSplatLayer {
   setVisible(visible: boolean) {
     this.spark && (this.spark.visible = visible);
     this.splats.forEach((mesh) => {
-      mesh.visible = visible;
+      if (this.roles.get(mesh) !== "sketch") mesh.visible = visible;
     });
   }
 

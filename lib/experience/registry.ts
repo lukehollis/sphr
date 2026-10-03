@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import type { dyno as SparkDynoNamespace } from "@sparkjsdev/spark";
 import type { EffectInstance, EffectParams, PlacedObject } from "./types";
+import type { PanoramaStyle } from "@/lib/three/renderers/PanoramaLayer";
 
 /**
  * Effects and shapes come in packs. A pack lists plain metadata, which the
@@ -56,8 +57,15 @@ export type GsplatValue = SparkDynoNamespace.DynoVal<typeof SparkDynoNamespace.G
 export type SplatModifier = (dyno: SparkDyno, gsplat: GsplatValue) => GsplatValue;
 
 export type SplatHost = {
-  /** Adds a per-splat modifier to every splat in the space; returns its removal. */
-  addModifier(modifier: SplatModifier): () => void;
+  /**
+   * Adds a per-splat modifier to the space's color splats, or to its companion
+   * line-drawing splats with role "sketch"; returns its removal.
+   */
+  addModifier(modifier: SplatModifier, role?: "color" | "sketch"): () => void;
+  /** Whether the space has a companion splat trained on line drawings. */
+  hasSketch: boolean;
+  /** Show or hide the companion line-drawing splats. */
+  showSketch(visible: boolean): void;
   /** Regenerate splats this frame because a modifier's uniforms changed. */
   invalidate(): void;
   dyno: SparkDyno;
@@ -78,6 +86,10 @@ export type EffectContext = {
   surfaces(): THREE.Mesh[];
   /** Present only in Gaussian splat spaces. */
   splats: SplatHost | null;
+  /** Shared uniforms that restyle the 360 photographs, in panorama spaces. */
+  panorama: PanoramaStyle | null;
+  /** First person at a panorama, or the overview (dollhouse). */
+  viewMode(): "FPV" | "ORBIT";
   reducedMotion: boolean;
 };
 

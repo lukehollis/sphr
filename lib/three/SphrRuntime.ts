@@ -817,7 +817,9 @@ export class SphrRuntime {
       objects: this.objects,
       surfaces: () => this.sceneGraph?.getSurfaceMeshes() ?? [],
       spaceBounds: (out) => out.copy(this.getSpaceBounds()),
-      splats: () => this.splats?.splatHost() ?? null
+      splats: () => this.splats?.splatHost() ?? null,
+      panorama: () => this.panorama?.style ?? null,
+      viewMode: () => this.state.viewMode
     });
     await Promise.all([this.objects.setObjects(this.tour.objects), this.effects.setEffects(this.tour.effects)]);
     this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0);
@@ -1100,12 +1102,12 @@ export class SphrRuntime {
   getSpaceBounds() {
     if (this.spaceBounds && !this.spaceBounds.isEmpty()) return this.spaceBounds;
     const box = new THREE.Box3();
-    if (!this.state.loading.ready && !this.splats && !this.sceneGraph) return box.setFromCenterAndSize(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(10, 4, 10));
     const graph = this.sceneGraph?.getBounds();
     if (graph && !graph.isEmpty()) box.union(graph);
     if (this.splats) box.union(this.splats.getBounds(new THREE.Box3()));
     for (const node of this.getNodes()) box.expandByPoint(this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position));
-    if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(10, 4, 10));
+    // Measure again later when nothing has loaded yet.
+    if (box.isEmpty()) return box.setFromCenterAndSize(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(10, 4, 10));
     this.spaceBounds = box;
     return box;
   }
