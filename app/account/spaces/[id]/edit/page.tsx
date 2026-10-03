@@ -16,5 +16,5 @@ export default async function EditCustomerSpacePage({ params }: { params: Promis
   const scene = owned?.space.sceneId ? (await readAllScenes()).find(item => item.sceneId === owned.space.sceneId) : undefined;
   if (!owned || !scene) notFound();
   const edits = readSceneEdits().get(scene.sceneId) ?? { title: null, startView: null, revision: 0, thumbnailVersion: null };
-  return <SpaceEditor scene={scene} edits={edits} back={{ href: `/account/spaces/${id}`, label: scene.title }} />;
+  return <SpaceEditor scene={scene} edits={edits} back={{ href: `/account/spaces/${id}`, label: scene.title }} tourHref={`/account/spaces/${id}/tour`} />;
 }

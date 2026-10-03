@@ -301,6 +301,10 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
 
   return {
     hasGuidedTour,
+    kind: tourData.kind === "hunt" && hasGuidedTour ? "hunt" : "tour",
+    objects: Array.isArray(tourData.objects) ? tourData.objects : [],
+    effects: Array.isArray(tourData.effects) ? tourData.effects : [],
+    finale: typeof tourData.finale === "string" ? tourData.finale : undefined,
     title: bootstrap.tour?.title ?? bootstrap.space.title,
     spaces: spaces.length ? spaces : [firstSpaceFallback],
     audio: tourData.audio ?? {},

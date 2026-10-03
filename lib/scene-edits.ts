@@ -1,5 +1,7 @@
 import type { CameraRotation, SphrBootstrap, SphrSpace, Vector3Like } from './types';
 import type { SceneListing } from './scene-types';
+import type { Experience } from './experience/types';
+import { applyExperience } from '@/lib/experience/apply';
 
 export type StartView = { nodeId?: string; position: Vector3Like; rotation: CameraRotation; fov: number };
 export type SceneEdits = { title: string | null; startView: StartView | null; revision: number; thumbnailVersion: string | null };
@@ -52,7 +54,12 @@ export function validateStartView(value: unknown, bootstrap: SphrBootstrap): Sta
 }
 
 /** Apply metadata at the edge; published capture packages and later tour stops remain intact. */
-export function applySceneEdits(input: SphrBootstrap, edits: Pick<SceneEdits, 'title' | 'startView'>): SphrBootstrap {
+export function applySceneEdits(input: SphrBootstrap, edits: Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null }): SphrBootstrap {
+  const edited = applyStartEdits(input, edits);
+  return edits.experience ? applyExperience(edited, edits.experience) : edited;
+}
+
+function applyStartEdits(input: SphrBootstrap, edits: Pick<SceneEdits, 'title' | 'startView'>): SphrBootstrap {
   const result = structuredClone(input);
   const space = openingSpace(result);
   if (edits.title) {
@@ -90,6 +97,18 @@ export function editorBootstrap(input: SphrBootstrap): SphrBootstrap {
   }
   result.orderedSpaces = undefined;
   result.tour = { ...result.tour, tour_data: { ...data, mode: 'explore', audio: {},
+    spaces: segment ? [segment] : undefined, tourmodels: undefined } };
+  return result;
+}
+
+/** The tour builder edits the opening space with its authored stops, objects and effects. */
+export function tourEditorBootstrap(input: SphrBootstrap): SphrBootstrap {
+  const result = structuredClone(input);
+  result.space = openingSpace(result);
+  const data = result.tour?.tour_data;
+  const segment = (data?.spaces ?? data?.tourmodels)?.[0];
+  result.orderedSpaces = undefined;
+  result.tour = { ...result.tour, tour_data: { ...data, audio: {}, autoplay: false,
     spaces: segment ? [segment] : undefined, tourmodels: undefined } };
   return result;
 }

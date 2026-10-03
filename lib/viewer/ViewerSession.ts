@@ -1,6 +1,6 @@
 import { normalizeTour } from '@/lib/bootstrap';
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from '@/lib/types';
-import { SphrRuntime } from '@/lib/three/SphrRuntime';
+import { SphrRuntime, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
 import { assertNativeBootstrap } from './native';
 import { nextTourLocation, tourSegment } from './segments';
 
@@ -62,11 +62,14 @@ export class ViewerSession {
       stage.three = new SphrRuntime(canvas, segment.bootstrap, {
         onState: state => {
           if (this.disposed || (this.pending ?? this.active) !== stage) return;
-          this.state = { ...state, activeSpaceIndex: spaceIndex,
+          this.state = { ...state, activeSpaceIndex: spaceIndex, finished: this.state.finished,
             loading: this.switching ? { ...state.loading, ready: false } : state.loading };
           this.emit();
-        }
+        },
+        onObjectSelect: id => this.callbacks.onObjectSelect?.(id),
+        onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform)
       });
+      if (this.editing) stage.three.setEditing(true);
       await stage.three.init(pointIndex);
       if (this.disposed) return;
       stage.three.start(this.preferences.guided);
@@ -102,7 +105,10 @@ export class ViewerSession {
     if (!normalizeTour(this.bootstrap).hasGuidedTour || this.state.navigating) return;
     const next = nextTourLocation(this.bootstrap, this.state.activeSpaceIndex, this.state.activePointIndex, 1);
     if (next) void this.goTo(next.spaceIndex, next.pointIndex);
-    else this.start(false);
+    else {
+      this.state = { ...this.state, finished: true };
+      this.start(false);
+    }
   }
 
   previous() {
@@ -113,6 +119,7 @@ export class ViewerSession {
 
   start(guided: boolean) {
     this.preferences.guided = guided && normalizeTour(this.bootstrap).hasGuidedTour;
+    if (guided) this.state = { ...this.state, finished: false };
     const tour = normalizeTour(this.bootstrap);
     const points = tour.spaces[this.state.activeSpaceIndex].tourpoints;
     if (!guided && points[this.state.activePointIndex]?.targetType === 'MODEL') {
@@ -140,6 +147,47 @@ export class ViewerSession {
     if (this.state.navigating) return;
     this.active?.three?.toggleViewMode();
   }
+
+  /** Close the closing card after a tour or hunt ends. */
+  dismissFinale() { this.state = { ...this.state, finished: false }; this.emit(); }
+
+  // ---- Tour builder ----
+  private editing = false;
+
+  setEditing(editing: boolean) {
+    this.editing = editing;
+    this.active?.three?.setEditing(editing);
+  }
+
+  /** Live edits from the builder; the opening space is the one being edited. */
+  async setExperience(update: ExperienceUpdate) {
+    const data = this.bootstrap.tour?.tour_data;
+    const segment = (data?.spaces ?? data?.tourmodels)?.[0];
+    if (data) {
+      data.kind = update.kind;
+      data.objects = update.objects;
+      data.effects = update.effects;
+      data.finale = update.finale;
+      if (update.points.length) data.mode = 'guided';
+    }
+    if (segment) {
+      if (update.points.length) segment.tourpoints = update.points;
+      segment.objects = update.objects;
+      segment.effects = update.effects;
+    }
+    if (this.state.activeSpaceIndex === 0) await this.active?.three?.setExperience(update);
+  }
+
+  selectObject(id: string | null) { this.active?.three?.selectObject(id); }
+  lookAtObject(id: string) { this.active?.three?.lookAtObject(id); }
+  setGizmoMode(mode: GizmoMode) { this.active?.three?.setGizmoMode(mode); }
+  resolveAnchor(anchor: PixelAnchor) { return this.active?.three?.resolveAnchor(anchor) ?? null; }
+  cameraView() { return this.active?.three?.cameraView() ?? null; }
+  aimFrom(nodeId: string, point: [number, number, number]) { return this.active?.three?.aimFrom(nodeId, point) ?? null; }
+  captureView() { return this.active?.three?.captureView() ?? null; }
+  requestHint() { this.active?.three?.requestHint(); }
+  restartHunt() { this.active?.three?.restartHunt(); }
+  goToStop(index: number) { return this.goTo(0, index); }
 
   getState() { return this.state; }
   getDebugSnapshot() { return this.active?.three?.getDebugSnapshot() ?? this.state; }

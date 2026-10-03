@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import type { SceneEdits, StartView } from "../scene-edits";
+import type { Experience } from "../experience/types";
 
 const scrypt = promisify(scryptCallback);
 const lifetime = 8 * 60 * 60 * 1000;
@@ -26,6 +27,7 @@ export function db() {
     CREATE TABLE IF NOT EXISTS login_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, resets INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, scene TEXT NOT NULL, public INTEGER NOT NULL, changed TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS scene_edits (scene TEXT PRIMARY KEY, title TEXT, start_view TEXT, thumbnail BLOB, thumbnail_version TEXT, revision INTEGER NOT NULL, changed TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS scene_tours (scene TEXT PRIMARY KEY, experience TEXT, revision INTEGER NOT NULL, changed TEXT NOT NULL);
   `);
   return database;
 }
@@ -61,6 +63,31 @@ export function saveSceneEdits(scene: string, revision: number, title: string | 
     connection.exec('COMMIT');
   } catch (error) { connection.exec('ROLLBACK'); throw error; }
   return readSceneEdits().get(scene)!;
+}
+
+/** The stored tour JSON for one space; lib/server/tours.ts validates it. */
+export function readSceneTourRow(scene: string): { experience: unknown; revision: number } {
+  if (!process.env.SPHR_STATE_DIR) return { experience: null, revision: 0 };
+  const row = db().prepare('SELECT experience, revision FROM scene_tours WHERE scene=?').get(scene) as { experience: string | null; revision: number } | undefined;
+  if (!row) return { experience: null, revision: 0 };
+  try { return { experience: row.experience ? JSON.parse(row.experience) : null, revision: row.revision }; }
+  catch { return { experience: null, revision: row.revision }; }
+}
+
+/** Save (or with null, remove) a space's tour, refusing stale revisions. */
+export function saveSceneTour(scene: string, revision: number, experience: Experience | null) {
+  if (!/^[a-f0-9]{12}$/.test(scene) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Invalid edit.');
+  const connection = db();
+  connection.exec('BEGIN IMMEDIATE');
+  try {
+    const row = connection.prepare('SELECT revision FROM scene_tours WHERE scene=?').get(scene) as { revision: number } | undefined;
+    if ((row?.revision ?? 0) !== revision) throw new EditConflict('This tour was edited elsewhere. Reload before saving.');
+    connection.prepare(`INSERT INTO scene_tours(scene, experience, revision, changed) VALUES (?, ?, ?, ?)
+      ON CONFLICT(scene) DO UPDATE SET experience=excluded.experience, revision=excluded.revision, changed=excluded.changed`)
+      .run(scene, experience ? JSON.stringify(experience) : null, revision + 1, new Date().toISOString());
+    connection.exec('COMMIT');
+  } catch (error) { connection.exec('ROLLBACK'); throw error; }
+  return { experience, revision: revision + 1 };
 }
 
 export function readSceneThumbnail(scene: string): Uint8Array | undefined {
