@@ -85,7 +85,7 @@ export const blueprint: LookEntry = {
     vec3 src = SAMPLE(uv);
     float l = LUM(src);
     // A drawn version gives clean lines (dark on white); otherwise trace the photo's edges.
-    float edge = HAS_VARIANT > 0.5 ? smoothstep(0.25, 0.85, 1.0 - l) : EDGES(uv, 1.2);
+    float edge = HAS_VARIANT > 0.5 ? DRAWN(uv) : EDGES(uv, 1.2);
     edge *= 0.78 + 0.22 * NOISE(px / 2.5);
     if (HAS_VARIANT > 0.5) l = 0.0;
     vec2 centered = (uv - 0.5) * vec2(uResolution.x / uResolution.y, 1.0);

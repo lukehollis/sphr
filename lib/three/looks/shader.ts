@@ -65,6 +65,15 @@ export const LOOK_HELPERS = /* glsl */ `
     return sum / total;
   }
   vec3 SATURATE(vec3 c, float amount) { return mix(vec3(LUM(c)), c, amount); }
+  /**
+   * Ink from a drawn version of the space (dark lines on white), with lone specks
+   * from rough stone or gravel faded out: a short blur leaves lines dark but thins dots.
+   */
+  float DRAWN(vec2 uv) {
+    float sharp = 1.0 - LUM(SAMPLE(uv));
+    float soft = 1.0 - LUM(BLUR(uv, 0.75));
+    return smoothstep(0.2, 0.75, sharp) * smoothstep(0.12, 0.38, soft);
+  }
   /** Direction of the view ray through this pixel, in world space. */
   vec3 RAY(vec2 uv) { vec2 ndc = uv * 2.0 - 1.0; return normalize(uRayZ + ndc.x * uRayX + ndc.y * uRayY); }
 `;
