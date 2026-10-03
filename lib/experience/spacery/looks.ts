@@ -100,7 +100,7 @@ export const spaceryLooks: LookEntry[] = [
     glsl: /* glsl */ `
       vec3 neon = mix(P(a), P(b), smoothstep(0.0, 1.0, uv.y + 0.25 * sin(uTime * 0.6 + uv.x * 3.0)));
       if (HAS_VARIANT > 0.5) {
-        float drawn = smoothstep(0.2, 0.8, 1.0 - LUM(SAMPLE(uv)));
+        float drawn = DRAWN(uv);
         float halo = smoothstep(0.0, 0.5, 1.0 - LUM(BLUR(uv, 3.0)));
         return neon * (drawn * 1.15 + halo * 0.55);
       }
