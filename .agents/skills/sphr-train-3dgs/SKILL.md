@@ -1,6 +1,6 @@
 ---
 name: sphr-train-3dgs
-description: Train the Gaussian splat for a capture that has a COLMAP solve (photos, phone video, or 360 frames cut into views), choosing between Brush and nerfstudio's appearance-aware splatfacto recipe, judging candidates on held-out photographs rather than PSNR, and adopting one for packaging. Use for every splat the sphr-video skill trains, and whenever a trained splat shows mottled walls, blotchy ground, smeared sky or floaters.
+description: Train the Gaussian splat for a capture that has a COLMAP solve (photos, phone video, 360 frames cut into views, or an E57 scan's own photos) with nerfstudio's splatfacto, turning its appearance model on only when the exposure varied, Brush as the fallback; judge candidates on held-out photographs rather than PSNR and adopt one for packaging. Use for every splat the sphr-video skill trains, and whenever a trained splat shows mottled walls, blotchy ground, smeared sky or floaters.
 ---
 
 # Training the splat
@@ -32,25 +32,37 @@ sphr-video describes; your commands stop after 10 minutes.
   [--originals "$SPHR_JOB_DIR/input/<photo folder>"]
 ```
 
-- `"exposure": "automatic"`, or `"unknown"` for a phone video or phone photos: the camera changed exposure
-  and white balance from frame to frame. A plain trainer explains those changes with geometry and grows
-  floaters, mottled walls, blotchy ground and smeared sky. Use **splatfacto with an appearance model**
-  (section 2). Nearly every phone capture is in this group.
-- `"exposure": "locked"` (a camera in manual mode, a drone with locked exposure, a turntable under fixed
-  lights): use **Brush** (sphr-video), which is faster and has nothing to correct.
-- A 360 capture cut into views (sphr-video, 360 section) comes from a 360 camera with automatic exposure:
-  splatfacto.
+Train with **splatfacto** (section 2) in every case; it was sharper than Brush on every capture compared
+(below). What changes is the appearance model:
 
-When in doubt, splatfacto. Brush stays useful for a quick first look while splatfacto trains, not as the
-final result of an automatic-exposure capture.
+- `"exposure": "automatic"` (the photos' EXIF shows the shutter or ISO changing, as phone photos indoors
+  and around windows do): **with** the appearance model, `--pipeline.model.use-bilateral-grid True`. Without
+  it, exposure changes turn into blotches on flat surfaces.
+- `"locked"`, or `"unknown"` for frames cut from a video or 360 footage: **without** it,
+  `--pipeline.model.use-bilateral-grid False`. On a capture whose exposure barely changed, the appearance
+  model has nothing to correct and drifts colour instead (a purple sky and pink-blotched walls on a sunny
+  walkthrough). If the held-out sheets of this model then show patchy brightness on walls or floors,
+  retrain with it.
 
-## 2. splatfacto with an appearance model
+Brush (sphr-video) is the fallback when `ns-train` is missing or the worker is short of time: about a
+third of the time, softer distant detail, blotchier flat surfaces.
+
+Measured on the RTX 3090 Ti, 30,000 iterations, held-out LPIPS (lower is better):
+
+| Capture | Brush 15k | splatfacto with appearance | splatfacto without |
+|---|---|---|---|
+| Phone walkthrough, sunny, 108 frames | 0.256, smeared cliffs | 0.267, sharp but purple drift | **0.230**, sharp, true colour |
+| Phone orbit indoors, 105 auto-exposed photos | 0.204, blotchy white table | **0.178**, clean table | not run |
+
+splatfacto took 35 to 50 minutes on a busy worker (Brush 11 to 13), and wrote 100 to 350 MB.
+
+## 2. splatfacto
 
 ```sh
 cd "$SPHR_JOB_DIR/work"
-(ns-train splatfacto --data data --output-dir ns --experiment-name scene --timestamp appearance \
+(ns-train splatfacto --data data --output-dir ns --experiment-name scene --timestamp final \
    --vis tensorboard --viewer.quit-on-train-completion True --max-num-iterations 30000 \
-   --pipeline.model.use-bilateral-grid True \
+   --pipeline.model.use-bilateral-grid <True|False> \
    --pipeline.model.camera-optimizer.mode SO3xR3 \
    --pipeline.model.use-scale-regularization True \
    --pipeline.model.rasterize-mode antialiased \
@@ -63,8 +75,8 @@ cd "$SPHR_JOB_DIR/work"
 
 What each setting buys:
 
-- `use-bilateral-grid` gives every photograph its own colour and exposure correction, so geometry does not
-  have to absorb exposure changes. This is the setting that removes most floaters on phone captures.
+- `use-bilateral-grid` (True or False, section 1) gives every photograph its own colour and exposure
+  correction, so geometry does not have to absorb exposure changes.
 - `camera-optimizer.mode SO3xR3` refines each camera pose, absorbing COLMAP's residual pose error, which
   otherwise shows as doubled edges.
 - `use-scale-regularization` penalizes long spiky Gaussians, which read as streaks.
@@ -78,7 +90,7 @@ What each setting buys:
 Then export it:
 
 ```sh
-ns-export gaussian-splat --load-config ns/scene/splatfacto/appearance/config.yml --output-dir splat-ns
+ns-export gaussian-splat --load-config ns/scene/splatfacto/final/config.yml --output-dir splat-ns
 ```
 
 `splat-ns/splat.ply` is a standard 3DGS PLY. The exporter drops Gaussians that are not finite or nearly
@@ -98,7 +110,7 @@ candidate's exported PLY with the same renderer, and put the photograph beside t
 /opt/nerfstudio/bin/python .agents/skills/sphr-train-3dgs/scripts/render_views.py --ply splat/scene.ply \
   --model data/sparse/0 --out renders/brush
 /opt/venv/bin/python .agents/skills/sphr-train-3dgs/scripts/compare_renders.py \
-  --images data/images --render "splatfacto appearance=renders/ns" --render "brush=renders/brush" --out compare
+  --images data/images --render "splatfacto=renders/ns" --render "brush=renders/brush" --out compare
 ```
 
 Pass `--antialiased` for a model trained with antialiased rasterization. Train Brush with

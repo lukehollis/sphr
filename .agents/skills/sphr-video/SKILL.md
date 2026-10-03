@@ -86,13 +86,14 @@ The overlap of 24 is three frames' worth of 8 views, so each view is matched wit
 neighbouring frames; for photos taken far apart use `colmap exhaustive_matcher` instead. Measured: 36 frames of
 an 18-second 360 walk (288 views at 1024 px) registered completely in one model, 1.1 px reprojection error.
 When less than about two thirds of the views register, build the tour instead (sphr-intake). Otherwise copy
-`colmap/sparse/0` to `data/sparse/0` and train as below; a 360 camera exposes automatically, so follow
-sphr-train-3dgs's appearance recipe.
+`colmap/sparse/0` to `data/sparse/0` and train as below; train with sphr-train-3dgs (frames cut from 360 video have no
+EXIF, so splatfacto without the appearance model unless the sheets show exposure patches).
 
 ## 3. Train and package
 
 Which trainer and settings to use, and how to judge the result, is in the **sphr-train-3dgs** skill; read it
-before training. Brush, below, is the fast trainer for captures with locked exposure.
+before training: on GPU workers that is nerfstudio's splatfacto. Brush, below, is the fallback when
+`ns-train` is missing or time is short.
 
 **Brush** is installed on GPU workers (`SPHR_GPU=nvidia` is set and `brush_app` exists). It trains on the GPU
 and reads a folder that holds `images/` and `sparse/0/` side by side, so copy COLMAP's model next to the
