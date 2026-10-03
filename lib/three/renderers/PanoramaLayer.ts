@@ -37,6 +37,30 @@ function applyProductionCubeRotation(group: THREE.Group, node: NodeData) {
   group.quaternion.copy(nodeQuaternion.multiply(cubeBasisQuaternion));
 }
 
+/**
+ * World direction of a pixel in a node's panorama image, measured from the
+ * top-left corner as fractions (0..1). Cube faces use the same plane
+ * transforms the layer renders with, so agents can point at what they see.
+ */
+export function panoramaPixelDirection(node: NodeData, x: number, y: number, face?: number) {
+  const cube = face !== undefined && (node.faces?.length || node.cubeFaces?.length || node.textureTemplate);
+  if (!cube) {
+    const phi = x * Math.PI * 2;
+    const theta = y * Math.PI;
+    const direction = new THREE.Vector3(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta));
+    return direction.applyEuler(eulerFromLike(node.rotation)).normalize();
+  }
+  const index = THREE.MathUtils.clamp(Math.round(face), 0, 5);
+  const plane = new THREE.Object3D();
+  plane.rotation.set(...FACE_ROTATIONS[index]);
+  plane.position.set(...FACE_POSITIONS[index]);
+  plane.updateMatrix();
+  const group = new THREE.Group();
+  applyProductionCubeRotation(group, node);
+  const point = new THREE.Vector3((x - 0.5) * 200, (0.5 - y) * 200, 0).applyMatrix4(plane.matrix);
+  return point.applyQuaternion(group.quaternion).normalize();
+}
+
 export class PanoramaLayer {
   private active: PanoObject | null = null;
   private outgoing: PanoObject | null = null;

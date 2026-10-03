@@ -8,6 +8,7 @@ Keep existing user changes. Build complete implementations and inspect real rend
 
 - Matterport ZIP/E57 ingestion or repair: read [.agents/skills/sphr-matterport/SKILL.md](.agents/skills/sphr-matterport/SKILL.md).
 - Panorama interaction changes: read [.agents/skills/sphr-360/SKILL.md](.agents/skills/sphr-360/SKILL.md).
+- Guided tours, scavenger hunts, placed objects and effects: read [docs/tours-and-effects.md](docs/tours-and-effects.md).
 - Authored tours: read [.agents/skills/sphr-tour/SKILL.md](.agents/skills/sphr-tour/SKILL.md).
 - Verification: read [.agents/skills/sphr-verify/SKILL.md](.agents/skills/sphr-verify/SKILL.md).
 - Roles and their handoffs live in `.agents/agents/`; these are responsibilities,

@@ -52,6 +52,18 @@ Runtime behavior:
   narration on normal pointer/keyboard interaction; it never blocks visual scene entry.
 - `extra` maps to project-specific transitions such as `shrinkToPoints`, `projectToSplats`, and `nightMode`.
 
+## Authored tours, hunts, objects and effects
+
+The tour builder (`/admin/scenes/<id>/tour`, `components/TourBuilder.tsx`) edits an
+`Experience` (`lib/experience/types.ts`): `kind` "tour" or "hunt", stops, placed
+objects and effect instances. It is validated by `parseExperience`, stored in
+`scene_tours`, and applied to the opening segment by `applyExperience`. Stops
+written there use `format: "plain"` text. A hunt stop has `find: { objectId, hint,
+found }`; its object is clickable only at that step and is collected when found.
+The tour agent (`lib/server/tour-agent.ts`) writes complete drafts from a prompt
+and points at pixels in panorama faces; the builder resolves those into positions
+with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
+
 ## Implementation Rules
 
 - `ViewerSession` owns tour position across `orderedSpaces`. Keep navigation global;

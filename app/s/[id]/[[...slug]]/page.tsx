@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import SphrApp from "@/components/SphrApp";
+import { readSceneTour } from "@/lib/server/tours";
 import { findScene, readAllScenes } from "@/lib/scene-catalog";
 import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
 import { isAdmin } from "@/lib/server/auth";
@@ -29,5 +30,5 @@ export default async function ScenePage({ params }: Props) {
   if (!isScenePublic(id) && !(await isAdmin())) redirect(`/admin/login?next=${encodeURIComponent(scene.scenePath)}`);
   // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null }} preview={{ title: scene.title, image: scene.thumbnail }} />;
+  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience }} preview={{ title: scene.title, image: scene.thumbnail }} />;
 }

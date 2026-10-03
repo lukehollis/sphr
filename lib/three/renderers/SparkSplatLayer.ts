@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { SplatConfig } from "@/lib/types";
+import type { SparkDyno, SplatHost, SplatModifier } from "@/lib/experience/registry";
 import { applyTransform } from "@/lib/three/math";
 
 type SparkModule = typeof import("@sparkjsdev/spark");
@@ -15,6 +16,11 @@ export class SparkSplatLayer {
     focalAdjustment: 2.0
   };
   private disposed = false;
+  private dyno: SparkDyno | null = null;
+  private readonly modifiers: SplatModifier[] = [];
+  private unpack: typeof import("@sparkjsdev/spark").unpackSplat | null = null;
+  private bounds: THREE.Box3 | null = null;
+  private regenerate = false;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -25,8 +31,10 @@ export class SparkSplatLayer {
 
   async init() {
     if (!this.configs.length) return;
-    const { SparkRenderer, SplatMesh, SplatFileType } = await import("@sparkjsdev/spark");
+    const { SparkRenderer, SplatMesh, SplatFileType, dyno, unpackSplat } = await import("@sparkjsdev/spark");
     if (this.disposed) return;
+    this.dyno = dyno;
+    this.unpack = unpackSplat;
     this.onProgress(0, 1, "Preparing Spark");
 
     this.spark = new SparkRenderer({
@@ -65,6 +73,7 @@ export class SparkSplatLayer {
 
         applyTransform(mesh, config);
         mesh.opacity = config.reveal ? 0 : config.opacity ?? 1;
+        if (this.modifiers.length) this.applyModifiers(mesh);
         this.scene.add(mesh);
         this.splats.push(mesh);
         await mesh.initialized;
@@ -155,6 +164,85 @@ export class SparkSplatLayer {
       mesh.opacity = 1;
       mesh.scale.setScalar(1);
     });
+  }
+
+  /** Effects rewrite splats through world-space modifiers chained in one block. */
+  splatHost(): SplatHost | null {
+    const dyno = this.dyno;
+    if (!dyno) return null;
+    return {
+      dyno,
+      addModifier: (modifier) => {
+        this.modifiers.push(modifier);
+        this.splats.forEach((mesh) => this.applyModifiers(mesh));
+        return () => {
+          const index = this.modifiers.indexOf(modifier);
+          if (index >= 0) this.modifiers.splice(index, 1);
+          this.splats.forEach((mesh) => this.applyModifiers(mesh));
+        };
+      },
+      invalidate: () => { this.regenerate = true; }
+    };
+  }
+
+  /** Regenerate splats once per frame when an effect changed its uniforms. */
+  update() {
+    if (!this.regenerate) return;
+    this.regenerate = false;
+    this.splats.forEach((mesh) => mesh.updateVersion());
+  }
+
+  getMeshes(): THREE.Object3D[] {
+    return this.splats;
+  }
+
+  /**
+   * Bounds of the captured splats from a sample of centers, trimmed of the
+   * stray floaters at the edges that would otherwise inflate them.
+   */
+  getBounds(out: THREE.Box3) {
+    if (this.bounds) return out.copy(this.bounds);
+    out.makeEmpty();
+    const unpack = this.unpack;
+    if (!unpack) return out;
+    const xs: number[] = [], ys: number[] = [], zs: number[] = [];
+    const point = new THREE.Vector3();
+    for (const mesh of this.splats) {
+      const packed = mesh.packedSplats;
+      const array = packed?.packedArray;
+      const count = packed?.getNumSplats() ?? 0;
+      if (!array || !count) continue;
+      mesh.updateMatrixWorld(true);
+      const step = Math.max(1, Math.floor(count / 20000));
+      for (let index = 0; index < count; index += step) {
+        const splat = unpack(array, index, packed.splatEncoding);
+        if (splat.opacity < 0.2) continue;
+        point.copy(splat.center).applyMatrix4(mesh.matrixWorld);
+        xs.push(point.x); ys.push(point.y); zs.push(point.z);
+      }
+    }
+    if (xs.length < 10) return out;
+    const range = (values: number[]) => {
+      values.sort((a, b) => a - b);
+      return [values[Math.floor(values.length * 0.02)], values[Math.floor(values.length * 0.98)]];
+    };
+    const [minX, maxX] = range(xs), [minY, maxY] = range(ys), [minZ, maxZ] = range(zs);
+    this.bounds = new THREE.Box3(new THREE.Vector3(minX, minY, minZ), new THREE.Vector3(maxX, maxY, maxZ));
+    return out.copy(this.bounds);
+  }
+
+  private applyModifiers(mesh: SplatMeshInstance) {
+    const dyno = this.dyno;
+    if (!dyno) return;
+    const modifiers = [...this.modifiers];
+    mesh.worldModifiers = modifiers.length ? [dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, ({ gsplat }) => {
+      if (!gsplat) throw new Error("No splat input");
+      let value = gsplat;
+      for (const modifier of modifiers) value = modifier(dyno, value);
+      return { gsplat: value };
+    })] : undefined;
+    mesh.updateGenerator();
+    this.regenerate = true;
   }
 
   setVisible(visible: boolean) {

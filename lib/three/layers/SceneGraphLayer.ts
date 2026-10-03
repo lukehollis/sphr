@@ -40,6 +40,7 @@ export class SceneGraphLayer {
   private viewMode: "FPV" | "ORBIT" = "FPV";
   private debug = false;
   private overviewReturnBlend: number | null = null;
+  private occluding = false;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -99,6 +100,23 @@ export class SceneGraphLayer {
 
   getRaycastObjects() {
     return this.raycastObjects;
+  }
+
+  /** Meshes of the captured space (the raycast models), for effects drawn on its surfaces. */
+  getSurfaceMeshes() {
+    const meshes: THREE.Mesh[] = [];
+    for (const record of this.records.values()) if (record.node.raycast) meshes.push(...record.meshes);
+    return meshes;
+  }
+
+  /**
+   * While a tour places objects, the hidden capture mesh writes depth in
+   * first-person view so walls in the panorama hide objects behind them.
+   */
+  setOccluding(occluding: boolean) {
+    if (this.occluding === occluding) return;
+    this.occluding = occluding;
+    this.applyVisibility();
   }
 
   hasNavigationTransitionMeshes() {
@@ -346,6 +364,8 @@ export class SceneGraphLayer {
           : node.fpvOpacity ?? 1;
     const effectiveOpacity = active ? opacity : 0;
     const visibleForRaycast = Boolean(node.raycast);
+    const occluder = this.occluding && visibleForRaycast && effectiveOpacity === 0 && this.viewMode === "FPV" && !this.debug && this.overviewReturnBlend === null;
+    record.meshes.forEach((mesh) => { mesh.renderOrder = occluder ? 30 : 0; });
 
     record.object.visible = active || visibleForRaycast;
     for (const material of record.materials) {
@@ -354,8 +374,9 @@ export class SceneGraphLayer {
       material.opacity = baseOpacity * effectiveOpacity;
       material.transparent = originalTransparent || effectiveOpacity < 1;
       if (node.raycast) material.side = node.unlit && (this.viewMode === "ORBIT" || this.overviewReturnBlend !== null) ? THREE.FrontSide : THREE.DoubleSide;
-      material.depthWrite = effectiveOpacity >= 1;
-      material.depthTest = effectiveOpacity >= 1 || this.overviewReturnBlend !== null;
+      material.depthWrite = effectiveOpacity >= 1 || occluder;
+      material.depthTest = effectiveOpacity >= 1 || this.overviewReturnBlend !== null || occluder;
+      material.colorWrite = !occluder;
       if ("wireframe" in material) {
         (material as THREE.MeshBasicMaterial).wireframe = Boolean(this.debug && node.wireframeInDebug);
       }

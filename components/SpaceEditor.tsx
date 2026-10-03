@@ -74,6 +74,7 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits }
     <aside className="space-editor-panel">
       <div className="editor-fields">
       <nav aria-label="Editor"><a href="/admin">← Spaces</a><a href={scene.scenePath} target="_blank" rel="noreferrer">View space ↗</a></nav>
+      <a className="editor-tour-link" href={`/admin/scenes/${scene.sceneId}/tour`}>Make a tour or scavenger hunt</a>
       <h1>Edit space</h1>
       <label htmlFor="space-title">Title</label>
       <input id="space-title" value={title} maxLength={200} disabled={busy} onChange={event => setTitle(event.target.value)} />
