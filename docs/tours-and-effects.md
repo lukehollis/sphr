@@ -98,6 +98,32 @@ In panorama spaces the capture mesh writes depth while objects are placed, so
 walls hide objects behind them, and surface effects draw over the photograph
 using the mesh's geometry.
 
+## Sound
+
+Two effects make sound. `sound` plays a clip when a stop opens, loops it
+while the stop runs, or plays it when a hunt object is found, a hint is asked
+for or an object is clicked (`trigger`: `enter`, `loop`, `found`, `hint`,
+`click`). Targeted at an object or a point it is positional: it pans as the
+visitor looks around and fades over `range` meters. `music` is a background
+track that fades in when its stop opens and out when the tour moves to a stop
+without it, so one music effect listed on several stops plays straight
+through them.
+
+```json
+{ "id": "score", "type": "music", "target": { "kind": "scene" }, "params": { "track": "calm", "volume": 0.35 } },
+{ "id": "drip", "type": "sound", "target": { "kind": "point", "position": [2, 0.4, -1] },
+  "params": { "sound": "https://example.org/drip.mp3", "trigger": "loop", "range": 6 } }
+```
+
+Sounds are named by pack ID, or given as an https URL or a site path. Packs
+list sounds as renderers that return an `AudioBuffer`; core synthesizes its
+set offline in the browser (`lib/experience/synth.ts`), so the repository
+ships no audio files: `chime`, `sparkle`, `found`, `hint`, `pop`, `whoosh`,
+`click`, the room tone `air` and the music loop `calm`. Hunt finds and hints
+chime by default when a stop has no sound of its own. Everything follows the
+viewer's mute button, and browsers keep it silent until the visitor's first
+touch or key press.
+
 ## Checks
 
 ```bash
