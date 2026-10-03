@@ -42,9 +42,8 @@ RUN /opt/venv/bin/pip install --no-cache-dir "uv==${UV_VERSION}" \
     && /opt/venv/bin/uv venv --python 3.10 /opt/nerfstudio \
     && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python torch==2.4.1 torchvision==0.19.1 \
          --index-url https://download.pytorch.org/whl/cu124 \
-    && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python "gsplat==1.4.0+pt24cu124" \
-         --index-url https://docs.gsplat.studio/whl/pt24cu124 \
-    && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python nerfstudio==1.1.5 \
+    && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python "gsplat==1.4.0+pt24cu124" nerfstudio==1.1.5 \
+         --extra-index-url https://docs.gsplat.studio/whl/pt24cu124 \
     && /opt/nerfstudio/bin/python -c "from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as L; L(normalize=True)" \
     && for tool in ns-train ns-export ns-render ns-eval; do ln -s /opt/nerfstudio/bin/$tool /usr/local/bin/$tool; done \
     && chmod -R a+rX /opt/uv-python /opt/nerfstudio /opt/torch-hub
