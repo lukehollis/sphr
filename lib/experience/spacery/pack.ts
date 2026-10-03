@@ -1,3 +1,4 @@
+import { spaceryLooks } from "@/lib/experience/spacery/looks";
 import type { EffectEntry, Pack, ShapeEntry, SoundEntry } from "@/lib/experience/registry";
 
 /** Spacery's own effects and collectibles for app.spacery.dev, beyond the open source core. */
@@ -132,6 +133,6 @@ const sounds: SoundEntry[] = [
   { id: "fanfare", label: "Fanfare", kind: "sfx", description: "A short triumphant brass fanfare, for finishing a hunt.", load: sound("fanfare") }
 ];
 
-const spacery: Pack = { id: "spacery", label: "Spacery", effects, shapes, sounds };
+const spacery: Pack = { id: "spacery", label: "Spacery", effects, shapes, sounds, looks: spaceryLooks };
 
 export default spacery;

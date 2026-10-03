@@ -16,22 +16,24 @@ const create: EffectFactory = (context, instance) => {
     float glPhase = fract(sin(dot(gs.center, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     float glPick = fract(sin(dot(gs.center, vec3(39.346, 11.135, 83.155))) * 24634.6345);
     float glWithin = uRadius <= 0.0 ? 1.0 : 1.0 - smoothstep(uRadius * 0.75, uRadius, distance(gs.center, uOrigin));
-    float glTwinkle = pow(max(0.0, sin(uTime * (1.5 + glPhase * 3.0) + glPhase * 60.0)), 28.0) * step(1.0 - uAmount, glPick);
-    float glAmount = glTwinkle * glWithin * uStrength;
-    gs.rgba.rgb = mix(gs.rgba.rgb, uColor * 2.2, glAmount * 0.85);
+    float glTwinkle = pow(max(0.0, sin(uTime * (1.5 + glPhase * 3.0) + glPhase * 60.0)), 12.0) * step(1.0 - uAmount, glPick);
+    // Only fine splats twinkle, drawn as a sharp point; big soft splats would flash as blobs.
+    float glSize = max(max(gs.scales.x, gs.scales.y), gs.scales.z);
+    float glAmount = glTwinkle * glWithin * uStrength * (1.0 - smoothstep(0.03, 0.12, glSize));
+    gs.rgba.rgb = mix(gs.rgba.rgb, uColor * 2.4, glAmount);
     gs.rgba.a = max(gs.rgba.a, glAmount);
-    gs.scales *= 1.0 + glAmount * 0.8;
+    gs.scales = mix(gs.scales, vec3(min(glSize, 0.012)), glAmount);
   `);
   const overlay = surfaceOverlay(context, `
     vec3 cell = floor(vWorld * uDensity);
     float phase = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
     float pick = fract(sin(dot(cell, vec3(39.346, 11.135, 83.155))) * 24634.6345);
     vec3 local = fract(vWorld * uDensity) - 0.5;
-    float dotShape = exp(-dot(local, local) * 40.0);
-    float twinkle = pow(max(0.0, sin(uTime * (1.5 + phase * 3.0) + phase * 60.0)), 20.0) * step(1.0 - uAmount, pick);
+    float dotShape = exp(-dot(local, local) * 22.0);
+    float twinkle = pow(max(0.0, sin(uTime * (1.5 + phase * 3.0) + phase * 60.0)), 10.0) * step(1.0 - uAmount * 2.0, pick);
     float within = uRadius <= 0.0 ? 1.0 : 1.0 - smoothstep(uRadius * 0.75, uRadius, distance(vWorld, uOrigin));
     alpha = dotShape * twinkle * within * uStrength;
-    color = uColor * 1.8;
+    color = uColor * 3.0;
   `, { uTime: { value: 0 }, uDensity: { value: 9 }, uAmount: { value: 0.1 }, uRadius: { value: 0 }, uOrigin: { value: origin }, uColor: { value: color }, uStrength: { value: 0 } });
 
   const sync = () => {

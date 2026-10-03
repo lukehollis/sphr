@@ -5,6 +5,15 @@ import type { EffectContext } from "@/lib/experience/registry";
  * An additive layer drawn over the capture mesh of a panorama space, sharing
  * its geometry, so surface effects appear on the photograph itself.
  */
+/** GLSL declarations for an effect's uniforms, from their values, so no effect has to repeat them. */
+function declare(uniforms: Record<string, { value: unknown }>) {
+  return Object.entries(uniforms).map(([name, { value }]) => {
+    const type = typeof value === "number" || typeof value === "boolean" ? "float" : value instanceof THREE.Color || value instanceof THREE.Vector3 ? "vec3"
+      : value instanceof THREE.Vector2 ? "vec2" : value instanceof THREE.Vector4 ? "vec4" : value instanceof THREE.Texture ? "sampler2D" : null;
+    return type ? `uniform ${type} ${name};` : "";
+  }).join("\n");
+}
+
 export function surfaceOverlay(context: EffectContext, fragmentBody: string, uniforms: Record<string, { value: unknown }>, globals = "") {
   const material = new THREE.ShaderMaterial({
     uniforms,
@@ -20,6 +29,7 @@ export function surfaceOverlay(context: EffectContext, fragmentBody: string, uni
     fragmentShader: /* glsl */ `
       varying vec3 vWorld;
       varying vec3 vNormalWorld;
+      ${globals.includes("uniform ") ? "" : declare(uniforms)}
       ${globals}
       void main() {
         vec3 color = vec3(0.0);
