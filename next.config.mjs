@@ -25,6 +25,10 @@ const nextConfig = {
   turbopack: { root: turbopackRoot },
   output: process.env.SPHR_STANDALONE === "1" ? "standalone" : undefined,
   ...(process.env.SPHR_BUILD_CPUS ? { experimental: { cpus: Number(process.env.SPHR_BUILD_CPUS) } } : {}),
+  // The Draco decoder reads the capture meshes agents place things against; keep its
+  // wasm module out of the server bundle.
+  serverExternalPackages: ["draco3dgltf"],
+  outputFileTracingIncludes: { "/api/account/tours/**": ["./node_modules/draco3dgltf/draco_decoder_gltf.wasm"] },
   reactStrictMode: true,
   devIndicators: false,
   allowedDevOrigins: ["local-origin.dev", "*.local-origin.dev"],

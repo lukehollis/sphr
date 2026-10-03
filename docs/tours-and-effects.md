@@ -192,10 +192,14 @@ agent token (see `docs/accounts.md`), and both connectors wrap them as tools:
 shape the site has), `save_tour`, `search_models`, `upload_model` (local
 connector) and `share_tour`. A draft started by an agent runs in the
 background (`{ "prompt", "async": true }`, then poll `GET` for `draft.state`)
-and is placed on the server (`lib/server/tour-placement.ts`): stops aim along
-the pixel the drafting agent picked, and objects land where that ray meets the
-floor of its location, two to twenty-five meters out, facing back toward it.
-The browser builder places against the capture's mesh instead, which is finer.
+and is placed on the server the way the builder places it in the viewer: each
+pixel the drafting agent picked becomes a ray from its panorama location, cast
+against the space's capture mesh (`lib/server/capture-mesh.ts` reads plain and
+Draco-compressed GLBs, positions only, and keeps a few in memory), and objects
+follow the builder's rules in `lib/experience/placement.ts` (never at the
+visitor's feet, open air puts it on the ground four meters out, far things grow
+up to five times). Stops aim from where they stand toward the same spot. A
+space without a capture mesh uses the floor under each location as the ground.
 
 ## Checks
 

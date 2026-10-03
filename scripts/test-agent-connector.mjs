@@ -53,7 +53,9 @@ const env = { ...process.env, SPHR_BUILD_DIR: '.next-agent-test', SPHR_PUBLIC_UR
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_WORKER_TOKEN: randomBytes(24).toString('hex'),
   SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '', SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/hook`,
-  SPHR_LIBRARY_FILE: path.join(state, 'library/index.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
+  SPHR_LIBRARY_FILE: path.join(state, 'library/index.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '',
+  // A stand-in for the tour agent that points at pixels, so drafts are placed for real.
+  SPHR_TOUR_AGENT_COMMAND: JSON.stringify([process.execPath, path.join(root, 'scripts/test-support/fake-tour-agent.mjs')]), FAKE_TOUR_AGENT_LOG: path.join(state, 'tour-agent.log') };
 delete env.NODE_ENV;
 for (const name of ['SPHR_APPLE_CLIENT_ID', 'SPHR_LINKEDIN_CLIENT_ID']) delete env[name];
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -106,6 +108,20 @@ async function signInWithGoogle(browser, claims, next) {
   assert.equal(start.status, 303);
   const { code, params } = idp.authorize(location(start), claims);
   return browser.get(`/api/auth/google/callback?code=${code}&state=${encodeURIComponent(params.state)}`);
+}
+
+/** A glTF binary of plain triangles: [x, y, z] corners, three per triangle. */
+function glbOf(triangles) {
+  const positions = Float32Array.from(triangles.flat(2));
+  const bin = Buffer.from(positions.buffer);
+  const json = Buffer.from(JSON.stringify({ asset: { version: '2.0' }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }], buffers: [{ byteLength: bin.length }], bufferViews: [{ buffer: 0, byteLength: bin.length }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: positions.length / 3, type: 'VEC3' }] }));
+  const padded = Buffer.concat([json, Buffer.alloc((4 - json.length % 4) % 4, 0x20)]);
+  const header = Buffer.alloc(12);
+  header.writeUInt32LE(0x46546c67, 0); header.writeUInt32LE(2, 4); header.writeUInt32LE(12 + 8 + padded.length + 8 + bin.length, 8);
+  const chunk = (type, body) => { const head = Buffer.alloc(8); head.writeUInt32LE(body.length, 0); head.writeUInt32LE(type, 4); return Buffer.concat([head, body]); };
+  return Buffer.concat([header, chunk(0x4e4f534a, padded), chunk(0x004e4942, bin)]);
 }
 
 /** The connector as an MCP client sees it: newline-delimited JSON-RPC over stdio. */
@@ -273,8 +289,12 @@ try {
   // ---- A tour of one of the operator's public spaces, with a model made in Blender ----
   const court = path.join(root, 'public/datasets/legacy/temple-court');
   mkdirSync(court, { recursive: true });
+  // Its capture mesh: open ground, and an altar platform half a meter high a few meters out.
+  const quad = (x0, x1, y, z0, z1) => [[[x0, y, z0], [x1, y, z0], [x1, y, z1]], [[x0, y, z0], [x1, y, z1], [x0, y, z1]]];
+  writeFileSync(path.join(court, 'mesh.glb'), glbOf([...quad(-20, 20, 0, -20, 20), ...quad(-3, 3, 0.5, 2, 6)]));
   writeFileSync(path.join(court, 'bootstrap.json'), JSON.stringify({ space: { id: '0b0b0b0b0b01', title: 'Temple court', type: 'spaces',
-    space_data: { nodes: [{ uuid: 'court-1', label: 'Altar', position: { x: 0, y: 1.5, z: 0 }, image: '/datasets/legacy/temple-court/pano.jpg' }] } } }));
+    space_data: { nodes: [{ uuid: 'court-1', label: 'Altar', position: { x: 0, y: 1.5, z: 0 }, floorPosition: { x: 0, y: 0, z: 0 }, image: '/datasets/legacy/temple-court/pano.jpg' }],
+      sceneGraph: [{ id: 'capture-mesh', type: 'model', file: '/datasets/legacy/temple-court/mesh.glb', raycast: true }] } } }));
   writeFileSync(path.join(root, 'public/datasets/legacy/index.json'), JSON.stringify({ spaces: [{ sceneId: '0b0b0b0b0b01', titleSlug: 'temple-court',
     scenePath: '/s/0b0b0b0b0b01/temple-court', slug: 'temple-court', title: 'Temple court', bootstrapUrl: '/datasets/legacy/temple-court/bootstrap.json',
     thumbnail: '/datasets/legacy/temple-court/preview.jpg', nodeCount: 1, createdAt: '2026-01-01', sourceType: 'panoramas' }] }));
@@ -286,10 +306,29 @@ try {
   assert.ok(!result.error, result.text);
   const tourId = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
   assert.match(result.text, /"The oracle" \(tour_id [a-f0-9]{12}\), a guided tour with 0 stops, private/);
+  // The site's tour agent drafts in the background; the server places what it points at on the capture mesh.
   result = await connector.call('draft_tour', { tour_id: tourId, request: 'A short tour of the altar' });
-  assert.ok(result.error && /No agent is set up/.test(result.text), 'without a tour agent on the site, drafting says so');
+  assert.ok(!result.error, result.text);
+  assert.match(result.text, /working on it/);
+  result = await connector.call('wait_for_tour', { tour_id: tourId });
+  assert.match(result.text, /The agent says: I placed the tripod on the altar platform/);
+  assert.match(result.text, /Stops: 1\. The altar \[look color\]\. Objects: Bronze tripod\. Effects: beacon\. Look: lines\./);
+  const drafted = (await (await agentFetch(`/api/account/tours/${tourId}?catalog=0`)).json()).tour.experience;
+  const [tripodObject] = drafted.objects;
+  const out = 1.5 / Math.tan(Math.PI * 0.12);
+  assert.ok(Math.abs(tripodObject.position[1] - 0.51) < 0.01, `it stands on the altar platform, not the ground (${tripodObject.position})`);
+  assert.ok(Math.abs(Math.hypot(tripodObject.position[0], tripodObject.position[2]) - out / 1.5) < 0.05, 'where the pointed ray meets the platform');
+  assert.deepEqual(tripodObject.scale, [1, 1, 1], 'near things keep their size');
+  assert.ok(['https://models.example/tripod.glb', 'https://models.example/goat.glb'].includes(tripodObject.source.url), 'library codes become model addresses');
+  assert.deepEqual(drafted.effects[0].target.position, tripodObject.position, 'the beacon marks the same spot');
+  assert.ok(drafted.stops[0].view.rotation.polar < -15, 'the stop looks down at the altar');
+  const told = JSON.parse(readFileSync(path.join(state, 'tour-agent.log'), 'utf8').trim().split('\n')[0]).prompt;
+  assert.match(told, /Kind of capture: 1 panorama locations with a 3D mesh/);
+  assert.match(told, /Drawn versions: none yet/);
+  assert.match(told, /Sacred goat, Animals, about 0\.8 m tall at scale 1, animated: Idle, Walk/, 'the agent sees which models move');
+  assert.match(told, /^lines \(Line drawing\): /m);
   result = await connector.call('get_tour', { tour_id: tourId });
-  assert.match(result.text, /Revision 0\. Experience JSON/);
+  assert.match(result.text, /Revision 1\. Experience JSON/, 'the draft was saved');
   assert.match(result.text, /^blueprint \(Blueprint\): /m, 'get_tour lists the looks');
   assert.match(result.text, /transition": one of cut, fade, dissolve, wipe, iris, sweep, glitch/);
   assert.match(result.text, /^music \(Background music\): .* Params track /m);
@@ -411,7 +450,10 @@ try {
   assert.match((await tool('wait_for_tour', { tour_id: cloudTour }, museSession)).text, /Stops: 1\. By the altar/);
   assert.match((await tool('share_tour', { tour_id: cloudTour, title: 'Offerings at the altar' }, museSession)).text, /"Offerings at the altar".*private/);
   assert.match((await tool('list_tours', {}, museSession)).text, /Offerings at the altar/);
-  assert.ok((await tool('draft_tour', { tour_id: cloudTour, request: 'Add two more clues' }, museSession)).error);
+  assert.match((await tool('draft_tour', { tour_id: cloudTour, request: 'Make it a hunt for the tripod' }, museSession)).text, /working on it/);
+  result = await tool('wait_for_tour', { tour_id: cloudTour }, museSession);
+  assert.match(result.text, /The agent says: I placed the tripod/);
+  assert.match(result.text, /a scavenger hunt with 1 clue/);
 
   // Without a session, the agent keeps the token itself and sends it as a bearer token.
   result = await tool('link_account', {});

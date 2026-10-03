@@ -107,11 +107,11 @@ agent can build one end to end:
 | Models | `search_models`, `upload_model` (local only) | `GET /api/library/search`, `POST /api/account/tours/<id>/models` (raw GLB) |
 | Share | `share_tour` | `PATCH` `{public, title}` |
 
-Drafts started by an agent are placed on the server (`lib/server/tour-placement.ts`):
-stops aim along the pixel the drafting agent chose and objects land where that ray
-meets the location's floor. The browser builder places against the capture mesh,
-which is finer, so check placements there or in a screenshot and adjust positions
-in `save_tour` when something floats or hides.
+Drafts started by an agent are placed on the server (`lib/server/tour-placement.ts`)
+exactly as the builder places them: rays from each pixel the drafting agent chose,
+cast against the capture mesh (`lib/server/capture-mesh.ts`), with the shared rules
+in `lib/experience/placement.ts`. Still check the result in the viewer or a
+screenshot, and adjust positions in `save_tour` when something hides behind a wall.
 
 From a shell, the local connector runs the same tools:
 `node connector/server.mjs call draft_tour '{"tour_id":"<id>","request":"..."}'`.

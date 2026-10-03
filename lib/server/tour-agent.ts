@@ -179,7 +179,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
   const picked = pickLibrary(library, prompt, draft);
   const lines = [
     `Space title: ${space.title}`,
-    `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(data.sceneGraph ?? bootstrap.tour?.tour_data?.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
+    `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(bootstrap.tour?.tour_data?.sceneGraph ?? data.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
     nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",

@@ -13,6 +13,7 @@ import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shape
 import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
 import { LOOK_TRANSITIONS, newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
+import { placeObjectAt } from "@/lib/experience/placement";
 import type { LibraryModel } from "@/lib/experience/library";
 
 type Props = {
@@ -29,7 +30,6 @@ type Props = {
 };
 
 type Turn = { prompt: string; reply: string };
-const THREE_DEG = Math.PI / 180;
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
 type Tab = "stops" | "objects" | "effects" | "look";
 
@@ -174,29 +174,11 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
       nodeId: anchor.view ? undefined : anchor.nodeId, face: anchor.face, x: anchor.x, y: anchor.y,
       camera: anchor.view ? views.current.get(anchor.view) : undefined
     }) ?? null;
+    // The same rules place agents' drafts on the server (lib/server/tour-placement.ts).
     const objects = experience.objects.map((object) => {
       const anchor = anchors?.objects?.[object.id];
       const spot = anchor ? resolve(anchor) : null;
-      if (!spot) return object;
-      // Signs and other flat things face the view they were placed from, unless the agent turned them,
-      // and things placed far off grow so they still read from there, up to five times.
-      const turned = object.rotation.some((value) => value !== 0);
-      const grow = spot.distance ? Math.min(5, Math.max(1, spot.distance / 5)) : 1;
-      // Nothing lands at the visitor's feet: a spot on the floor right below the camera moves out to two meters.
-      const away = [spot.position[0] - spot.origin[0], spot.position[2] - spot.origin[2]];
-      const reach = Math.hypot(away[0], away[1]);
-      if (!spot.hit) {
-        // Pointed at sky or open air: stand it on the ground a few meters out in that direction.
-        const heading = THREE_DEG * spot.rotation.azimuth;
-        spot.position = [spot.origin[0] - Math.sin(heading) * 4, spot.floor ?? spot.origin[1] - 1.5, spot.origin[2] - Math.cos(heading) * 4];
-      } else if (reach < 2) {
-        const heading = THREE_DEG * spot.rotation.azimuth;
-        const [dx, dz] = reach > 0.2 ? [away[0] / reach, away[1] / reach] : [-Math.sin(heading), -Math.cos(heading)];
-        spot.position = [spot.origin[0] + dx * 2, spot.position[1], spot.origin[2] + dz * 2];
-      }
-      return { ...object, position: spot.position,
-        ...(turned ? {} : { rotation: [0, Number(spot.rotation.azimuth.toFixed(1)), 0] as Vec3 }),
-        ...(grow > 1 ? { scale: object.scale.map((value) => Number((value * grow).toFixed(3))) as Vec3 } : {}) };
+      return spot ? placeObjectAt(object, spot) : object;
     });
     const effects = experience.effects.map((effect) => {
       const anchor = anchors?.effects?.[effect.id];

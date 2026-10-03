@@ -5,6 +5,7 @@ import type { SceneListing } from "@/lib/scene-types";
 import { readSceneBootstrap } from "./scene-editor";
 import { composeTour, TourAgentError, type AgentTurn, type ClientView } from "./tour-agent";
 import { placeOnServer } from "./tour-placement";
+import { captureMeshes } from "./capture-mesh";
 import { variantsUrl } from "./variants";
 
 /** The drawn versions of a space the looks can use: its line-drawing manifest's styles and companion splats. */
@@ -50,6 +51,10 @@ export async function draftFromRequest(scene: SceneListing, body: Record<string,
   }) : [];
   const drawn = await drawnVersions(scene, space.space_data.splats as { role?: string }[] | undefined);
   const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn });
-  if (place) return { experience: placeOnServer(bootstrap, result.experience, result.anchors), anchors: { objects: {}, stops: {}, effects: {} }, reply: result.reply };
+  if (place) {
+    // Placed against the capture mesh like the builder does; without it, against each location's floor.
+    const meshes = await captureMeshes(bootstrap).catch((failure) => { console.warn("Placing without the capture mesh:", (failure as Error).message); return []; });
+    return { experience: placeOnServer(bootstrap, result.experience, result.anchors, meshes), anchors: { objects: {}, stops: {}, effects: {} }, reply: result.reply };
+  }
   return { experience: result.experience, anchors: result.anchors, reply: result.reply };
 }

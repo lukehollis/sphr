@@ -252,30 +252,48 @@ test('agents search the whole library and name models by ID', async () => {
   assert.deepEqual(raw.objects.map((object) => object.source.url), ['https://cdn.example/athena.glb', 'https://cdn.example/lamp.glb', 'not-a-model']);
 });
 
-test('agent drafts are placed on the server where their pixels meet the floor', async () => {
+test('agent drafts are placed on the server like the builder places them', async () => {
+  const THREE = await import('three');
   const { placeOnServer } = await import('../lib/server/tour-placement.ts');
   const experience = parseExperience({ version: 1, kind: 'tour', objects: [
     { id: 'near', name: 'Near', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
     { id: 'sky', name: 'Sky', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-    { id: 'far', name: 'Far', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+    { id: 'far', name: 'Far', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    { id: 'feet', name: 'Feet', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
   ], effects: [{ id: 'glow', type: 'beacon', target: { kind: 'point', position: [0, 0, 0] }, params: {} }],
   stops: [{ id: 'one', title: 'One', text: 'Hi', view: { nodeId: 'b' }, objects: ['near'], effects: ['glow'] }] });
   const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [
-    { uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, image: 'https://example.com/a.jpg' }, { uuid: 'b', position: { x: 4, y: 1.5, z: 0 }, image: 'https://example.com/b.jpg' }] } } };
+    { uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, floorPosition: { x: 0, y: 0, z: 0 }, image: 'https://example.com/a.jpg' },
+    { uuid: 'b', position: { x: 4, y: 1.5, z: 0 }, image: 'https://example.com/b.jpg' }] } } };
   const below = { nodeId: 'a', x: 0.25, y: 0.6 };
-  const placed = placeOnServer(space, experience, { objects: { near: below, sky: { nodeId: 'a', x: 0.25, y: 0.2 }, far: { nodeId: 'a', x: 0.25, y: 0.5175 } },
-    effects: { glow: below }, stops: { one: below } });
+  const anchors = { objects: { near: below, sky: { nodeId: 'a', x: 0.25, y: 0.2 }, far: { nodeId: 'a', x: 0.25, y: 0.5175 }, feet: { nodeId: 'a', x: 0.25, y: 0.97 } },
+    effects: { glow: below }, stops: { one: below } };
   const reach = (position) => Math.hypot(position[0], position[2]);
-  const [near, sky, far] = placed.objects;
-  assert.ok(Math.abs(near.position[1]) < 1e-6 && Math.abs(reach(near.position) - 1.5 / Math.tan(Math.PI * 0.1)) < 0.01, 'on the floor where the ray lands');
-  assert.deepEqual(near.scale, [1, 1, 1]);
-  assert.ok(Math.abs(reach(sky.position) - 4) < 1e-6 && Math.abs(sky.position[1]) < 1e-6, 'pointing up stands it a few meters out');
-  assert.ok(Math.abs(reach(far.position) - 25) < 1e-6 && far.scale[0] === 5, 'never across the valley, and grown to be seen');
+
+  // Without a capture mesh, the floor under the location is the ground.
+  let placed = placeOnServer(space, experience, anchors);
+  let [near, sky, far, feet] = placed.objects;
+  const out = 1.5 / Math.tan(Math.PI * 0.1);
+  assert.ok(Math.abs(near.position[1]) < 1e-6 && Math.abs(reach(near.position) - out) < 0.01, 'on the floor where the ray lands');
+  assert.deepEqual(near.scale, [1, 1, 1], 'close things keep their size');
+  assert.ok(Math.abs(reach(sky.position) - 4) < 1e-6 && Math.abs(sky.position[1]) < 1e-6, 'pointing up stands it four meters out on the floor');
+  assert.ok(Math.abs(reach(far.position) - 4) < 1e-6, 'beyond 25 meters of flat floor counts as open air');
+  assert.ok(Math.abs(reach(feet.position) - 2) < 1e-6, 'never at the visitor\'s feet');
   assert.equal(near.rotation[1], sky.rotation[1], 'turned along the ray');
-  assert.ok(Math.abs(placed.effects[0].target.position[1] - 0.5) < 1e-6, 'point effects float just above the spot');
+  assert.deepEqual(placed.effects[0].target.position, near.position, 'point effects sit where the ray lands');
   const aim = placed.stops[0].view.rotation;
   const toward = Math.atan2(-(near.position[0] - 4), -near.position[2]) * 180 / Math.PI;
   assert.ok(Math.abs(aim.azimuth - toward) < 0.1 && aim.polar < 0, 'a stop elsewhere looks toward the same spot');
+
+  // With one, rays meet the captured surfaces: a slope rising away from the location, and a wall.
+  const slope = new THREE.Mesh(new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2).rotateX(-0.2), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  slope.updateMatrixWorld(true);
+  placed = placeOnServer(space, experience, anchors, [slope]);
+  [near, sky, far] = placed.objects;
+  const ground = (position) => position[2] * Math.tan(0.2);
+  assert.ok(Math.abs(near.position[1] - 0.01 - ground(near.position)) < 0.02 && reach(near.position) < out, 'it rests on the rising ground, nearer than the flat floor would put it');
+  assert.ok(reach(far.position) > 4 && far.scale[0] > 1, 'far ground is reached, and what lands there grows to be seen');
+  assert.ok(Math.abs(reach(sky.position) - 4) < 1e-6, 'sky still stands four meters out');
 });
 
 test('agents learn the looks, effects and sounds a site has', async () => {
@@ -294,4 +312,50 @@ test('placed objects keep the animation clip they play', () => {
     { id: 'cat', name: 'Cat', source: { kind: 'model', url: 'https://cdn.example/cat.glb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], animation: 7 }] });
   assert.equal(experience.objects[0].animation, 'Wag tail');
   assert.equal('animation' in experience.objects[1], false);
+});
+
+test('capture meshes are read from plain and Draco-compressed glTF binaries', async () => {
+  const { parseGlb } = await import('../lib/server/capture-mesh.ts');
+  const draco3d = (await import('draco3dgltf')).default;
+  // A 10 m square of ground in two triangles, raised by its node to y = 2.
+  const positions = new Float32Array([-5, 0, -5, 5, 0, -5, 5, 0, 5, -5, 0, 5]);
+  const indices = new Uint32Array([0, 2, 1, 0, 3, 2]);
+  const glb = (gltf, bin) => {
+    const json = Buffer.from(JSON.stringify(gltf));
+    const padded = Buffer.concat([json, Buffer.alloc((4 - json.length % 4) % 4, 0x20)]);
+    const body = Buffer.concat([bin, Buffer.alloc((4 - bin.length % 4) % 4)]);
+    const chunk = (type, data) => { const head = Buffer.alloc(8); head.writeUInt32LE(data.length, 0); head.writeUInt32LE(type, 4); return Buffer.concat([head, data]); };
+    const header = Buffer.alloc(12);
+    header.writeUInt32LE(0x46546c67, 0); header.writeUInt32LE(2, 4); header.writeUInt32LE(12 + 16 + padded.length + body.length, 8);
+    return Buffer.concat([header, chunk(0x4e4f534a, padded), chunk(0x004e4942, body)]);
+  };
+  const base = { asset: { version: '2.0' }, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0, translation: [0, 2, 0] }] };
+  const plainBin = Buffer.concat([Buffer.from(positions.buffer), Buffer.from(indices.buffer)]);
+  const plain = await parseGlb(glb({ ...base, meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    buffers: [{ byteLength: plainBin.length }], bufferViews: [{ buffer: 0, byteLength: 48 }, { buffer: 0, byteOffset: 48, byteLength: 24 }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 4, type: 'VEC3' }, { bufferView: 1, componentType: 5125, count: 6, type: 'SCALAR' }] }, plainBin));
+
+  const encoder = await draco3d.createEncoderModule({});
+  const mesh = new encoder.Mesh();
+  const builder = new encoder.MeshBuilder();
+  builder.AddFacesToMesh(mesh, 2, indices);
+  const positionId = builder.AddFloatAttributeToMesh(mesh, encoder.POSITION, 4, 3, positions);
+  const out = new encoder.DracoInt8Array();
+  const length = new encoder.Encoder().EncodeMeshToDracoBuffer(mesh, out);
+  const dracoBin = Buffer.from(Int8Array.from({ length }, (_, index) => out.GetValue(index)).buffer);
+  const compressed = await parseGlb(glb({ ...base, extensionsUsed: ['KHR_draco_mesh_compression'], extensionsRequired: ['KHR_draco_mesh_compression'],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1, extensions: { KHR_draco_mesh_compression: { bufferView: 0, attributes: { POSITION: positionId } } } }] }],
+    buffers: [{ byteLength: dracoBin.length }], bufferViews: [{ buffer: 0, byteLength: dracoBin.length }],
+    accessors: [{ componentType: 5126, count: 4, type: 'VEC3' }, { componentType: 5125, count: 6, type: 'SCALAR' }] }, dracoBin));
+
+  const THREE = await import('three');
+  for (const [label, parts] of [['plain', plain], ['Draco', compressed]]) {
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].geometry.index.count, 6, `${label}: both triangles`);
+    const surface = new THREE.Mesh(parts[0].geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    surface.matrixAutoUpdate = false;
+    surface.matrixWorld.copy(parts[0].matrix);
+    const hit = new THREE.Raycaster(new THREE.Vector3(1, 10, 1), new THREE.Vector3(0, -1, 0)).intersectObject(surface)[0];
+    assert.ok(hit && Math.abs(hit.point.y - 2) < 1e-4, `${label}: a ray finds the ground where its node put it`);
+  }
 });

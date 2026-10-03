@@ -1,75 +1,77 @@
 import * as THREE from "three";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience, Vec3 } from "@/lib/experience/types";
+import { aimFrom, placeObjectAt, type AnchorSpot } from "@/lib/experience/placement";
 import { openingSpace } from "@/lib/scene-edits";
+import { sceneGroupSettings, worldFromGroupedPoint } from "@/lib/three/math";
 import { panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
-import type { NodeData, SphrBootstrap } from "@/lib/types";
+import type { SphrBootstrap } from "@/lib/types";
 import type { AgentAnchors } from "@/lib/server/tour-agent";
 
 /**
  * Places an agent's draft without a browser, for people's own agents that build tours
- * through the API: stops aim along the pixel the agent pointed at, and objects stand
- * where that ray meets the floor of its panorama location (or a few meters out when it
- * points level or up), facing back toward that location. The browser builder places
- * against the capture's mesh instead, so placements there are finer; anyone can move
- * an object afterwards in the builder.
+ * through the API, the way the builder does in the viewer: each pixel the agent pointed
+ * at becomes a ray from its panorama location, cast against the space's capture mesh
+ * (see capture-mesh.ts), and objects follow the builder's rules (placeObjectAt). A
+ * space without a capture mesh uses the floor under each location as the ground.
  */
-export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, anchors: AgentAnchors): Experience {
+export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, anchors: AgentAnchors, meshes: THREE.Object3D[] = []): Experience {
   const data = openingSpace(bootstrap).space_data;
   const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
-  const origin = (node: NodeData) => new THREE.Vector3(node.position.x, node.position.y, node.position.z);
-  const floor = (node: NodeData) => node.floorPosition?.y ?? node.position.y - 1.5;
-  const heading = (direction: THREE.Vector3) => Number(THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)).toFixed(1));
+  const settings = sceneGroupSettings("nodes", data);
+  const toArray = (vector: THREE.Vector3) => [vector.x, vector.y, vector.z] as Vec3;
+  const raycaster = new THREE.Raycaster();
+  raycaster.far = 500;
 
-  /** Where an anchor's ray lands, and the ray. */
-  const land = (anchor: { nodeId?: string; face?: number; x: number; y: number }) => {
+  const resolve = (anchor: { nodeId?: string; face?: number; x: number; y: number }): AnchorSpot | null => {
     const node = anchor.nodeId ? nodes.get(anchor.nodeId) : undefined;
     if (!node) return null;
+    const origin = worldFromGroupedPoint(node.position, settings);
     const direction = panoramaPixelDirection(node, anchor.x, anchor.y, anchor.face);
-    const start = origin(node);
-    const ground = floor(node);
-    let point: THREE.Vector3;
-    if (direction.y < -0.05) {
-      point = start.clone().addScaledVector(direction, (ground - start.y) / direction.y);
-    } else {
-      const flat = new THREE.Vector3(direction.x, 0, direction.z).normalize();
-      point = start.clone().addScaledVector(flat, 4).setY(ground);
+    const floor = node.floorPosition ? worldFromGroupedPoint(node.floorPosition, settings).y : null;
+    const base = { origin: toArray(origin), floor, rotation: {
+      azimuth: THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)),
+      polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)))
+    } };
+    if (meshes.length) {
+      raycaster.set(origin, direction);
+      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+      if (hit) {
+        const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
+        if (normal && normal.dot(direction) > 0) normal.negate();
+        // Rest on floors; stand slightly off walls toward the viewer.
+        const point = hit.point.clone().addScaledVector(normal ?? direction.clone().negate(), normal && normal.y > 0.7 ? 0.01 : 0.06);
+        return { ...base, position: toArray(point), normal: normal ? toArray(normal) : null, hit: true, distance: hit.distance };
+      }
+    } else if (direction.y < -0.05) {
+      // No capture mesh: the floor under the location stands in for the ground, out to 25 meters.
+      const ground = floor ?? origin.y - 1.5;
+      const distance = (ground - origin.y) / direction.y;
+      const across = distance * Math.hypot(direction.x, direction.z);
+      if (distance > 0 && across <= 25) return { ...base, position: toArray(origin.clone().addScaledVector(direction, distance)), normal: [0, 1, 0], hit: true, distance };
     }
-    // Not at the visitor's feet, and not across the valley.
-    const away = new THREE.Vector3(point.x - start.x, 0, point.z - start.z);
-    const reach = away.length();
-    if (reach < 2 || reach > 25) point.copy(start).addScaledVector(away.normalize(), THREE.MathUtils.clamp(reach, 2, 25)).setY(ground);
-    return { node, direction, point, reach: Math.max(2, Math.min(25, reach)) };
+    return { ...base, position: toArray(origin.clone().addScaledVector(direction, 2.5)), normal: null, hit: false, distance: null };
   };
 
   const objects = experience.objects.map((object) => {
     const anchor = anchors.objects[object.id];
-    const spot = anchor ? land(anchor) : null;
-    if (!spot) return object;
-    const turned = object.rotation.some((value) => value !== 0);
-    const grow = Math.min(5, Math.max(1, spot.reach / 5));
-    return { ...object, position: [spot.point.x, spot.point.y, spot.point.z] as Vec3,
-      ...(turned ? {} : { rotation: [0, heading(spot.direction), 0] as Vec3 }),
-      ...(grow > 1 ? { scale: object.scale.map((value) => Number((value * grow).toFixed(3))) as Vec3 } : {}) };
+    const spot = anchor ? resolve(anchor) : null;
+    return spot ? placeObjectAt(object, spot) : object;
   });
   const effects = experience.effects.map((effect) => {
     const anchor = anchors.effects[effect.id];
-    const spot = anchor && effect.target.kind === "point" ? land(anchor) : null;
-    return spot ? { ...effect, target: { kind: "point" as const, position: [spot.point.x, spot.point.y + 0.5, spot.point.z] as Vec3 } } : effect;
+    const spot = anchor && effect.target.kind === "point" ? resolve(anchor) : null;
+    return spot ? { ...effect, target: { kind: "point" as const, position: spot.position } } : effect;
   });
+  // A stop looks from where it stands toward the spot the agent pointed at, even when
+  // that spot was picked in a photo taken somewhere else.
   const stops = experience.stops.map((stop) => {
     const anchor = anchors.stops[stop.id];
-    const node = anchor?.nodeId ? nodes.get(anchor.nodeId) : undefined;
-    if (!anchor || !node) return stop;
-    const direction = panoramaPixelDirection(node, anchor.x, anchor.y, anchor.face);
-    // Picked in a photo taken somewhere else: look from this stop toward the same spot.
+    const spot = anchor ? resolve(anchor) : null;
+    if (!spot) return stop;
     const standing = stop.view.nodeId ? nodes.get(stop.view.nodeId) : undefined;
-    let aim = direction;
-    if (standing && standing.uuid !== node.uuid) {
-      const spot = land(anchor);
-      if (spot) aim = spot.point.clone().sub(origin(standing)).normalize();
-    }
-    return { ...stop, view: { ...stop.view, rotation: { azimuth: heading(aim), polar: Number(THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(aim.y, -1, 1))).toFixed(1)) } } };
+    const aimed = standing && spot.hit ? aimFrom(toArray(worldFromGroupedPoint(standing.position, settings)), spot.position) : null;
+    return { ...stop, view: { ...stop.view, rotation: aimed ?? { azimuth: Number(spot.rotation.azimuth.toFixed(2)), polar: Number(spot.rotation.polar.toFixed(2)) } } };
   });
   return parseExperience({ ...experience, objects, effects, stops }, { lenient: true });
 }
