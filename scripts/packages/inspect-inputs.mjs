@@ -67,6 +67,17 @@ async function inspect(file) {
     return { ...base, kind: 'mesh', format: extension, tool: 'scripts/packages/build-model.mjs' };
   }
   if (['mtl', 'bin'].includes(extension)) return { ...base, kind: 'mesh-part', hint: 'Keep next to its OBJ or glTF file.' };
+  if (['insv', 'insp'].includes(extension)) {
+    // Raw Insta360 camera files: unstitched fisheye, so they must not be treated as ordinary video or photos.
+    const match = name.match(/^(VID|LRV|IMG)_(\d{8})_(\d{6})_(\d{2})_(\d{3})\./i);
+    if (match?.[1].toUpperCase() === 'LRV') return { ...base, kind: 'insta360-preview', hint: 'Low-resolution preview made by the camera; ignore it.' };
+    const video = extension === 'insv' ? probe(file) : undefined;
+    return { ...base, kind: extension === 'insv' ? 'insta360-video' : 'insta360-still', ...(match ? { capture: `${match[2]}_${match[3]}_${match[5]}`, lens: match[4] } : {}),
+      ...(video ? { width: video.width, height: video.height, duration: video.duration } : {}), tool: 'scripts/packages/build-insta360.mjs',
+      hint: extension === 'insv'
+        ? 'Raw Insta360 video. The ONE RS records one file per lens (VID_..._00_n and VID_..._10_n); pass the folder or both files to build-insta360.mjs, which stitches them.'
+        : 'Raw Insta360 still (both lenses in one image; HDR brackets share a timestamp). build-insta360.mjs stitches it.' };
+  }
   if (/^(jpe?g|png|webp|tiff?|heic|heif|avif|dng)$/.test(extension)) {
     try {
       const meta = await sharp(file).metadata();

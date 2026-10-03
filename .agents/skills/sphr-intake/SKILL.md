@@ -38,6 +38,7 @@ Pick the input that gives the best space; most uploads have one obvious main cap
 | Gaussian splat (`.ply` with `f_dc_0`, `.spz`, `.splat`, `.ksplat`, `.sog`) | sphr-splat-package | `build-splat.mjs` |
 | 2:1 equirectangular 360 photos | sphr-panorama-package | `build-panoramas.mjs` |
 | 2:1 equirectangular 360 video | sphr-panorama-package | `build-video360.mjs` |
+| Raw Insta360 camera files: `.insv` video (one file per lens, `_00_` and `_10_`) or `.insp` stills | sphr-panorama-package | `build-insta360.mjs` |
 | Ordinary video or a set of overlapping photos | sphr-video | COLMAP + a splat trainer |
 | Lidar point cloud (LAS/LAZ, E57 without images, PLY points, PCD, XYZ/PTS) | sphr-lidar-package | `build-pointcloud.mjs` |
 | Scanned or photogrammetry mesh (OBJ, GLB/glTF, PLY with faces, STL, USDZ, FBX) | sphr-lidar-package | `build-model.mjs` |
