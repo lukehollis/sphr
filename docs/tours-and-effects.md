@@ -198,8 +198,12 @@ against the space's capture mesh (`lib/server/capture-mesh.ts` reads plain and
 Draco-compressed GLBs, positions only, and keeps a few in memory), and objects
 follow the builder's rules in `lib/experience/placement.ts` (never at the
 visitor's feet, open air puts it on the ground four meters out, far things grow
-up to five times). Stops aim from where they stand toward the same spot. A
-space without a capture mesh uses the floor under each location as the ground.
+up to five times). Stops aim from where they stand toward the same spot. The
+agent picks spots in photos taken from many places, so an object the capture
+hides from the first stop that shows it (behind a step or a wall) comes forward
+onto the surface in the way, or the floor just in front of it, which keeps every
+hunt object clickable from its clue. A space without a capture mesh uses the
+floor under each location as the ground.
 
 ## Checks
 
