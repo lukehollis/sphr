@@ -210,7 +210,8 @@ async function finishUpload(args: Record<string, unknown>, context: McpContext) 
   if (waiting.length) return `Not every file is complete yet: ${waiting.join(", ")}. Resume those uploads from the stored byte, then call finish_upload again.`;
   if (args.submit === false) return "Every file is uploaded. Call finish_upload with submit true when the space should be processed.";
   const submitted = await call(context, submitRoute as never, `/api/account/spaces/${id}/submit`, { method: "POST", id,
-    body: typeof args.notes === "string" && args.notes.trim() ? { notes: args.notes } : {} });
+    body: { ...(typeof args.notes === "string" && args.notes.trim() ? { notes: args.notes } : {}),
+      ...(["splat", "tour", "auto"].includes(args.output as string) ? { output: args.output } : {}) } });
   return `Submitted for processing. ${siteBrand()} emails the account when the space is ready, usually within a few hours. ${describeSpace(context, submitted.space)}`;
 }
 
@@ -257,6 +258,7 @@ export const hostedTools: Tool[] = [
     required: ["space_id", "files"] } },
   { name: "finish_upload", run: finishUpload, description: "Checks that every uploaded file is complete and submits the space for processing. The account is emailed when the space is ready.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema, notes: { type: "string", description: "Optional notes for processing, such as what the capture is or how the tour should go." },
+      output: { type: "string", enum: ["splat", "tour", "auto"], description: "What to build: \"splat\", a 3DGS (3D Gaussian splat) visitors move through freely (the default for photos, video and 360 captures); \"tour\", a guided tour of 360 panoramas (the default for E57 scans); or \"auto\" to use those defaults. Set it only when the person asks for one." },
       submit: { type: "boolean", description: "Defaults to true." } }, required: ["space_id"] } },
   { name: "space_status", run: spaceStatus, description: "Status of one space, or every space on the account with its link when ready.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema } } },

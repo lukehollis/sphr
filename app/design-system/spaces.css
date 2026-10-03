@@ -123,6 +123,21 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
 .upload-status .site-hint { color: var(--site-muted); font-size: var(--size-caption); }
 .upload-status .site-actions { margin-top: 6px; }
 .upload-status .site-alert { margin: 0; }
+.output-picker { min-width: 0; margin: 4px 0 0; padding: 0; border: 0; }
+.output-picker legend { margin-bottom: 8px; padding: 0; color: var(--text-heading); font-size: var(--size-caption); font-weight: 600; }
+.output-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.output-option { position: relative; display: grid; align-content: start; gap: 6px; min-width: 0; padding: 8px 8px 12px;
+  border: 1px solid var(--hairline); border-top: 3px solid var(--hairline); background: var(--paper); color: var(--text-body); cursor: pointer;
+  transition: border-color 120ms, background-color 120ms; }
+.output-option:hover { background: var(--paper-tint); }
+.output-option input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.output-option:has(input:focus-visible) { outline: var(--focus-ring); outline-offset: 2px; }
+.output-option-selected { border-top-color: var(--ink); }
+.output-option img { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; object-fit: cover; background: var(--paper-tint); }
+.output-option-name { display: flex; align-items: center; gap: 8px; color: var(--text-heading); font-size: 15px; font-weight: 600; }
+.output-option-name i { width: 10px; height: 10px; flex: none; border: 1.5px solid var(--site-muted); transition: background-color 120ms, border-color 120ms; }
+.output-option-selected .output-option-name i { border-color: var(--ink); background: var(--ink); }
+.upload-status .output-option-text { color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-heading); }
 .upload-status-done { border-left-color: var(--text-heading); }
 .upload-meter { display: block; height: 3px; background: var(--site-line); }
 .upload-meter span { display: block; height: 100%; background: var(--text-heading); transition: width 120ms; }

@@ -38,7 +38,15 @@ export type Batch = {
   error?: string;
   /** New files count down to processing; files added to a hosted space wait for a click. */
   autoStart: boolean;
+  /** What the customer chose to build; unset leaves it to the default for the files. */
+  output?: Output;
 };
+
+export type Output = "splat" | "tour";
+
+/** A splat unless the upload is an E57 scan. The agent applies the same rule when the choice is left alone,
+ *  which also catches an E57 inside a ZIP. */
+export const defaultOutput = (batch: Batch): Output => batch.transfers.some(entry => /\.e57$/i.test(entry.name)) ? "tour" : "splat";
 
 const AUTO_START_SECONDS = 10;
 export const awaitingPaymentKey = "sphr-awaiting-payment";
@@ -211,7 +219,7 @@ export function useUploadBatches(onChange: () => void) {
     if (!spaceId) return;
     patch(key, { phase: "submitting", countdown: undefined, error: undefined });
     try {
-      await accountRequest(`/api/account/spaces/${spaceId}/submit`, { notes: "" });
+      await accountRequest(`/api/account/spaces/${spaceId}/submit`, { notes: "", output: latest.current.find(item => item.key === key)?.output ?? "auto" });
       patch(key, { phase: "processing" });
       remember(null);
     } catch (failure) {
@@ -222,6 +230,7 @@ export function useUploadBatches(onChange: () => void) {
   }, [patch]);
 
   const hold = useCallback((key: string) => patch(key, { phase: "held", countdown: undefined }), [patch]);
+  const chooseOutput = useCallback((key: string, output: Output) => patch(key, { output }), [patch]);
 
   /** Sends the failed files again. */
   const retry = useCallback((key: string) => {
@@ -300,7 +309,7 @@ export function useUploadBatches(onChange: () => void) {
         const spaceId = spaceOf.current.get(batch.key);
         if (batch.phase !== "countdown" || !spaceId) continue;
         void fetch(`/api/account/spaces/${spaceId}/submit`, { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ notes: "" }) }).catch(() => undefined);
+          body: JSON.stringify({ notes: "", output: batch.output ?? "auto" }) }).catch(() => undefined);
       }
     };
     window.addEventListener("pagehide", leave);
@@ -344,7 +353,7 @@ export function useUploadBatches(onChange: () => void) {
     return () => channel.close();
   }, []);
 
-  return { batches, startNew, startExisting, addFiles, submit, hold, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
+  return { batches, startNew, startExisting, addFiles, submit, hold, chooseOutput, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
 }
 
 export type Uploads = ReturnType<typeof useUploadBatches>;
@@ -561,6 +570,31 @@ function PlanFull({ batch, uploads, billing }: { batch: Batch; uploads: Uploads;
   </div>;
 }
 
+const outputOptions: { value: Output; name: string; text: string; example: string }[] = [
+  { value: "splat", name: "3DGS", text: "A 3D Gaussian splat visitors move through freely.", example: "/examples/3dgs" },
+  { value: "tour", name: "360 tour", text: "Visitors step between 360 photos. Needs 360 photos, 360 video or an E57 scan.", example: "/examples/360-tour" }
+];
+
+/** Whether the capture becomes a 3D Gaussian splat or a tour of 360 panoramas, each shown by a looping example. */
+function OutputChoice({ batch, uploads }: { batch: Batch; uploads: Uploads }) {
+  const chosen = batch.output ?? defaultOutput(batch);
+  return <fieldset className="output-picker">
+    <legend>Build as</legend>
+    <div className="output-options">
+      {outputOptions.map(option => <label key={option.value} className={`output-option${chosen === option.value ? " output-option-selected" : ""}`}>
+        <input type="radio" name={`output-${batch.key}`} value={option.value} checked={chosen === option.value}
+          onChange={() => uploads.chooseOutput(batch.key, option.value)} />
+        <picture>
+          <source srcSet={`${option.example}.jpg`} media="(prefers-reduced-motion: reduce)" />
+          <img src={`${option.example}.gif`} alt="" width={240} height={150} loading="lazy" />
+        </picture>
+        <span className="output-option-name"><i aria-hidden="true" />{option.name}</span>
+        <span className="output-option-text">{option.text}</span>
+      </label>)}
+    </div>
+  </fieldset>;
+}
+
 function Status({ batch, uploads, total, sent, done, failed, left, onClose, existing, billing }: {
   batch: Batch; uploads: Uploads; total: number; sent: number; done: number; failed: number; left: number | null; onClose: () => void; existing: boolean;
   billing?: PlanChoice;
@@ -601,6 +635,7 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
     <h3>{failed ? `${failed} ${failed === 1 ? "file" : "files"} did not upload` : `Uploading ${files}`}</h3>
     <p>{formatBytes(sent)} of {formatBytes(total)}{left !== null && !failed ? `. ${timeLeft(left)}` : ""}</p>
     <Meter value={total ? sent / total * 100 : 0} label="Upload progress" />
+    <OutputChoice batch={batch} uploads={uploads} />
     {failed ? <div className="site-actions">
       <button type="button" className="site-button" onClick={() => uploads.retry(batch.key)}>Try again</button>
       {done > 0 && <button type="button" className="site-link" onClick={() => uploads.skipFailed(batch.key)}>Leave {failed === 1 ? "it" : "them"} out</button>}
@@ -611,6 +646,7 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
     <h3>Upload complete</h3>
     <p>{batch.phase === "countdown" ? `Processing starts in ${batch.countdown} s.` : existing && !batch.autoStart
       ? "The space stays as it is until you process it again with these files." : "Start processing when every file is here."}</p>
+    <OutputChoice batch={batch} uploads={uploads} />
     <div className="site-actions">
       <button type="button" className="site-button" onClick={() => void uploads.submit(batch.key)}>{batch.phase === "countdown" ? "Start now"
         : existing && !batch.autoStart ? "Reprocess with these files" : "Start processing"}<span aria-hidden="true">→</span></button>

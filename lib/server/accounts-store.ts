@@ -46,6 +46,10 @@ function store() {
   if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "plan")) {
     connection.exec("ALTER TABLE subscriptions ADD COLUMN plan TEXT");
   }
+  // What the customer asked the capture to become; spaces from before the choice existed are left to the agent.
+  if (!(connection.prepare("PRAGMA table_info(customer_spaces)").all() as { name: string }[]).some(column => column.name === "output")) {
+    connection.exec("ALTER TABLE customer_spaces ADD COLUMN output TEXT");
+  }
   prepared = true;
   return connection;
 }
@@ -452,15 +456,22 @@ export function seenStripeEvent(id: string) {
 // ---- Customer spaces ----
 
 export type SpaceStatus = "unpaid" | "draft" | "queued" | "processing" | "ready" | "failed" | "deleted";
+/**
+ * What a capture is built as: a Gaussian splat, or a tour of 360 panoramas. Null leaves it to the processing
+ * agent, which builds a tour from an E57 scan and a splat from everything else.
+ */
+export type SpaceOutput = "splat" | "tour";
+export const spaceOutputs: readonly SpaceOutput[] = ["splat", "tour"];
 export type CustomerSpace = { id: string; userId: string; title: string; status: SpaceStatus; sceneId: string | null;
-  notes: string | null; message: string | null; created: string; updated: string };
+  notes: string | null; output: SpaceOutput | null; message: string | null; created: string; updated: string };
 type SpaceRow = { id: string; user_id: string; title: string; status: SpaceStatus; scene_id: string | null; notes: string | null;
-  message: string | null; created: string; updated: string };
+  output: string | null; message: string | null; created: string; updated: string };
 const billable = "('draft','queued','processing','ready','failed')";
 export const maxSpacesPerAccount = 500;
 
 function toSpace(row: SpaceRow): CustomerSpace {
   return { id: row.id, userId: row.user_id, title: row.title, status: row.status, sceneId: row.scene_id, notes: row.notes,
+    output: spaceOutputs.includes(row.output as SpaceOutput) ? row.output as SpaceOutput : null,
     message: row.message, created: row.created, updated: row.updated };
 }
 
@@ -602,7 +613,13 @@ function unusedSceneId() {
   }
 }
 
-export function submitCustomerSpace(spaceId: string, notes: string | null) {
+/** Reads a requested output: a choice, null for "let the agent decide", or undefined to keep the space's last choice. */
+export function parseSpaceOutput(value: unknown): SpaceOutput | null | undefined {
+  if (value === "auto" || value === null) return null;
+  return spaceOutputs.includes(value as SpaceOutput) ? value as SpaceOutput : undefined;
+}
+
+export function submitCustomerSpace(spaceId: string, notes: string | null, output?: SpaceOutput | null) {
   return transaction(() => {
     const space = readCustomerSpace(spaceId);
     if (!space || !["draft", "failed", "ready"].includes(space.status)) throw new AccountError("This space cannot be submitted right now.");
@@ -616,7 +633,8 @@ export function submitCustomerSpace(spaceId: string, notes: string | null) {
       .run(now(), spaceId);
     // The scene ID is fixed before processing so a job can only publish its own space.
     store().prepare("INSERT INTO jobs(id, space_id, scene_id, status, created) VALUES (?, ?, ?, 'queued', ?)").run(id, spaceId, space.sceneId ?? unusedSceneId(), now());
-    store().prepare("UPDATE customer_spaces SET status='queued', notes=?, message=NULL, updated=? WHERE id=?").run(notes, now(), spaceId);
+    store().prepare("UPDATE customer_spaces SET status='queued', notes=?, output=?, message=NULL, updated=? WHERE id=?")
+      .run(notes, output === undefined ? space.output : output, now(), spaceId);
     return readJob(id)!;
   });
 }

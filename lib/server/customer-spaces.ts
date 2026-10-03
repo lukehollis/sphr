@@ -14,7 +14,7 @@ export async function describeSpace(space: CustomerSpace) {
   const listing = scene && editedListing(scene, readSceneEdits().get(scene.sceneId));
   const job = latestJob(space.id);
   return {
-    id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, message: space.message,
+    id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, output: space.output, message: space.message,
     created: space.created, updated: space.updated, hosted: spaceHosted(space),
     scene: listing ? { sceneId: listing.sceneId, path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(listing.sceneId) } : null,
     job: job ? { status: job.status, created: job.created, started: job.started, finished: job.finished,
