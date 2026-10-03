@@ -37,8 +37,8 @@ QT_QPA_PLATFORM=offscreen colmap automatic_reconstructor --workspace_path "$SPHR
 Matching runs on the CPU, so pick the matcher by where the frames came from. `video` matches each frame
 with its neighbours (about 4 s a frame for 108 frames at 1600 px, so 8 minutes); `individual` matches every
 pair, which suits orbit photo sets up to about 150 but took 6.5 minutes per block of a 108-frame video. Run
-COLMAP in the background with its output in `work/colmap.log` and check on it, rather than letting a
-command time out and starting over.
+COLMAP in the background (`nohup … > work/colmap.log 2>&1 &`, as for training below) and check on it,
+rather than letting a command time out and starting over.
 
 COLMAP here is built without CUDA: its default GPU SIFT crashes with a stack trace, so keep `--use_gpu 0`
 (for the step-by-step commands, `--SiftExtraction.use_gpu 0` and `--SiftMatching.use_gpu 0`). Phone
@@ -58,9 +58,17 @@ frames it used:
 ```sh
 mkdir -p "$SPHR_JOB_DIR/work/data/sparse"
 cp -r "$SPHR_JOB_DIR/work/colmap/sparse/0" "$SPHR_JOB_DIR/work/data/sparse/0"   # work/data/images = the frames COLMAP used
-brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --export-path "$SPHR_JOB_DIR/work/splat" \
-  --export-name scene.ply --export-every 15000 > "$SPHR_JOB_DIR/work/brush.log" 2>&1
+nohup brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --export-path "$SPHR_JOB_DIR/work/splat" \
+  --export-name scene.ply --export-every 5000 > "$SPHR_JOB_DIR/work/brush.log" 2>&1 &
+echo $! > "$SPHR_JOB_DIR/work/brush.pid"
 ```
+
+Your commands stop after 10 minutes, and training (like COLMAP on a long video) can take longer when the
+worker is busy, so never run it in the foreground or under a short `timeout`: a killed run leaves nothing.
+Start it as above and check every minute or two with
+`kill -0 "$(cat "$SPHR_JOB_DIR/work/brush.pid")" 2>/dev/null && echo training || echo finished`.
+`--export-every 5000` rewrites `scene.ply` along the way, so a run that has to be stopped still leaves a
+usable splat; package only after the process has finished.
 
 Measured on the RTX 3090 Ti: 105 photos at 1600 px register in COLMAP (CPU) in about 4 minutes and
 train 15,000 steps in about 8.5 minutes, giving a ~100 MB PLY. Write a progress line before training
