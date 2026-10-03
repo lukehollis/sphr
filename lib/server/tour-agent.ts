@@ -1,0 +1,422 @@
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import Anthropic from "@anthropic-ai/sdk";
+import sharp from "sharp";
+import { effectEntries, shapeEntries } from "@/lib/experience/packs";
+import { parseExperience } from "@/lib/experience/validate";
+import type { Experience } from "@/lib/experience/types";
+import type { NodeData, SphrBootstrap } from "@/lib/types";
+import { nodeCubeFaceUrl, nodePanoramaUrl } from "@/lib/media";
+import type { LibraryModel } from "@/lib/experience/library";
+import { libraryModels } from "@/lib/server/library";
+
+/**
+ * The tour agent: a visitor-facing tour or scavenger hunt written from one
+ * text box. It sees the space (panorama faces or a captured view), the
+ * current draft and every installed effect, shape and library model, and
+ * returns a complete new draft. Placements point at pixels in the images it
+ * saw; the editor turns those into 3D positions against the capture.
+ *
+ * Backends, first configured wins:
+ *   ANTHROPIC_API_KEY            Claude through the Messages API.
+ *   SPHR_TOUR_AGENT_COMMAND      Your own agent CLI, as a JSON array. A {prompt}
+ *                                placeholder inlines the prompt, otherwise it is
+ *                                piped to standard input; {dir} is the folder of
+ *                                space images, e.g.
+ *                                ["claude","-p","--output-format","json","--allowedTools","Read"].
+ */
+
+export const TOUR_AGENT_MODEL = process.env.SPHR_TOUR_AGENT_MODEL || "claude-opus-5-5";
+
+export type PixelPlace = { nodeId?: string; face?: number; view?: string; x: number; y: number };
+export type AgentAnchors = {
+  objects: Record<string, PixelPlace>;
+  stops: Record<string, PixelPlace>;
+  effects: Record<string, PixelPlace>;
+};
+export type AgentTurn = { prompt: string; reply: string };
+export type ClientView = { id: string; image: string; nodeId?: string; rotation?: { azimuth: number; polar: number }; fov?: number };
+export type AgentResult = { experience: Experience; anchors: AgentAnchors; reply: string };
+
+export class TourAgentError extends Error {}
+
+export function tourAgentConfigured() {
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim() || process.env.SPHR_TOUR_AGENT_COMMAND?.trim());
+}
+
+type AgentImage = { label: string; data: string };
+
+const FACE_NAMES: Record<number, string> = { 1: "face 1", 2: "face 2", 3: "face 3", 4: "face 4" };
+
+function round(value: number, places = 2) { return Number(value.toFixed(places)); }
+
+/** Spread picks across the space so the agent sees more than one corner. */
+function sampleNodes(nodes: NodeData[], preferred: string[], count: number) {
+  const chosen: NodeData[] = [];
+  for (const id of preferred) {
+    const node = nodes.find((item) => item.uuid === id);
+    if (node && !chosen.includes(node)) chosen.push(node);
+    if (chosen.length >= count) return chosen;
+  }
+  if (!chosen.length && nodes.length) chosen.push(nodes[0]);
+  while (chosen.length < Math.min(count, nodes.length)) {
+    let best: NodeData | null = null;
+    let bestDistance = -1;
+    for (const node of nodes) {
+      if (chosen.includes(node)) continue;
+      const distance = Math.min(...chosen.map((item) => Math.hypot(item.position.x - node.position.x, item.position.y - node.position.y, item.position.z - node.position.z)));
+      if (distance > bestDistance) { bestDistance = distance; best = node; }
+    }
+    if (!best) break;
+    chosen.push(best);
+  }
+  return chosen;
+}
+
+async function loadImage(url: string, origin: string): Promise<string | null> {
+  try {
+    let bytes: Buffer;
+    if (url.startsWith("/") && !url.startsWith("//")) {
+      const local = path.join(process.cwd(), "public", decodeURIComponent(url.split("?")[0]));
+      if (!local.startsWith(path.join(process.cwd(), "public"))) return null;
+      try { bytes = await readFile(local); }
+      catch {
+        const response = await fetch(new URL(url, origin), { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) return null;
+        bytes = Buffer.from(await response.arrayBuffer());
+      }
+    } else {
+      if (!/^https:\/\//.test(url)) return null;
+      const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: "follow" });
+      if (!response.ok) return null;
+      bytes = Buffer.from(await response.arrayBuffer());
+    }
+    const jpeg = await sharp(bytes, { limitInputPixels: 80_000_000 }).rotate().resize({ width: 768, height: 768, fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
+    return jpeg.toString("base64");
+  } catch { return null; }
+}
+
+function decodeClientImage(value: string) {
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || value.length > 2_000_000) return null;
+  return match[2];
+}
+
+/** Everything the agent needs to know about the space, as text plus images. */
+export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false) {
+  const space = bootstrap.space;
+  const data = space.space_data;
+  const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
+  const images: AgentImage[] = [];
+  const preferred = [...draft.stops.map((stop) => stop.view.nodeId).filter((id): id is string => Boolean(id)), ...(data.initialNode ? [data.initialNode] : [])];
+  const sampled = sampleNodes(nodes, preferred, nodes.length > 1 ? 6 : 1);
+  await Promise.all(sampled.map(async (node) => {
+    const cube = Boolean(node.faces?.length || node.cubeFaces?.length || node.textureTemplate);
+    if (cube) {
+      const faces = await Promise.all([1, 2, 3, 4].map(async (face) => ({ face, data: await loadImage(nodeCubeFaceUrl(node, face, "1024", space.version), origin) })));
+      for (const face of faces) if (face.data) images.push({ label: `location ${node.uuid} ${FACE_NAMES[face.face]}`, data: face.data });
+    } else if (node.image) {
+      const image = await loadImage(nodePanoramaUrl(node, "full"), origin);
+      if (image) images.push({ label: `location ${node.uuid} panorama (equirectangular, no face)`, data: image });
+    }
+  }));
+  for (const view of views.slice(0, 4)) {
+    const image = decodeClientImage(view.image);
+    if (image) images.push({ label: `view ${view.id}`, data: image });
+  }
+  images.sort((a, b) => a.label.localeCompare(b.label));
+
+  const listed = nodes.length > 300 ? sampleNodes(nodes, preferred, 300) : nodes;
+  const library = await libraryModels(team);
+  const lines = [
+    `Space title: ${space.title}`,
+    `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(data.sceneGraph ?? bootstrap.tour?.tour_data?.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
+    nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
+    images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
+    views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
+    `Effects you can use:\n${effectEntries().map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
+    `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
+    library.length ? `Library models you can place (source {"kind":"model","url":...}):\n${library.map((model) => `${model.url} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
+    `Current draft:\n${JSON.stringify(draft)}`
+  ].filter(Boolean);
+  return { text: lines.join("\n\n"), images, library };
+}
+
+const SYSTEM = `You build guided tours and scavenger hunts inside captured 3D spaces for Spacery's viewer.
+A tour is a sequence of stops. Each stop stands at a panorama location (or a free camera in splat spaces), looks somewhere, and shows a short title and text. A scavenger hunt is a sequence of clues; each step hides one placed object that the visitor must find and click, then shows a found message.
+
+You always answer by calling the write_tour tool exactly once with the complete new draft. Keep everything from the current draft that the request does not change, including IDs, text the person wrote and object positions they set.
+
+Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a client view. Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Keep an existing object's position by leaving its position as it is and place null.
+
+Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues describe where to look without naming the exact spot; hints are more direct; found messages reward the visitor with one real detail about the place. Hunt steps should start from a location where the object is reachable but not in the middle of the view.
+
+Effects. Use effects to serve the story, not everywhere. A stop lists the effect IDs that run while it is shown; "always" effects run through free exploration too. Use the object target to attach an effect to a placed object. Hunt finds already burst with sparkles, so you do not need to add that. Use colors that suit the space.
+
+Sizes. Real objects should be life size. Hunt items are usually 0.15 to 0.5 m.
+
+Reply in one or two plain sentences saying what you made or changed.`;
+
+const placeSchema = {
+  anyOf: [
+    { type: "null" },
+    {
+      type: "object",
+      properties: {
+        nodeId: { type: "string" }, face: { type: "integer", minimum: 0, maximum: 5 }, view: { type: "string" },
+        x: { type: "number", minimum: 0, maximum: 1 }, y: { type: "number", minimum: 0, maximum: 1 }
+      },
+      required: ["x", "y"]
+    }
+  ]
+} as const;
+
+const vec3Schema = { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 } as const;
+
+const WRITE_TOUR: Anthropic.Tool = {
+  name: "write_tour",
+  description: "Save the complete new draft of the tour or scavenger hunt, plus a short reply to the person.",
+  input_schema: {
+    type: "object",
+    properties: {
+      reply: { type: "string" },
+      kind: { type: "string", enum: ["tour", "hunt"] },
+      finale: { type: "string" },
+      objects: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" }, name: { type: "string" },
+            source: { type: "object", properties: { kind: { type: "string", enum: ["shape", "model", "image"] }, shape: { type: "string" }, url: { type: "string" }, color: { type: "string" }, text: { type: "string" } }, required: ["kind"] },
+            place: placeSchema,
+            position: { anyOf: [{ type: "null" }, vec3Schema] },
+            rotation: vec3Schema,
+            scale: { anyOf: [{ type: "number" }, vec3Schema] },
+            idle: { type: "string", enum: ["none", "spin", "bob", "float"] },
+            label: { type: "string" },
+            always: { type: "boolean" }
+          },
+          required: ["id", "name", "source"]
+        }
+      },
+      effects: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" }, type: { type: "string" }, name: { type: "string" },
+            target: { type: "object", properties: { kind: { type: "string", enum: ["scene", "object", "point"] }, id: { type: "string" }, place: placeSchema, position: vec3Schema }, required: ["kind"] },
+            params: { type: "object" },
+            always: { type: "boolean" }
+          },
+          required: ["id", "type", "target"]
+        }
+      },
+      stops: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" }, title: { type: "string" }, text: { type: "string" }, detail: { type: "string" },
+            nodeId: { type: "string" },
+            look: placeSchema,
+            rotation: { type: "object", properties: { azimuth: { type: "number" }, polar: { type: "number" } } },
+            position: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
+            fov: { type: "number" },
+            objects: { type: "array", items: { type: "string" } },
+            effects: { type: "array", items: { type: "string" } },
+            find: { type: "object", properties: { objectId: { type: "string" }, hint: { type: "string" }, found: { type: "string" } }, required: ["objectId"] }
+          },
+          required: ["id", "title", "text"]
+        }
+      }
+    },
+    required: ["reply", "kind", "objects", "effects", "stops"]
+  }
+};
+
+type RawDraft = {
+  reply?: unknown; kind?: unknown; finale?: unknown;
+  objects?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>>; stops?: Array<Record<string, unknown>>;
+};
+
+function asPlace(value: unknown): PixelPlace | null {
+  const place = value as Record<string, unknown> | null;
+  if (!place || typeof place !== "object" || typeof place.x !== "number" || typeof place.y !== "number") return null;
+  const clamp = (number: number) => Math.min(1, Math.max(0, number));
+  return {
+    x: clamp(place.x), y: clamp(place.y),
+    ...(typeof place.nodeId === "string" ? { nodeId: place.nodeId } : {}),
+    ...(typeof place.face === "number" ? { face: Math.round(place.face) } : {}),
+    ...(typeof place.view === "string" ? { view: place.view } : {})
+  };
+}
+
+/** Split the agent's pixel placements from the draft and validate the rest. */
+export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds: Set<string>): AgentResult {
+  const anchors: AgentAnchors = { objects: {}, stops: {}, effects: {} };
+  const previousObjects = new Map(previous.objects.map((object) => [object.id, object]));
+  const previousStops = new Map(previous.stops.map((stop) => [stop.id, stop]));
+  const objects = (raw.objects ?? []).map((object) => {
+    const id = String(object.id ?? "");
+    const place = asPlace(object.place);
+    if (place) anchors.objects[id] = place;
+    const position = Array.isArray(object.position) ? object.position : previousObjects.get(id)?.position ?? [0, 0, 0];
+    const { place: _place, ...rest } = object;
+    return { ...rest, position, rotation: object.rotation ?? previousObjects.get(id)?.rotation ?? [0, 0, 0], scale: object.scale ?? previousObjects.get(id)?.scale ?? 1 };
+  });
+  const effects = (raw.effects ?? []).map((effect) => {
+    const target = (effect.target ?? { kind: "scene" }) as Record<string, unknown>;
+    const place = target.kind === "point" ? asPlace(target.place) : null;
+    if (place) anchors.effects[String(effect.id ?? "")] = place;
+    const position = Array.isArray(target.position) ? target.position : [0, 0, 0];
+    return { ...effect, target: target.kind === "point" ? { kind: "point", position } : target };
+  });
+  const firstNode = nodeIds.values().next().value as string | undefined;
+  const stops = (raw.stops ?? []).map((stop) => {
+    const id = String(stop.id ?? "");
+    const before = previousStops.get(id);
+    const look = asPlace(stop.look);
+    const nodeId = typeof stop.nodeId === "string" && nodeIds.has(stop.nodeId) ? stop.nodeId : look?.nodeId && nodeIds.has(look.nodeId) ? look.nodeId : before?.view.nodeId ?? firstNode;
+    if (look) anchors.stops[id] = { ...look, nodeId: look.nodeId ?? nodeId };
+    const rotation = stop.rotation && typeof stop.rotation === "object" ? stop.rotation : before?.view.rotation ?? { azimuth: 0, polar: 0 };
+    return {
+      id, title: stop.title, text: stop.text, detail: stop.detail,
+      view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}) },
+      objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
+      files: before?.files, sounds: before?.sounds, models: before?.models, annotations: before?.annotations
+    };
+  });
+  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
+  const reply = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
+  return { experience, anchors, reply };
+}
+
+function userContent(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Anthropic.ContentBlockParam[] {
+  const content: Anthropic.ContentBlockParam[] = [];
+  for (const image of context.images) {
+    content.push({ type: "text", text: image.label });
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: image.data } });
+  }
+  const earlier = history.slice(-6).map((turn) => `They asked: ${turn.prompt}\nYou replied: ${turn.reply}`).join("\n\n");
+  content.push({ type: "text", text: `${context.text}${earlier ? `\n\nEarlier in this conversation:\n${earlier}` : ""}\n\nThe person asks:\n${prompt}` });
+  return content;
+}
+
+async function viaApi(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, check: (raw: RawDraft) => void): Promise<RawDraft> {
+  const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
+  const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: userContent(context, history, prompt) as Anthropic.Beta.BetaContentBlockParam[] }];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const stream = client.beta.messages.stream({
+      model: TOUR_AGENT_MODEL,
+      max_tokens: 32000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium" },
+      system: SYSTEM,
+      tools: [WRITE_TOUR as Anthropic.Beta.BetaTool],
+      tool_choice: { type: "auto" },
+      messages
+    });
+    const message = await stream.finalMessage();
+    if (message.stop_reason === "refusal") throw new TourAgentError("The agent declined this request. Try describing the tour differently.");
+    if (message.stop_reason === "max_tokens") throw new TourAgentError("The draft ran too long. Ask for fewer stops or less text.");
+    const call = message.content.find((block): block is Anthropic.Beta.BetaToolUseBlock => block.type === "tool_use" && block.name === "write_tour");
+    messages.push({ role: "assistant", content: message.content as Anthropic.Beta.BetaContentBlockParam[] });
+    if (!call) {
+      messages.push({ role: "user", content: "Call write_tour with the complete draft." });
+      continue;
+    }
+    try {
+      const raw = call.input as RawDraft;
+      check(raw);
+      return raw;
+    } catch (error) {
+      messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: call.id, is_error: true, content: `The draft was not saved. ${error instanceof Error ? error.message : "It was invalid."} Fix it and call write_tour again.` }] });
+    }
+  }
+  throw new TourAgentError("The agent could not produce a valid draft. Try again.");
+}
+
+async function viaCommand(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Promise<RawDraft> {
+  let template: unknown;
+  try { template = JSON.parse(process.env.SPHR_TOUR_AGENT_COMMAND ?? ""); } catch { template = null; }
+  if (!Array.isArray(template) || !template.length || !template.every((part) => typeof part === "string")) {
+    throw new TourAgentError("SPHR_TOUR_AGENT_COMMAND must be a JSON array of strings.");
+  }
+  const directory = await mkdtemp(path.join(tmpdir(), "sphr-tour-agent-"));
+  try {
+    const names = await Promise.all(context.images.map(async (image, index) => {
+      const name = `${String(index + 1).padStart(2, "0")}-${image.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.jpg`;
+      await writeFile(path.join(directory, name), Buffer.from(image.data, "base64"));
+      return `${name} is ${image.label}`;
+    }));
+    const schema = JSON.stringify(WRITE_TOUR.input_schema);
+    const fullPrompt = `${SYSTEM}\n\nInstead of calling a tool, answer with only one JSON object matching this schema, and nothing else:\n${schema}\n\n${names.length ? `Images of the space are files in ${directory}. Look at each one: ${names.join("; ")}.\n\n` : ""}${userContent({ text: context.text, images: [] }, history, prompt).map((block) => block.type === "text" ? block.text : "").join("\n")}`;
+    // Without a {prompt} placeholder the prompt goes to the agent's standard input.
+    const inline = (template as string[]).some((part) => part.includes("{prompt}"));
+    const args = (template as string[]).map((part) => part.replaceAll("{prompt}", fullPrompt).replaceAll("{dir}", directory));
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = spawn(args[0], args.slice(1), { cwd: directory, stdio: [inline ? "ignore" : "pipe", "pipe", "pipe"], env: process.env });
+      if (!inline) child.stdin?.end(fullPrompt);
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new TourAgentError("The agent took too long.")); }, 300_000);
+      child.stdout?.on("data", (chunk) => { stdout += chunk; if (stdout.length > 4_000_000) child.kill("SIGTERM"); });
+      child.stderr?.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", (error) => { clearTimeout(timer); reject(new TourAgentError(`Unable to start the agent. ${error.message}`)); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve(stdout);
+        else reject(new TourAgentError(`The agent stopped with an error. ${stderr.trim().split("\n").slice(-2).join(" ").slice(0, 300)}`));
+      });
+    });
+    return extractJson(output);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+/** Pull the draft out of CLI output, which may wrap it in a JSON envelope or prose. */
+export function extractJson(output: string): RawDraft {
+  const candidates: string[] = [output.trim()];
+  let envelope: { result?: unknown; is_error?: unknown; stops?: unknown } | null = null;
+  try { envelope = JSON.parse(output.trim()); } catch { /* not an envelope */ }
+  if (envelope?.is_error === true) throw new TourAgentError(`The agent reported a problem. ${String(envelope.result ?? "").slice(0, 300)}`);
+  try {
+    if (envelope && typeof envelope.result === "string") candidates.unshift(envelope.result);
+    else if (envelope && typeof envelope === "object" && Array.isArray(envelope.stops)) return envelope as RawDraft;
+  } catch { /* not an envelope */ }
+  for (const candidate of candidates) {
+    const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(candidate)?.[1];
+    for (const text of [fenced, candidate].filter(Boolean) as string[]) {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      if (start < 0 || end <= start) continue;
+      try {
+        const value = JSON.parse(text.slice(start, end + 1));
+        if (value && typeof value === "object") return value as RawDraft;
+      } catch { /* keep looking */ }
+    }
+  }
+  throw new TourAgentError("The agent did not return a draft.");
+}
+
+export async function composeTour(options: {
+  bootstrap: SphrBootstrap; draft: Experience; prompt: string; history: AgentTurn[]; views: ClientView[]; origin: string; kind: "tour" | "hunt"; team?: boolean;
+}): Promise<AgentResult & { library: LibraryModel[] }> {
+  if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY or SPHR_TOUR_AGENT_COMMAND.");
+  const data = options.bootstrap.space.space_data;
+  const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
+  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team);
+  const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
+  const check = (raw: RawDraft) => { normalizeAgentDraft(raw, options.draft, nodeIds); };
+  const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
+    ? await viaApi(context, options.history, prompt, check)
+    : await viaCommand(context, options.history, prompt);
+  return { ...normalizeAgentDraft(raw, options.draft, nodeIds), library: context.library };
+}

@@ -17,6 +17,17 @@ Use this for SPHR VFX and interaction polish.
 - `PanoramaLayer` and `IiifImageLayer` for non-splat visual layers.
 - `app/globals.css` for HUD/tour/loading responsiveness.
 
+## Effect packs
+
+Reusable effects and object shapes live in packs (`lib/experience/registry.ts`,
+core in `lib/experience/core/`). `EffectsLayer` runs effect instances per stop;
+`ObjectLayer` places objects. Splat effects add GPU modifiers through
+`context.splats.addModifier` and call `invalidate()` when uniforms change.
+Panorama effects draw over `context.surfaces()` (the capture mesh) with
+`depthFunc: LessEqualDepth`; the mesh writes depth while a tour places objects.
+Add new effects to a pack with metadata (label, one-sentence description,
+targets, params with ranges) so the builder and the tour agent can offer them.
+
 ## Implementation Rules
 
 - Effects must serve tour comprehension or scene interaction. Avoid decorative-only clutter.

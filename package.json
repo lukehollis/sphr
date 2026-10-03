@@ -21,9 +21,11 @@
     "test:accounts": "node --test scripts/test-accounts.mjs",
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
     "test:agents": "node scripts/test-agent-connector.mjs",
-    "worker": "node scripts/worker/agent-runner.mjs"
+    "worker": "node scripts/worker/agent-runner.mjs",
+    "test:experience": "node --experimental-transform-types --test scripts/test-experience.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@sparkjsdev/spark": "2.1.0",
     "lucide-react": "1.23.0",
     "next": "16.2.10",

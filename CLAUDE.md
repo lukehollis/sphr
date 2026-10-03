@@ -119,6 +119,7 @@ Keep new scene-specific behavior data-driven where possible:
 - Use `annotations` to show annotation planes.
 - Use `sounds` to control audio.
 - Use `extra` for project-specific transitions. Garden currently maps `shrinkToPoints`, `projectToSplats`, and `nightMode` to Spark/atmosphere changes.
+- Use `tour_data.objects`, `tour_data.effects`, `kind: "hunt"` and per-stop `objects`, `effects` and `find` for placed objects, pack effects and scavenger hunts (see `docs/tours-and-effects.md`).
 
 When adding renderer features, prefer adding a layer under `lib/three/renderers` or `lib/three/layers`, then compose it from `SphrRuntime`.
 

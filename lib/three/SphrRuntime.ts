@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { activeTourPoint, normalizeTour } from "@/lib/bootstrap";
 import type {
   IiifConfig,
@@ -18,15 +19,25 @@ import { AnnotationLayer } from "@/lib/three/layers/AnnotationLayer";
 import { CursorLayer } from "@/lib/three/layers/CursorLayer";
 import { NavigationLayer } from "@/lib/three/layers/NavigationLayer";
 import { SceneGraphLayer } from "@/lib/three/layers/SceneGraphLayer";
+import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
+import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
-import { PanoramaLayer } from "@/lib/three/renderers/PanoramaLayer";
+import { PanoramaLayer, panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
 import { selectDirectionalTarget, selectNavigationTarget, selectSpotTarget } from "@/lib/three/navigation";
 import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 import type { StartView } from '@/lib/scene-edits';
+import type { EffectInstance, ExperienceKind, PlacedObject, StopView, Vec3 } from "@/lib/experience/types";
+
+export type GizmoMode = "translate" | "rotate" | "scale";
+/** A pixel in a panorama face (agents) or in the current view (editor), as 0..1 fractions from the top left. */
+export type PixelAnchor = { nodeId?: string; face?: number; x: number; y: number; camera?: ViewCamera };
+/** A camera pose remembered with a captured view, so later placements aim from where it was taken. */
+export type ViewCamera = { position: Vec3; quaternion: [number, number, number, number]; fov: number; aspect: number };
+export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string };
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -72,6 +83,18 @@ export class SphrRuntime {
   private transitionMeshTween: Tween | null = null;
   private navigationReleaseTween: Tween | null = null;
   private animationStarted = false;
+  private objects: ObjectLayer | null = null;
+  private effects: EffectsLayer | null = null;
+  private gizmo: TransformControls | null = null;
+  private gizmoDragging = false;
+  private editing = false;
+  private selectedObject: string | null = null;
+  private readonly huntFound = new Set<string>();
+  private hintShown = false;
+  private hoverObjectId: string | null = null;
+  private lastSurfaceHover = 0;
+  private tooltip: HTMLDivElement | null = null;
+  private spaceBounds: THREE.Box3 | null = null;
   private currentNode: NodeData | null = null;
   private cubeRenderTarget: THREE.WebGLCubeRenderTarget | null = null;
   private cubeCamera: THREE.CubeCamera | null = null;
@@ -185,6 +208,8 @@ export class SphrRuntime {
     if (this.disposed) { this.sceneGraph.dispose(); return; }
     this.annotations.init();
     this.nav?.setOccluders(this.sceneGraph.getRaycastObjects());
+    await this.setupExperience();
+    if (this.disposed) return;
 
     await this.goTo(initialLocation.spaceIndex, initialLocation.pointIndex, true);
     this.setLoading({ label: "Ready", progress: 1, ready: true });
@@ -207,6 +232,7 @@ export class SphrRuntime {
       this.annotations?.hideAll();
       this.sceneGraph?.hideAll();
     }
+    this.applyExperienceForPoint(point);
     this.emitState();
   }
 
@@ -281,6 +307,8 @@ export class SphrRuntime {
     this.annotations?.show(point.annotations ?? point.overlays ?? []);
     this.sceneGraph?.showOnly(point.models ?? []);
     this.sceneGraph?.setViewMode(this.state.viewMode, this.state.debug);
+    this.hintShown = false;
+    this.applyExperienceForPoint(point);
 
     const returningFromOverview = fromOverview && nextViewMode === "FPV" && !instant;
     // Moves the visitor chose are always in sight; only tour steps between unlinked scans cut.
@@ -386,6 +414,14 @@ export class SphrRuntime {
         hasCubeScene: Boolean(this.cubeScene)
       },
       skybox: this.skybox?.getDebugSnapshot() ?? null,
+      experience: {
+        kind: this.tour.kind,
+        objects: this.tour.objects.length,
+        effects: this.tour.effects.length,
+        editing: this.editing,
+        selected: this.selectedObject,
+        hunt: this.state.hunt ?? null
+      },
       splats: this.splats?.getDebugSnapshot() ?? null,
       camera: {
         position: this.camera.position.toArray(),
@@ -422,6 +458,14 @@ export class SphrRuntime {
     this.cursor?.dispose();
     this.sceneGraph?.dispose();
     this.annotations?.dispose();
+    this.gizmo?.detach();
+    if (this.gizmo) this.scene.remove(this.gizmo.getHelper());
+    this.gizmo?.dispose();
+    this.gizmo = null;
+    this.effects?.dispose();
+    this.objects?.dispose();
+    this.tooltip?.remove();
+    this.tooltip = null;
     this.textureCache.dispose();
     this.controls.dispose();
     this.cubeRenderTarget?.dispose();
@@ -520,6 +564,7 @@ export class SphrRuntime {
 
   private handlePointerDown = (event: PointerEvent) => {
     if (!event.isPrimary || this.activePointerId !== null) { this.pointerMoved = true; return; }
+    if (this.gizmo?.axis) { this.pointerMoved = true; this.activePointerId = event.pointerId; return; }
     this.activePointerId = event.pointerId;
     this.pointerMoved = this.isNavigating || !this.state.loading.ready;
     this.pointerDown.set(event.clientX, event.clientY);
@@ -535,6 +580,7 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    if (this.hoverExperience(event)) return;
     const hoveredNode = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     this.nav?.setHovered(hoveredNode && hoveredNode.uuid !== this.currentNode?.uuid ? hoveredNode.uuid : null);
     const targets = this.sceneGraph?.getRaycastObjects() ?? [];
@@ -553,11 +599,21 @@ export class SphrRuntime {
   private handlePointerUp = (event: PointerEvent) => {
     if (event.pointerId !== this.activePointerId) return;
     this.activePointerId = null;
+    if (this.gizmoDragging) return;
     const dx = event.clientX - this.pointerDown.x;
     const dy = event.clientY - this.pointerDown.y;
     if (this.pointerMoved || Math.hypot(dx, dy) > 5 || this.isNavigating || event.button !== 0) return;
     // A single click in dollhouse must not consume the first half of a double click.
-    if (this.state.viewMode === "ORBIT") return;
+    if (this.state.viewMode === "ORBIT") {
+      if (this.objects) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.raycaster.setFromCamera(new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1), this.camera);
+        const picked = this.pickObject();
+        if (picked && this.editing) this.selectObject(picked);
+        else if (picked) this.handleObjectClick(picked);
+      }
+      return;
+    }
 
     const rect = this.canvas.getBoundingClientRect();
     const pointer = new THREE.Vector2(
@@ -565,6 +621,9 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    const picked = this.pickObject();
+    if (picked && this.editing) { this.selectObject(picked); return; }
+    if (picked && this.handleObjectClick(picked)) return;
     const node = this.nav?.getIntersectedNode(this.raycaster);
     if (node && node.uuid !== this.currentNode?.uuid) {
       this.navigateToNode(node);
@@ -616,6 +675,7 @@ export class SphrRuntime {
 
   private handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "\\") { this.toggleDebug(); return; }
+    if (this.editing && event.key === "Escape" && !isTypingTarget(event.target)) { this.selectObject(null); return; }
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const step = key === "ArrowUp" || key === "w" ? 1 : key === "ArrowDown" || key === "s" ? -1 : 0;
@@ -680,7 +740,7 @@ export class SphrRuntime {
     output.width = 960; output.height = 640;
     const context = output.getContext('2d');
     if (!context) throw new Error('Unable to create the thumbnail.');
-    const hidden = [this.nav?.group, this.scene.getObjectByName('annotations')].filter(Boolean) as THREE.Object3D[];
+    const hidden = [this.nav?.group, this.scene.getObjectByName('annotations'), this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
     const visibility = hidden.map(object => object.visible);
     try {
       hidden.forEach(object => { object.visible = false; });
@@ -701,7 +761,8 @@ export class SphrRuntime {
   private async navigateToNode(node: NodeData) {
     if (this.isNavigating) return;
     const fromOverview = this.state.viewMode === "ORBIT";
-    const tourPoint = this.findTourPointForNode(node.uuid);
+    // Hunt steps keep their clue while visitors walk around looking.
+    const tourPoint = this.tour.kind === "hunt" && this.state.guided ? null : this.findTourPointForNode(node.uuid);
     if (tourPoint) {
       await this.goTo(tourPoint.spaceIndex, tourPoint.pointIndex, false, !fromOverview, fromOverview);
       return;
@@ -743,6 +804,331 @@ export class SphrRuntime {
     }
     this.emitState();
     this.prefetchNeighbors(node);
+  }
+
+  // ---- Placed objects, effects, scavenger hunts and editing ----
+
+  private async setupExperience() {
+    this.objects = new ObjectLayer(this.scene);
+    this.effects = new EffectsLayer({
+      scene: this.scene,
+      camera: this.camera,
+      renderer: this.renderer,
+      objects: this.objects,
+      surfaces: () => this.sceneGraph?.getSurfaceMeshes() ?? [],
+      spaceBounds: (out) => out.copy(this.getSpaceBounds()),
+      splats: () => this.splats?.splatHost() ?? null,
+      panorama: () => this.panorama?.style ?? null,
+      viewMode: () => this.state.viewMode
+    });
+    await Promise.all([this.objects.setObjects(this.tour.objects), this.effects.setEffects(this.tour.effects)]);
+    this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0);
+  }
+
+  private applyExperienceForPoint(point?: TourPoint) {
+    const guided = this.state.guided || (this.editing && this.tour.hasGuidedTour);
+    const objects = new Set(guided ? point?.objects ?? [] : []);
+    const hunt = this.tour.kind === "hunt";
+    if (hunt && guided && point?.find) objects.add(point.find.objectId);
+    this.objects?.show(objects);
+    this.effects?.activate(guided ? point?.effects ?? [] : []);
+    this.state.hunt = hunt ? {
+      found: [...this.huntFound],
+      stepFound: Boolean(point?.find && this.huntFound.has(point.find.objectId)),
+      hint: this.hintShown
+    } : undefined;
+  }
+
+  /** Pointer over the space: object labels, interactive cursors and hover effects. */
+  private hoverExperience(event: PointerEvent) {
+    if (!this.objects) return false;
+    const picked = this.pickObject();
+    if (picked !== this.hoverObjectId) {
+      this.hoverObjectId = picked;
+      const data = picked ? this.objects.getData(picked) : null;
+      const label = this.editing ? data?.name : this.tour.kind === "hunt" && this.state.guided ? "" : data?.label;
+      this.showTooltip(label ?? "", event);
+    } else if (this.tooltip?.dataset.visible === "true") this.moveTooltip(event);
+    if (this.effects?.wantsPointer() && performance.now() - this.lastSurfaceHover > 70) {
+      this.lastSurfaceHover = performance.now();
+      this.effects.pointer(this.surfaceHit());
+    }
+    if (picked && (this.editing || this.isInteractive(picked))) {
+      this.canvas.style.cursor = "pointer";
+      this.cursor?.hide();
+      this.nav?.setHovered(null);
+      return true;
+    }
+    return false;
+  }
+
+  private isInteractive(id: string) {
+    const point = this.getActivePoint();
+    if (this.tour.kind === "hunt" && this.state.guided && point?.find?.objectId === id) return true;
+    return Boolean(this.objects?.getData(id)?.label) || this.tour.effects.some((effect) => effect.target.kind === "object" && effect.target.id === id);
+  }
+
+  /** The visible placed object under the pointer ray, unless a wall hides it. */
+  private pickObject() {
+    const picked = this.objects?.pick(this.raycaster);
+    if (!picked) return null;
+    if (this.state.viewMode === "FPV") {
+      const wall = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+      if (wall && wall.distance < picked.distance - 0.15) return null;
+    }
+    return picked.id;
+  }
+
+  private surfaceHit() {
+    const targets = [...(this.sceneGraph?.getRaycastObjects() ?? []), ...(this.splats?.getMeshes() ?? [])];
+    const hit = this.raycaster.intersectObjects(targets, true)[0];
+    if (!hit) return null;
+    const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)) : null;
+    return { point: hit.point.clone(), normal, objectId: null };
+  }
+
+  private handleObjectClick(id: string) {
+    const point = this.getActivePoint();
+    if (this.tour.kind === "hunt" && this.state.guided && point?.find?.objectId === id && !this.huntFound.has(id)) {
+      this.huntFound.add(id);
+      this.objects?.collect(id);
+      if (!this.effects?.cue(id, "found")) void this.effects?.flash("sparkles", id, "found", { mode: "burst", color: "#fff6c2", color2: "#f7c948", radius: 0.9 });
+      this.audio.play("found");
+      this.applyExperienceForPoint(point);
+      this.emitState();
+      return true;
+    }
+    if (!this.isInteractive(id)) return false;
+    this.effects?.cue(id, "click");
+    return true;
+  }
+
+  /** Hunt: show the step's hint and light up where the object is. */
+  requestHint() {
+    const point = this.getActivePoint();
+    const id = point?.find?.objectId;
+    if (this.tour.kind !== "hunt" || !id || this.huntFound.has(id)) return;
+    this.hintShown = true;
+    if (!this.effects?.cue(id, "hint")) void this.effects?.flash("beacon", id, "hint", { height: 3, radius: 0.6, color: "#ffffff" }, 12);
+    this.applyExperienceForPoint(point);
+    this.emitState();
+  }
+
+  /** Hunt: start over with every object back in place. */
+  restartHunt() {
+    this.huntFound.clear();
+    this.hintShown = false;
+    this.objects?.resetCollected();
+    this.applyExperienceForPoint(this.getActivePoint());
+    this.emitState();
+  }
+
+  setEditing(editing: boolean) {
+    this.editing = editing;
+    this.objects?.setEditing(editing);
+    if (editing && !this.gizmo) {
+      const gizmo = new TransformControls(this.camera, this.renderer.domElement);
+      gizmo.setSize(0.85);
+      gizmo.addEventListener("dragging-changed", (event) => {
+        this.gizmoDragging = Boolean(event.value);
+        this.controls.enabled = !this.gizmoDragging && !this.isNavigating;
+        if (!this.gizmoDragging) this.emitObjectTransform();
+      });
+      gizmo.addEventListener("objectChange", () => this.emitObjectTransform());
+      const helper = gizmo.getHelper();
+      helper.traverse((child) => { child.renderOrder = 60; });
+      this.scene.add(helper);
+      this.gizmo = gizmo;
+    }
+    if (!editing && this.gizmo) this.selectObject(null);
+    this.applyExperienceForPoint(this.getActivePoint());
+  }
+
+  selectObject(id: string | null) {
+    const holder = id ? this.objects?.getHolder(id) ?? null : null;
+    this.selectedObject = holder ? id : null;
+    if (this.gizmo) {
+      if (holder) this.gizmo.attach(holder);
+      else this.gizmo.detach();
+    }
+    this.callbacks.onObjectSelect?.(this.selectedObject);
+  }
+
+  setGizmoMode(mode: GizmoMode) {
+    this.gizmo?.setMode(mode);
+    this.gizmo?.setSpace(mode === "scale" ? "local" : "world");
+  }
+
+  private emitObjectTransform() {
+    const id = this.selectedObject;
+    const holder = id ? this.objects?.getHolder(id) : null;
+    if (!id || !holder) return;
+    const round = (value: number, places = 4) => Number(value.toFixed(places));
+    this.callbacks.onObjectTransform?.(id, {
+      position: [round(holder.position.x), round(holder.position.y), round(holder.position.z)],
+      rotation: [round(THREE.MathUtils.radToDeg(holder.rotation.x), 2), round(THREE.MathUtils.radToDeg(holder.rotation.y), 2), round(THREE.MathUtils.radToDeg(holder.rotation.z), 2)],
+      scale: [round(holder.scale.x), round(holder.scale.y), round(holder.scale.z)]
+    });
+  }
+
+  /** Replace the tour's stops, objects and effects without reloading the space. */
+  async setExperience(update: ExperienceUpdate) {
+    const segment = this.tour.spaces[0];
+    if (segment && update.points.length) segment.tourpoints = update.points;
+    this.tour.hasGuidedTour = this.tour.hasGuidedTour || update.points.length > 0;
+    this.tour.kind = update.kind;
+    this.tour.objects = update.objects;
+    this.tour.effects = update.effects;
+    this.tour.finale = update.finale;
+    if (this.state.activePointIndex >= (segment?.tourpoints.length ?? 1)) this.state.activePointIndex = 0;
+    await Promise.all([this.objects?.setObjects(update.objects), this.effects?.setEffects(update.effects)]);
+    if (this.disposed) return;
+    this.sceneGraph?.setOccluding(update.objects.length > 0 || update.effects.length > 0);
+    if (this.selectedObject && !update.objects.some((object) => object.id === this.selectedObject)) this.selectObject(null);
+    else if (this.selectedObject) this.selectObject(this.selectedObject);
+    this.applyExperienceForPoint(this.getActivePoint());
+    this.emitState();
+  }
+
+  /** Where a pixel lands in the space: the surface it shows, or two meters out. */
+  resolveAnchor(anchor: PixelAnchor): { position: Vec3; normal: Vec3 | null; hit: boolean; rotation: { azimuth: number; polar: number } } | null {
+    const node = anchor.nodeId ? this.resolveNode(anchor.nodeId) : null;
+    if (anchor.nodeId && !node) return null;
+    const ray = new THREE.Raycaster();
+    if (node) {
+      const origin = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
+      ray.set(origin, panoramaPixelDirection(node, anchor.x, anchor.y, anchor.face));
+    } else {
+      let camera: THREE.Camera = this.camera;
+      if (anchor.camera) {
+        const saved = new THREE.PerspectiveCamera(anchor.camera.fov, anchor.camera.aspect, 0.02, 20000);
+        saved.position.set(...anchor.camera.position);
+        saved.quaternion.fromArray(anchor.camera.quaternion);
+        saved.updateMatrixWorld(true);
+        camera = saved;
+      }
+      ray.setFromCamera(new THREE.Vector2(anchor.x * 2 - 1, -(anchor.y * 2 - 1)), camera);
+    }
+    ray.far = 500;
+    const targets = [...(this.sceneGraph?.getRaycastObjects() ?? []), ...(this.splats?.getMeshes() ?? [])];
+    const hit = ray.intersectObjects(targets, true).find((item) => item.distance > 0.15);
+    const direction = ray.ray.direction;
+    const rotation = {
+      azimuth: THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)),
+      polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)))
+    };
+    if (!hit) {
+      const point = ray.ray.at(2.5, new THREE.Vector3());
+      return { position: [point.x, point.y, point.z], normal: null, hit: false, rotation };
+    }
+    const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
+    if (normal && normal.dot(direction) > 0) normal.negate();
+    // Rest on floors; stand slightly off walls toward the viewer.
+    const point = hit.point.clone().addScaledVector(normal ?? direction.clone().negate(), normal && normal.y > 0.7 ? 0.01 : 0.06);
+    return { position: [point.x, point.y, point.z], normal: normal ? [normal.x, normal.y, normal.z] : null, hit: true, rotation };
+  }
+
+  /** A JPEG of the current view for the tour agent, with the camera it was taken from. */
+  captureView(width = 1024): { image: string; camera: ViewCamera; view: StopView } {
+    const aspect = this.camera.aspect;
+    const height = Math.round(width / Math.max(0.5, Math.min(2.5, aspect)));
+    const output = document.createElement("canvas");
+    output.width = width; output.height = height;
+    const context = output.getContext("2d");
+    if (!context) throw new Error("Unable to capture the view.");
+    const hidden = [this.nav?.group, this.scene.getObjectByName("annotations"), this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
+    const visibility = hidden.map((object) => object.visible);
+    try {
+      hidden.forEach((object) => { object.visible = false; });
+      this.renderer.render(this.scene, this.camera);
+      context.fillStyle = "#111"; context.fillRect(0, 0, width, height);
+      context.drawImage(this.canvas, 0, 0, width, height);
+    } finally {
+      hidden.forEach((object, index) => { object.visible = visibility[index]; });
+    }
+    return {
+      image: output.toDataURL("image/jpeg", 0.82),
+      camera: { position: this.camera.position.toArray() as Vec3, quaternion: this.camera.quaternion.toArray() as [number, number, number, number], fov: this.camera.fov, aspect },
+      view: this.cameraView()
+    };
+  }
+
+  /** Turn the camera toward a placed object without moving, or orbit to it in overview. */
+  lookAtObject(id: string) {
+    if (!this.objects || this.isNavigating) return;
+    const center = this.objects.bounds(id, new THREE.Box3()).getCenter(new THREE.Vector3());
+    if (this.state.viewMode === "FPV") {
+      const direction = center.clone().sub(this.camera.position);
+      if (direction.lengthSq() < 1e-6) return;
+      this.flyTo({ position: this.camera.position.clone(), target: this.camera.position.clone().addScaledVector(direction.normalize(), 0.1), fov: this.camera.fov });
+    } else {
+      const offset = this.camera.position.clone().sub(this.controls.target);
+      this.flyTo({ position: center.clone().add(offset), target: center, fov: this.camera.fov });
+    }
+  }
+
+  /** Heading and tilt that look from a panorama location toward a point. */
+  aimFrom(nodeId: string, point: Vec3) {
+    const node = this.resolveNode(nodeId);
+    if (!node) return null;
+    const origin = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
+    const direction = new THREE.Vector3(...point).sub(origin);
+    if (direction.lengthSq() < 1e-6) return null;
+    direction.normalize();
+    return {
+      azimuth: Number(THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)).toFixed(2)),
+      polar: Number(THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1))).toFixed(2))
+    };
+  }
+
+  /** The current camera as a tour stop view. */
+  cameraView(): StopView {
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    const rotation = {
+      azimuth: Number(THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)).toFixed(2)),
+      polar: Number(THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1))).toFixed(2))
+    };
+    const panoramas = !this.bootstrap.space.space_data.noPanos && this.getNodes().length > 0;
+    return {
+      ...(panoramas && this.currentNode ? { nodeId: this.currentNode.uuid } : {}),
+      ...(!panoramas ? { position: { x: Number(this.camera.position.x.toFixed(3)), y: Number(this.camera.position.y.toFixed(3)), z: Number(this.camera.position.z.toFixed(3)) } } : {}),
+      rotation,
+      fov: Math.round(this.camera.fov),
+      ...(this.state.viewMode === "ORBIT" ? { viewMode: "ORBIT" as const } : {})
+    };
+  }
+
+  /** Bounds of everything captured: meshes, splats and panorama locations. */
+  getSpaceBounds() {
+    if (this.spaceBounds && !this.spaceBounds.isEmpty()) return this.spaceBounds;
+    const box = new THREE.Box3();
+    const graph = this.sceneGraph?.getBounds();
+    if (graph && !graph.isEmpty()) box.union(graph);
+    if (this.splats) box.union(this.splats.getBounds(new THREE.Box3()));
+    for (const node of this.getNodes()) box.expandByPoint(this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position));
+    // Measure again later when nothing has loaded yet.
+    if (box.isEmpty()) return box.setFromCenterAndSize(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(10, 4, 10));
+    this.spaceBounds = box;
+    return box;
+  }
+
+  private showTooltip(label: string, event: PointerEvent) {
+    if (!label) { if (this.tooltip) this.tooltip.dataset.visible = "false"; return; }
+    if (!this.tooltip) {
+      this.tooltip = document.createElement("div");
+      this.tooltip.className = "sphr-object-label";
+      this.tooltip.setAttribute("role", "tooltip");
+      this.canvas.parentElement?.append(this.tooltip);
+    }
+    this.tooltip.textContent = label;
+    this.tooltip.dataset.visible = "true";
+    this.moveTooltip(event);
+  }
+
+  private moveTooltip(event: PointerEvent) {
+    if (!this.tooltip) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.tooltip.style.transform = `translate(${Math.round(event.clientX - rect.left + 14)}px, ${Math.round(event.clientY - rect.top + 14)}px)`;
   }
 
   private prefetchNeighbors(node: NodeData) {
@@ -806,6 +1192,9 @@ export class SphrRuntime {
       this.skybox?.update(this.camera);
       this.panorama?.update(this.camera);
       this.nav?.update(this.camera, this.canvas.clientHeight);
+      this.objects?.update(elapsed, now / 1000);
+      this.effects?.update(now / 1000, elapsed);
+      this.splats?.update();
       this.cursor?.update(now);
       this.renderer.render(this.scene, this.camera);
       this.cursor?.render(this.renderer, this.camera);

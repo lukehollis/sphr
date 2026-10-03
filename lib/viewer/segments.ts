@@ -23,6 +23,10 @@ export function tourSegment(bootstrap: SphrBootstrap, spaceIndex: number, pointI
       sceneGraph: [...graph.values()].map(node => ({ ...node, persistent: true, raycast: true }))
     } };
   }
+  // Placed objects and effects are measured in one space's coordinates.
+  const data = bootstrap.tour?.tour_data;
+  const objects = model ? [] : segment.objects ?? (spaceIndex === 0 ? data?.objects ?? [] : []);
+  const effects = model ? [] : segment.effects ?? (spaceIndex === 0 ? data?.effects ?? [] : []);
   return {
     key: `${spaceIndex}:${model ? 'model:' + [...models].sort().join(',') : space.type}`,
     point, space: activeSpace,
@@ -31,7 +35,8 @@ export function tourSegment(bootstrap: SphrBootstrap, spaceIndex: number, pointI
       tour: { ...bootstrap.tour, tour_data: {
         ...bootstrap.tour?.tour_data,
         mode: tour.hasGuidedTour ? 'guided' : 'explore',
-        spaces: [segment], sceneGraph: model ? activeSpace.space_data.sceneGraph : [...graph.values()],
+        spaces: [segment], objects, effects,
+        sceneGraph: model ? activeSpace.space_data.sceneGraph : [...graph.values()],
         annotationGraph: model ? [] : tour.annotationGraph
       } }
     } as SphrBootstrap

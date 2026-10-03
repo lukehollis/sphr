@@ -56,3 +56,6 @@ pnpm-debug.log*
 /.venv-matterport/
 __pycache__/
 *.pyc
+
+# Licensed model library assets are hosted separately (see scripts/library).
+/public/library

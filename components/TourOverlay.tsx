@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { ChevronLeft, ChevronRight, Footprints } from "lucide-react";
+import { ChevronLeft, ChevronRight, Footprints, Lightbulb, RotateCcw } from "lucide-react";
 import type { RuntimeState, TourPoint, TourUiText } from "@/lib/types";
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
 import { sanitizeTourHtml } from "@/lib/tour-html";
+import { paragraphs } from "@/lib/experience/types";
 
 type Props = {
   point: TourPoint;
@@ -14,7 +15,32 @@ type Props = {
   isLastPoint: boolean;
   onPrevious: () => void;
   onNext: () => void;
+  /** Scavenger hunt: step position, hint and restart. */
+  hunt?: { step: number; steps: number; onHint: () => void };
 };
+
+/** Text written in the tour builder is plain; older authored tours carry HTML. */
+function StopText({ value, plain, className }: { value?: string | null; plain: boolean; className: string }) {
+  if (!value) return null;
+  if (!plain) return <div className={className} dangerouslySetInnerHTML={{ __html: value }} />;
+  return <div className={className}>{paragraphs(value).map((part, index) => <p key={index}>{part}</p>)}</div>;
+}
+
+/** The closing card after the last stop of a tour or the last find of a hunt. */
+export function TourFinale({ text, hunt, onExplore, onRestart }: { text?: string; hunt?: { found: number; steps: number }; onExplore: () => void; onRestart: () => void }) {
+  return (
+    <section className="tour-overlay tour-finale-layer" aria-live="polite">
+      <div className="tour-copy tour-finale">
+        <h2 className="tour-finale-title">{hunt ? (hunt.found >= hunt.steps ? "You found everything" : `You found ${hunt.found} of ${hunt.steps}`) : "The end of the tour"}</h2>
+        {text && <StopText value={text} plain className="tour-main-text" />}
+        <div className="tour-finale-actions">
+          <button type="button" className="tour-next" onClick={onExplore}><span className="tour-button-label">Explore freely</span><Footprints size={22} aria-hidden="true" /></button>
+          <button type="button" className="tour-restart" onClick={onRestart}><RotateCcw size={18} aria-hidden="true" /> {hunt ? "Play again" : "Start again"}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) {
   if (file.url && /^https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/[\w-]+(?:\?.*)?$/.test(file.url)) {
@@ -28,25 +54,42 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
     : image ? <a href={image} target="_blank" rel="noopener noreferrer"><img className="tour-media" src={image} alt={file.title ?? ''} /></a> : null;
 }
 
-export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext }: Props) {
+export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt }: Props) {
+  const plain = point.format === "plain";
+  const huntStep = hunt && point.find ? state.hunt : undefined;
+  const found = Boolean(huntStep?.stepFound);
+  const locked = Boolean(hunt && point.find && !found);
   const primaryFile = point.files?.[0];
   const mapUrl = point.mapUrl && /^https:\/\/(?:www\.)?google\.com\/maps(?:\/embed\/|\?)/.test(point.mapUrl) ? point.mapUrl : '';
   // Older tours kept their opening description in a separate start screen.
   // Preserve that copy at an otherwise empty first stop when entering directly.
   const rawText = point.text || (!point.secondaryText && !primaryFile && !mapUrl
     && state.activeSpaceIndex === 0 && state.activePointIndex === 0 ? description : undefined);
-  const text = useMemo(() => sanitizeTourHtml(rawText), [rawText]);
-  const secondaryText = useMemo(() => sanitizeTourHtml(point.secondaryText), [point.secondaryText]);
+  // Builder text is plain and rendered as text; older authored HTML is sanitized.
+  const text = useMemo(() => plain ? rawText : sanitizeTourHtml(rawText), [rawText, plain]);
+  const secondaryText = useMemo(() => plain ? point.secondaryText : sanitizeTourHtml(point.secondaryText), [point.secondaryText, plain]);
+
+  const nextLabel = locked ? "Find it to go on"
+    : hunt ? (isLastPoint ? "Finish" : "Next clue")
+    : isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next";
 
   return (
     <section className="tour-overlay" aria-live="polite">
-      {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl) && (
-        <div className="tour-copy">
+      {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl || hunt) && (
+        <div className={hunt ? "tour-copy tour-hunt" : "tour-copy"}>
+          {hunt && <p className="tour-hunt-step">{found ? "Found" : `Clue ${hunt.step} of ${hunt.steps}`}{point.title ? <span>{point.title}</span> : null}</p>}
+          {!hunt && point.title && plain && <p className="tour-stop-title">{point.title}</p>}
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
             <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}
-          {text && <div className="tour-main-text" dangerouslySetInnerHTML={{ __html: text }} />}
-          {secondaryText && <div className="tour-secondary-text" dangerouslySetInnerHTML={{ __html: secondaryText }} />}
+          {found && point.find?.found
+            ? <StopText value={point.find.found} plain className="tour-main-text tour-found-text" />
+            : <StopText value={text} plain={plain} className="tour-main-text" />}
+          {!found && <StopText value={secondaryText} plain={plain} className="tour-secondary-text" />}
+          {locked && state.hunt?.hint && point.find?.hint && <StopText value={point.find.hint} plain className="tour-secondary-text tour-hint-text" />}
+          {locked && <button type="button" className="tour-hint" onClick={hunt?.onHint} disabled={state.hunt?.hint && !point.find?.hint}>
+            <Lightbulb size={18} aria-hidden="true" /> {state.hunt?.hint ? "Look for the light" : "Hint"}
+          </button>}
         </div>
       )}
       {state.guided && (
@@ -55,8 +98,8 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
             <ChevronLeft size={22} aria-hidden="true" />
             <span className="tour-button-label">{ui?.previousButtonText ?? "Previous"}</span>
           </button>
-          <button type="button" className={isLastPoint ? "tour-next tour-next-final" : "tour-next"} aria-label={isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next"} title={isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next"} onClick={onNext} disabled={state.navigating}>
-            <span className="tour-button-label">{isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next"}</span>
+          <button type="button" className={isLastPoint ? "tour-next tour-next-final" : "tour-next"} aria-label={nextLabel} title={nextLabel} onClick={onNext} disabled={state.navigating || locked}>
+            <span className="tour-button-label">{nextLabel}</span>
             {isLastPoint ? <Footprints size={22} aria-hidden="true" /> : <ChevronRight size={22} aria-hidden="true" />}
           </button>
         </nav>

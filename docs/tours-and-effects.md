@@ -1,0 +1,105 @@
+# Guided tours, scavenger hunts, objects and effects
+
+A space can carry an authored experience: a **guided tour** (stops with a
+camera view and text) or a **scavenger hunt** (clues, each asking visitors to
+find and click a placed object). Both can place custom 3D objects in the space
+and run visual effects at chosen stops or the whole time.
+
+## Building one
+
+Sign in at `/admin`, open a space, and choose **Make a tour or scavenger hunt**
+(`/admin/scenes/<id>/tour`). Describe what you want in the text box and send it
+to your agent. It looks at photographs of the space, writes every stop, places
+objects where it sees fitting spots, and adds effects. Then edit anything:
+retitle and rewrite stops, aim a stop at the current view, pick an object in
+the space and move, turn or resize it with the gizmo, tune effects, and
+preview it as a visitor. **Save** publishes it at the space's normal link.
+
+The agent is configured on the server, first match wins:
+
+| Variable | Agent |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Claude through the Messages API (`SPHR_TOUR_AGENT_MODEL`, default `claude-opus-5-5`) |
+| `SPHR_TOUR_AGENT_COMMAND` | Your own agent CLI as a JSON array, for example `["claude","-p","--output-format","json","--allowedTools","Read"]`. The prompt is piped to standard input unless an argument contains `{prompt}`. Images of the space are files in the working directory (`{dir}`). |
+
+Without either, the builder still works by hand.
+
+Placed models can come from three places: pack shapes, any `https` glTF or GLB
+address, and a model library manifest named by `SPHR_LIBRARY_URL` (or
+`SPHR_LIBRARY_FILE`):
+
+```json
+{ "models": [{ "id": "chest", "name": "Treasure chest", "category": "Props", "url": "props/chest.glb", "height": 0.6, "tags": ["treasure"], "scope": "everyone" }] }
+```
+
+Relative URLs resolve against the manifest. `"scope": "team"` keeps a model to
+administrators, for assets licensed to your team but not to every editor.
+
+## Data
+
+Saved experiences live in the state database (`scene_tours`) and are applied
+to the space's opening segment when it is served. Packages can also author
+them directly in `tour_data`:
+
+```json
+{
+  "kind": "hunt",
+  "finale": "You found everything.",
+  "objects": [
+    { "id": "coin", "name": "Old coin", "source": { "kind": "shape", "shape": "orb", "color": "#f6c642" },
+      "position": [1.2, 0.4, -3], "rotation": [0, 0, 0], "scale": [1, 1, 1], "idle": "spin" }
+  ],
+  "effects": [
+    { "id": "sweep", "type": "scan", "target": { "kind": "scene" }, "params": { "mode": "reveal", "speed": 6 } },
+    { "id": "glint", "type": "sparkles", "target": { "kind": "object", "id": "coin" }, "params": { "mode": "aura" }, "always": true }
+  ],
+  "spaces": [{ "id": "space-id", "tourpoints": [
+    { "id": "clue-1", "title": "By the door", "text": "Something shiny waits where everyone comes in.", "format": "plain",
+      "nodeUUID": "scan-003", "rotation": { "azimuth": 40, "polar": -10 },
+      "objects": [], "effects": ["sweep"], "find": { "objectId": "coin", "hint": "Look low.", "found": "That coin is from 1890." } }
+  ] }]
+}
+```
+
+Rotations of objects are degrees. Object and effect IDs are listed per stop;
+`always` objects and effects also show in free exploration. Objects and effects
+belong to the first space of a multi-space tour.
+
+## Packs
+
+Effects and shapes come in packs (`lib/experience/registry.ts`). A pack lists
+plain metadata, which the builder, the validator and the agent read, and loads
+its Three.js code lazily only when a space uses it. Core ships five effects
+(`sparkles`, `scan`, `sketch`, `dust`, `beacon`) and four shapes (`marker`, `orb`,
+`box`, `sign`). `sketch` draws the space in pencil and ink, then a radial scan
+paints the color back in (or turns color into a drawing). Splats are restyled on
+the GPU; panoramas are drawn from the photograph's own edges. A space can also
+carry a companion splat trained on line drawings of its photos
+(`{ "url": "...", "role": "sketch" }` in `space_data.splats`, in the manner of
+[3D line drawings](https://amritkwatra.com/experiments/3d-line-drawings)); the
+sketch effect then reveals between the two splats instead. Register more in `lib/experience/extra-packs.ts`.
+
+An effect factory receives a context with the scene, camera, its target object
+or point, the space's bounds and capture meshes, and, in splat spaces, a host
+that adds GPU modifiers to every splat:
+
+```ts
+const create: EffectFactory = (context, instance) => ({
+  update({ time, delta }) { /* animate */ },
+  setActive(active) { /* fade in or out as stops change */ },
+  play(cue) { /* "found", "hint" or "click" */ },
+  pointer(hit) { /* surface under the pointer, for hover effects */ },
+  dispose() {}
+});
+```
+
+In panorama spaces the capture mesh writes depth while objects are placed, so
+walls hide objects behind them, and surface effects draw over the photograph
+using the mesh's geometry.
+
+## Checks
+
+```bash
+npm run test:experience
+npm run typecheck
+```
