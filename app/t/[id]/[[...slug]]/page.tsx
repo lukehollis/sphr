@@ -7,6 +7,7 @@ import { readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath } from "@/lib/server/accounts";
 import { siteBrand } from "@/lib/server/brand";
 import { readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
+import { variantsUrl } from "@/lib/server/variants";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string; slug?: string[] }> };
@@ -35,6 +36,6 @@ export default async function TourPage({ params }: Props) {
   if (!scene) notFound();
   if (slug?.length !== 1 || slug[0] !== sceneTitleSlug(tour.title)) redirect(tourPath(tour));
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl}
-    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true }}
+    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants: variantsUrl(scene.sceneId) }}
     preview={{ title: tour.title, image: scene.thumbnail }} />;
 }

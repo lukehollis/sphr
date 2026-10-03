@@ -9,15 +9,15 @@ import type { ObjectTransform, RuntimeState } from "@/lib/types";
 import type { ViewerSession } from "@/lib/viewer/ViewerSession";
 import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
-import { effectEntries, effectEntry, shapeEntries, shapeEntry, soundEntries } from "@/lib/experience/packs";
+import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, soundEntries } from "@/lib/experience/packs";
 import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
-import { newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type PlacedObject, type Vec3 } from "@/lib/experience/types";
+import { LOOK_TRANSITIONS, newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import type { LibraryModel } from "@/lib/experience/library";
 
 type Props = {
   scene: SceneListing;
-  edits: Pick<SceneEdits, "title" | "startView">;
+  edits: Pick<SceneEdits, "title" | "startView"> & { variants?: string | null };
   initial: Experience;
   saved: { experience: Experience | null; revision: number };
   library: LibraryModel[];
@@ -29,11 +29,12 @@ type Props = {
 };
 
 type Turn = { prompt: string; reply: string };
+const THREE_DEG = Math.PI / 180;
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
-type Tab = "stops" | "objects" | "effects";
+type Tab = "stops" | "objects" | "effects" | "look";
 
 function updateFor(draft: Experience, standalone: boolean) {
-  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, standalone };
+  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, standalone };
 }
 
 export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api, tour }: Props) {
@@ -181,6 +182,18 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
       // and things placed far off grow so they still read from there, up to five times.
       const turned = object.rotation.some((value) => value !== 0);
       const grow = spot.distance ? Math.min(5, Math.max(1, spot.distance / 5)) : 1;
+      // Nothing lands at the visitor's feet: a spot on the floor right below the camera moves out to two meters.
+      const away = [spot.position[0] - spot.origin[0], spot.position[2] - spot.origin[2]];
+      const reach = Math.hypot(away[0], away[1]);
+      if (!spot.hit) {
+        // Pointed at sky or open air: stand it on the ground a few meters out in that direction.
+        const heading = THREE_DEG * spot.rotation.azimuth;
+        spot.position = [spot.origin[0] - Math.sin(heading) * 4, spot.floor ?? spot.origin[1] - 1.5, spot.origin[2] - Math.cos(heading) * 4];
+      } else if (reach < 2) {
+        const heading = THREE_DEG * spot.rotation.azimuth;
+        const [dx, dz] = reach > 0.2 ? [away[0] / reach, away[1] / reach] : [-Math.sin(heading), -Math.cos(heading)];
+        spot.position = [spot.origin[0] + dx * 2, spot.position[1], spot.origin[2] + dz * 2];
+      }
       return { ...object, position: spot.position,
         ...(turned ? {} : { rotation: [0, Number(spot.rotation.azimuth.toFixed(1)), 0] as Vec3 }),
         ...(grow > 1 ? { scale: object.scale.map((value) => Number((value * grow).toFixed(3))) as Vec3 } : {}) };
@@ -377,8 +390,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         </form>
 
         <div className="builder-tabs" role="tablist" aria-label="Tour parts">
-          {(["stops", "objects", "effects"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
-            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : `Effects and sound ${draft.effects.length}`}
+          {(["stops", "objects", "effects", "look"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
+            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : "Look"}
           </button>)}
         </div>
 
@@ -462,10 +475,17 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           {!draft.objects.length && <p className="editor-help">Place shapes, library models or your own glTF models. Select one in the space to move, turn or resize it.</p>}
         </div>}
 
+        {tab === "look" && <LookPanel draft={draft} stop={activeStop ?? null} splatSpace={splatSpace} ready={Boolean(canEdit)}
+          thumbnails={(ids) => session.current?.lookThumbnails(ids, 200) ?? {}}
+          onChange={(look, stopId) => {
+            if (stopId) patchStop(stopId, { look });
+            else setDraft((current) => ({ ...current, look }));
+          }} />}
+
         {tab === "effects" && <div role="tabpanel" className="builder-list">
           <label className="builder-add-effect">Add an effect<select value="" disabled={!canEdit} onChange={(event) => { if (event.target.value) addEffect(event.target.value); }}>
             <option value="">Choose an effect</option>
-            {effectEntries().map((entry) => <option key={entry.type} value={entry.type} disabled={entry.requires === "splats" && !splatSpace}>{entry.label}{entry.requires === "splats" && !splatSpace ? " (splat spaces)" : ""}</option>)}
+            {effectEntries().filter((entry) => !entry.retired).map((entry) => <option key={entry.type} value={entry.type} disabled={entry.requires === "splats" && !splatSpace}>{entry.label}{entry.requires === "splats" && !splatSpace ? " (splat spaces)" : ""}</option>)}
           </select></label>
           {draft.effects.map((effect) => <EffectCard key={effect.id} effect={effect} objects={draft.objects} objectName={objectName}
             onPreview={(source) => void session.current?.previewSound(source)}
@@ -484,6 +504,75 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         </div>
       </div>
     </aside>
+  </div>;
+}
+
+const TRANSITION_LABELS: Record<LookTransition, string> = {
+  cut: "Cut", fade: "Fade", dissolve: "Dissolve", wipe: "Wipe", iris: "Iris", sweep: "Sweep through the space", glitch: "Glitch"
+};
+
+/**
+ * The look of the whole frame, for the tour or for the stop in view: previews of
+ * the current view in every look, the transition into it, and its settings.
+ */
+function LookPanel({ draft, stop, splatSpace, ready, thumbnails, onChange }: {
+  draft: Experience; stop: ExperienceStop | null; splatSpace: boolean; ready: boolean;
+  thumbnails: (ids: string[]) => Record<string, string>;
+  onChange: (look: StopLook | undefined, stopId: string | null) => void;
+}) {
+  const [scope, setScope] = useState<"stop" | "tour">(stop ? "stop" : "tour");
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const looks = lookEntries();
+  const forStop = scope === "stop" && stop;
+  const current = forStop ? stop.look : draft.look;
+  const selected = current?.look ?? (forStop ? "inherit" : "color");
+  const entry = current && current.look !== "color" ? lookEntry(current.look) : null;
+  const refresh = useCallback(() => {
+    if (ready) setPreviews(thumbnails(["color", ...lookEntries().filter((look) => splatSpace || look.requires !== "splats").map((look) => look.id)]));
+  }, [ready, splatSpace, thumbnails]);
+  useEffect(() => { refresh(); }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const choose = (id: string) => {
+    const target = forStop ? stop.id : null;
+    if (id === "inherit") { onChange(undefined, target); return; }
+    if (id === "color" && !forStop) { onChange(undefined, null); return; }
+    const look = id === "color" ? null : lookEntry(id);
+    onChange({ look: id, ...(look?.params.length ? { params: resolveParams(look, {}) } : {}),
+      transition: current?.transition ?? (look?.variant ? "sweep" : "fade"), ...(current?.duration ? { duration: current.duration } : {}) }, target);
+  };
+  const patch = (next: Partial<StopLook>) => { if (current) onChange({ ...current, ...next }, forStop ? stop.id : null); };
+
+  return <div role="tabpanel" className="builder-list builder-look">
+    <div className="builder-kind" role="radiogroup" aria-label="Look for">
+      <button type="button" role="radio" aria-checked={scope === "tour"} onClick={() => setScope("tour")}>Whole tour</button>
+      <button type="button" role="radio" aria-checked={scope === "stop"} disabled={!stop} onClick={() => setScope("stop")}>{stop ? `This stop` : "No stop open"}</button>
+    </div>
+    <p className="editor-help">{forStop ? `"${stop.title || "This stop"}" changes to its look as visitors arrive.` : "Every stop without its own look, and free exploration, use this."}</p>
+    <div className="builder-looks">
+      {forStop && <button type="button" className="builder-look" aria-pressed={selected === "inherit"} onClick={() => choose("inherit")}>
+        <span className="builder-look-image builder-look-same">Same as the tour</span><span>{draft.look ? lookEntry(draft.look.look)?.label ?? "Color" : "Color"}</span>
+      </button>}
+      {[{ id: "color", label: "Color", requires: undefined }, ...looks].map((look) => {
+        const disabled = look.requires === "splats" && !splatSpace;
+        return <button key={look.id} type="button" className="builder-look" aria-pressed={selected === look.id} disabled={disabled} title={"description" in look ? look.description : "The capture as it is."} onClick={() => choose(look.id)}>
+          <span className="builder-look-image">{previews[look.id] ? <img src={previews[look.id]} alt="" /> : null}</span>
+          <span>{look.label}</span>
+        </button>;
+      })}
+    </div>
+    <button type="button" className="builder-quiet" disabled={!ready} onClick={refresh}>Refresh previews from this view</button>
+    {current && selected !== "inherit" && <>
+      <div className="builder-row">
+        <label>Transition<select value={current.transition ?? "fade"} onChange={(event) => patch({ transition: event.target.value as LookTransition })}>
+          {LOOK_TRANSITIONS.map((value) => <option key={value} value={value}>{TRANSITION_LABELS[value]}</option>)}
+        </select></label>
+        <label>Seconds<input type="number" min={0} max={8} step={0.1} value={current.duration ?? ""} placeholder="Auto"
+          onChange={(event) => patch({ duration: event.target.value === "" ? undefined : Math.max(0, Math.min(8, Number(event.target.value))) })} /></label>
+      </div>
+      {entry && <p className="editor-help">{entry.description}</p>}
+      {entry?.params.map((param) => <Param key={param.key} spec={param} value={current.params?.[param.key]} onPreview={() => {}}
+        onChange={(value) => patch({ params: { ...resolveParams(entry, current.params), [param.key]: value } })} />)}
+    </>}
   </div>;
 }
 

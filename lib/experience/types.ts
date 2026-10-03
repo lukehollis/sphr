@@ -53,6 +53,22 @@ export type StopView = {
 /** A scavenger hunt step asks the visitor to find one placed object. */
 export type StopFind = { objectId: string; hint?: string; found?: string };
 
+/** How one look gives way to the next, like a cut in a video editor. */
+export type LookTransition = "cut" | "fade" | "dissolve" | "wipe" | "iris" | "sweep" | "glitch";
+export const LOOK_TRANSITIONS: readonly LookTransition[] = ["cut", "fade", "dissolve", "wipe", "iris", "sweep", "glitch"];
+
+/**
+ * A visual style for the whole frame (a line drawing, a blueprint, film noir…),
+ * set for the tour and changed per stop. `color` is the capture as it is.
+ */
+export type StopLook = {
+  look: string;
+  params?: EffectParams;
+  transition?: LookTransition;
+  /** Seconds the transition takes. */
+  duration?: number;
+};
+
 export type ExperienceStop = {
   id: string;
   title: string;
@@ -68,6 +84,8 @@ export type ExperienceStop = {
   sounds?: string[];
   models?: string[];
   annotations?: string[];
+  /** This stop's look; without one, the tour's look. */
+  look?: StopLook;
 };
 
 export type ExperienceKind = "tour" | "hunt";
@@ -81,6 +99,8 @@ export type Experience = {
   stops: ExperienceStop[];
   objects: PlacedObject[];
   effects: EffectInstance[];
+  /** The look for free exploration and for stops without their own. */
+  look?: StopLook;
 };
 
 export const EXPERIENCE_LIMITS = {

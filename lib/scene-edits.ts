@@ -6,7 +6,7 @@ import { applyExperience } from '@/lib/experience/apply';
 export type StartView = { nodeId?: string; position: Vector3Like; rotation: CameraRotation; fov: number };
 export type SceneEdits = { title: string | null; startView: StartView | null; revision: number; thumbnailVersion: string | null };
 /** What the viewer applies on top of a published capture; `standalone` marks a customer's own tour of the space. */
-export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean };
+export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean; variants?: string | null };
 
 export function sceneTitleSlug(title: string) {
   return title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -58,6 +58,12 @@ export function validateStartView(value: unknown, bootstrap: SphrBootstrap): Sta
 /** Apply metadata at the edge; published capture packages and later tour stops remain intact. */
 export function applySceneEdits(input: SphrBootstrap, edits: ViewerEdits): SphrBootstrap {
   const edited = applyStartEdits(input, edits);
+  // Drawn versions of the panoramas, for looks, are listed beside the published capture.
+  if (edits.variants) {
+    for (const space of [edited.space, ...(edited.orderedSpaces ?? [])]) {
+      if (!space.space_data.variants) space.space_data = { ...space.space_data, variants: edits.variants };
+    }
+  }
   return edits.experience ? applyExperience(edited, edits.experience, { standalone: edits.standalone }) : edited;
 }
 

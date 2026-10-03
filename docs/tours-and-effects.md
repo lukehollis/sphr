@@ -106,6 +106,37 @@ In panorama spaces the capture mesh writes depth while objects are placed, so
 walls hide objects behind them, and surface effects draw over the photograph
 using the mesh's geometry.
 
+## Looks
+
+A look restyles the whole frame, like a filter in a video editor, and a
+tour or a stop can change to one through a transition: `cut`, `fade`,
+`dissolve`, `wipe`, `iris` (opening from what the stop is about), `sweep`
+(opening through the space like a scan) or `glitch`.
+
+```json
+"look": { "look": "blueprint", "transition": "sweep", "duration": 2 },
+"stops": [{ "id": "one", "look": { "look": "lines", "transition": "iris" } }, { "id": "two", "look": "color" }]
+```
+
+The tour's look covers free exploration and every stop without its own;
+`color` is the capture as it is. With no look, frames render straight to the
+screen. With one, the frame renders offscreen and a full-screen shader redraws
+it (`lib/three/looks`). Each look is GLSL for `vec3 look(vec2 uv)`, so adding
+one is a few lines in a pack (`looks` on a Pack; see `LookMeta` in
+`registry.ts`). Core ships `lines` (line drawing), `watercolor`, `blueprint`
+and `noir`.
+
+Line drawings work the way the 3D line drawings experiment by Amrit Kwatra
+does (Chan, Isola and Durand's informative-drawings model, as in splatline):
+every photograph of a space is redrawn by the model once, offline, with
+`scripts/lines/linework.py`. Panorama faces go to
+`<SPHR_LINES_BASE_URL>/<sceneId>/<style>/<uuid>/<face>.jpg` with an
+`index.json`, and the viewer blends them into the photographs with the
+transition's shape. For a Gaussian splat space, a companion splat trained on
+the drawn photos with the same cameras is listed in `space_data.splats` with
+`role: "sketch"` (or `"watercolor"`), loaded only when a look asks for it.
+Without a drawn version, a look draws the frame's edges itself.
+
 ## Sound
 
 Two effects make sound. `sound` plays a clip when a stop opens, loops it

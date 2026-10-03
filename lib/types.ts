@@ -1,4 +1,4 @@
-import type { EffectInstance, ExperienceKind, PlacedObject, StopFind } from "@/lib/experience/types";
+import type { EffectInstance, ExperienceKind, PlacedObject, StopFind, StopLook } from "@/lib/experience/types";
 
 export type Vector3Like = {
   x: number;
@@ -60,7 +60,7 @@ export type SplatConfig = TransformConfig & {
    * "sketch" marks a companion splat trained on line drawings of the same photos.
    * It stays hidden until a sketch effect reveals it.
    */
-  role?: "color" | "sketch";
+  role?: "color" | "sketch" | "watercolor";
 };
 
 export type IiifConfig = TransformConfig & {
@@ -100,6 +100,8 @@ export type TourPoint = {
   effects?: string[];
   /** Scavenger hunt: the object to find at this step. */
   find?: StopFind;
+  /** The frame's look at this stop (see TourData.look). */
+  look?: StopLook;
   mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
@@ -148,6 +150,8 @@ export type TourData = {
   effects?: EffectInstance[];
   /** Shown after the last tour stop, or when every hunt item is found. */
   finale?: string;
+  /** The frame's look in free exploration and at stops without their own. */
+  look?: StopLook;
   audio?: Record<string, AudioConfig>;
   autoplay?: boolean;
   defaultShowText?: boolean;
@@ -246,6 +250,8 @@ export type SpaceData = {
   splats?: SplatConfig[];
   iiif?: IiifConfig | IiifConfig[];
   skybox?: SkyboxConfig | null;
+  /** Index of drawn versions of the panorama faces (line drawings, watercolor), for looks. */
+  variants?: string;
   clickNavigation?: ClickNavigationConfig;
   navigation?: NavigationConfig;
   navigationTransition?: NavigationTransitionConfig;
@@ -339,6 +345,7 @@ export type NormalizedTour = {
   objects: PlacedObject[];
   effects: EffectInstance[];
   finale?: string;
+  look?: StopLook;
   title: string;
   spaces: TourSpace[];
   audio: Record<string, AudioConfig>;

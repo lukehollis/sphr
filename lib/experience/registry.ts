@@ -44,6 +44,8 @@ export type EffectMeta = {
   oneShot?: boolean;
   /** Only works in Gaussian splat spaces, because it rewrites the splats themselves. */
   requires?: "splats";
+  /** Kept working for tours that use it, but not offered for new ones. */
+  retired?: string;
 };
 
 export type ShapeMeta = {
@@ -129,12 +131,41 @@ export type ShapeFactory = (object: PlacedObject) => THREE.Object3D;
 export type EffectEntry = EffectMeta & { load: () => Promise<{ default: EffectFactory }> };
 export type ShapeEntry = ShapeMeta & { load: () => Promise<{ default: ShapeFactory }> };
 
+/**
+ * A look restyles the whole rendered frame in one full-screen shader. `glsl` is
+ * the body of `vec3 look(vec2 uv)`, returning a display (sRGB) color. It can call
+ * SAMPLE(uv) for the frame's sRGB color, LUM(c), EDGES(uv, width) for a 0..1 edge
+ * strength, BLUR(uv, radius), HASH(p), NOISE(p) and P(key) for a parameter, and
+ * COVER(uv) for how much of the pixel the space covers (splats leave gaps), and
+ * read uTime, uResolution and PX (one pixel in uv units). A look with a `variant`
+ * renders that version of the space first when one exists (a companion splat
+ * trained on line drawings, or line-drawn panorama photos); HAS_VARIANT says
+ * whether it did, so the shader can fall back to drawing lines itself.
+ */
+export type LookMeta = {
+  id: string;
+  label: string;
+  /** One sentence for the editor and the tour agent. */
+  description: string;
+  params: ParamSpec[];
+  variant?: "sketch" | "watercolor";
+  /** Shrink or flatten the splats while the look is on. */
+  splats?: { scale?: number; opacity?: number; falloff?: number };
+  /** Only works in Gaussian splat spaces. */
+  requires?: "splats";
+  /** Color behind the space where it leaves gaps (splats rarely fill the frame); paper for drawings. */
+  backdrop?: string;
+  glsl: string;
+};
+export type LookEntry = LookMeta;
+
 export type Pack = {
   id: string;
   label: string;
   effects: EffectEntry[];
   shapes: ShapeEntry[];
   sounds?: SoundEntry[];
+  looks?: LookEntry[];
 };
 
 /** Audio shared by every effect: one context, a listener on the camera and a master volume. */

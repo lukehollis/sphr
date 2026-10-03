@@ -24,6 +24,7 @@ import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
 import { ExperienceAudio } from "@/lib/experience/audio";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
+import { LookPass, lookKey, type LookHost } from "@/lib/three/looks/LookPass";
 import { PanoramaLayer, panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
 import { selectDirectionalTarget, selectNavigationTarget, selectSpotTarget } from "@/lib/three/navigation";
@@ -31,7 +32,7 @@ import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 import type { StartView } from '@/lib/scene-edits';
-import type { EffectInstance, ExperienceKind, PlacedObject, StopView, Vec3 } from "@/lib/experience/types";
+import type { EffectInstance, ExperienceKind, PlacedObject, StopLook, StopView, Vec3 } from "@/lib/experience/types";
 
 export type GizmoMode = "translate" | "rotate" | "scale";
 /** A pixel in a panorama face (agents) or in the current view (editor), as 0..1 fractions from the top left. */
@@ -39,7 +40,7 @@ export type PixelAnchor = { nodeId?: string; face?: number; x: number; y: number
 /** A camera pose remembered with a captured view, so later placements aim from where it was taken. */
 export type ViewCamera = { position: Vec3; quaternion: [number, number, number, number]; fov: number; aspect: number };
 /** Live edits from the builder. A `standalone` tour's points replace the stops even when there are none. */
-export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; standalone?: boolean };
+export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; look?: StopLook; standalone?: boolean };
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -74,6 +75,8 @@ export class SphrRuntime {
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
   private panorama: PanoramaLayer | null = null;
+  private readonly looks: LookPass;
+  private lookStarted = false;
   private iiif: IiifImageLayer | null = null;
   private nav: NavigationLayer | null = null;
   private skybox: SkyboxLayer | null = null;
@@ -125,6 +128,7 @@ export class SphrRuntime {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.setClearColor(0x0a0c10, 0);
     this.textureCache = new TextureCache(this.manager);
+    this.looks = new LookPass(this.renderer, this.lookHost(), typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.audio = new AudioController(this.tour.audio);
 
@@ -177,6 +181,7 @@ export class SphrRuntime {
 
     if (!this.bootstrap.space.space_data.noPanos && nodes.length) {
       this.panorama = new PanoramaLayer(this.scene, this.textureCache, this.bootstrap.space.version);
+      this.panorama.setVariantSource(this.bootstrap.space.space_data.variants);
 
     }
 
@@ -468,6 +473,7 @@ export class SphrRuntime {
     this.gizmo = null;
     this.effects?.dispose();
     this.objects?.dispose();
+    this.looks.dispose();
     this.experienceAudio?.dispose();
     this.experienceAudio = null;
     this.tooltip?.remove();
@@ -846,6 +852,31 @@ export class SphrRuntime {
     return this.audioHost().preview(source);
   }
 
+  /** What looks can ask of the space: drawn versions of it, splat styling and linear output. */
+  private lookHost(): LookHost {
+    const size = new THREE.Vector2();
+    return {
+      prepareVariant: async (variant) => {
+        const results = await Promise.all([this.splats?.prepareVariant(variant) ?? false, this.panorama?.prepareVariant(variant) ?? false]);
+        return results.some(Boolean);
+      },
+      showVariant: (variant, amount, transition, direction) => {
+        this.splats?.showVariant(variant, amount, transition, this.camera, direction);
+        this.renderer.getDrawingBufferSize(size);
+        const mode = ["cut", "fade", "dissolve", "wipe", "iris", "sweep", "glitch"].indexOf(transition);
+        this.panorama?.showVariant(variant ? amount : 0, mode < 0 ? 1 : mode, direction, size);
+      },
+      styleSplats: (style, amount) => this.splats?.styleSplats(style ?? null, amount),
+      setLinearOutput: (linear) => this.splats?.setLinearOutput(linear),
+      variantReady: (variant) => Boolean(this.splats?.variantReady(variant) || this.panorama?.variantReady())
+    };
+  }
+
+  /** Previews of the current view in each look, for the builder. */
+  lookThumbnails(ids: string[], width?: number) {
+    return this.looks.thumbnails(this.scene, this.camera, ids, width);
+  }
+
   private applyExperienceForPoint(point?: TourPoint) {
     const guided = this.state.guided || (this.editing && this.tour.hasGuidedTour);
     const objects = new Set(guided ? point?.objects ?? [] : []);
@@ -853,6 +884,16 @@ export class SphrRuntime {
     if (hunt && guided && point?.find) objects.add(point.find.objectId);
     this.objects?.show(objects);
     this.effects?.activate(guided ? point?.effects ?? [] : []);
+    // A stop's look, else the tour's; transitions open toward what the stop is about.
+    const look = guided ? point?.look ?? this.tour.look : this.tour.look;
+    const focus = point?.find?.objectId ?? point?.objects?.[0];
+    const anchor = focus ? this.objects?.getData(focus)?.position : undefined;
+    // A tour that opens on a stop with its own look starts in the tour's look and transitions from it.
+    if (!this.lookStarted) {
+      this.lookStarted = true;
+      if (lookKey(look) !== lookKey(this.tour.look)) this.looks.set(this.tour.look, this.camera, null, { instant: true });
+    }
+    this.looks.set(look, this.camera, anchor ? new THREE.Vector3(...anchor) : null);
     this.state.hunt = hunt ? {
       found: [...this.huntFound],
       stepFound: Boolean(point?.find && this.huntFound.has(point.find.objectId)),
@@ -1003,6 +1044,7 @@ export class SphrRuntime {
     this.tour.objects = update.objects;
     this.tour.effects = update.effects;
     this.tour.finale = update.finale;
+    this.tour.look = update.look;
     if (this.state.activePointIndex >= (segment?.tourpoints.length ?? 1)) this.state.activePointIndex = 0;
     await Promise.all([this.objects?.setObjects(update.objects), this.effects?.setEffects(update.effects)]);
     if (this.disposed) return;
@@ -1014,7 +1056,7 @@ export class SphrRuntime {
   }
 
   /** Where a pixel lands in the space: the surface it shows, or two meters out. */
-  resolveAnchor(anchor: PixelAnchor): { position: Vec3; normal: Vec3 | null; hit: boolean; distance: number | null; rotation: { azimuth: number; polar: number } } | null {
+  resolveAnchor(anchor: PixelAnchor): { position: Vec3; normal: Vec3 | null; hit: boolean; distance: number | null; origin: Vec3; floor: number | null; rotation: { azimuth: number; polar: number } } | null {
     const node = anchor.nodeId ? this.resolveNode(anchor.nodeId) : null;
     if (anchor.nodeId && !node) return null;
     const ray = new THREE.Raycaster();
@@ -1036,19 +1078,21 @@ export class SphrRuntime {
     const targets = [...(this.sceneGraph?.getRaycastObjects() ?? []), ...(this.splats?.getMeshes() ?? [])];
     const hit = ray.intersectObjects(targets, true).find((item) => item.distance > 0.15);
     const direction = ray.ray.direction;
+    const origin: Vec3 = [ray.ray.origin.x, ray.ray.origin.y, ray.ray.origin.z];
+    const floor = node?.floorPosition ? (this.nav?.getWorldPosition({ ...node, position: node.floorPosition }) ?? vectorFromLike(node.floorPosition)).y : null;
     const rotation = {
       azimuth: THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)),
       polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)))
     };
     if (!hit) {
       const point = ray.ray.at(2.5, new THREE.Vector3());
-      return { position: [point.x, point.y, point.z], normal: null, hit: false, distance: null, rotation };
+      return { position: [point.x, point.y, point.z], normal: null, hit: false, distance: null, origin, floor, rotation };
     }
     const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
     if (normal && normal.dot(direction) > 0) normal.negate();
     // Rest on floors; stand slightly off walls toward the viewer.
     const point = hit.point.clone().addScaledVector(normal ?? direction.clone().negate(), normal && normal.y > 0.7 ? 0.01 : 0.06);
-    return { position: [point.x, point.y, point.z], normal: normal ? [normal.x, normal.y, normal.z] : null, hit: true, distance: hit.distance, rotation };
+    return { position: [point.x, point.y, point.z], normal: normal ? [normal.x, normal.y, normal.z] : null, hit: true, distance: hit.distance, origin, floor, rotation };
   }
 
   /** A JPEG of the current view for the tour agent, with the camera it was taken from. */
@@ -1217,9 +1261,10 @@ export class SphrRuntime {
       this.nav?.update(this.camera, this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);
       this.effects?.update(now / 1000, elapsed);
+      this.looks.update(elapsed);
       this.splats?.update();
       this.cursor?.update(now);
-      this.renderer.render(this.scene, this.camera);
+      this.looks.render(this.scene, this.camera, now / 1000);
       this.cursor?.render(this.renderer, this.camera);
     });
   }

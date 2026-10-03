@@ -194,3 +194,39 @@ test('the agent sees the library models that match the request, under codes it c
   assert.equal(raw.objects[0].source.url, 'https://cdn.example/sphinx.glb');
   assert.equal(raw.objects[1].source.url, 'https://other.example/x.glb');
 });
+
+test('looks are validated for the tour and each stop, and reach the viewer', () => {
+  const input = tour();
+  input.look = { look: 'blueprint', params: { grid: 9, line: '#ABCDEF' }, transition: 'sweep', duration: 30 };
+  input.stops[0].look = { look: 'lines', transition: 'iris' };
+  input.stops.push({ id: 'two', title: 'Two', text: 'Back to color', view, objects: [], effects: [], look: 'color' });
+  const parsed = parseExperience(input);
+  assert.deepEqual(parsed.look, { look: 'blueprint', params: { paper: '#123f78', line: '#abcdef', grid: 1, fill: 0.16 }, transition: 'sweep', duration: 8 }, 'params are clamped and filled in');
+  assert.deepEqual(parsed.stops[0].look, { look: 'lines', params: { paper: '#f4f1e8', ink: '#1d1c1a', weight: 1.3, hatching: 0.55, color: 0 }, transition: 'iris' });
+  assert.deepEqual(parsed.stops[1].look, { look: 'color' }, 'a stop can return to the capture itself');
+  assert.throws(() => parseExperience({ ...tour(), look: { look: 'nonsense' } }), ExperienceError);
+  const lenient = parseExperience({ ...tour(), look: { look: 'nonsense' }, stops: [{ ...tour().stops[0], look: { look: 'lines', transition: 'spin' } }] }, { lenient: true });
+  assert.equal(lenient.look, undefined, 'unknown looks are dropped from agent drafts');
+  assert.equal(lenient.stops[0].look.transition, undefined, 'unknown transitions are dropped');
+  const applied = applyExperience(bootstrap(), parsed);
+  assert.equal(applied.tour.tour_data.look.look, 'blueprint');
+  assert.equal(applied.tour.tour_data.spaces[0].tourpoints[0].look.look, 'lines');
+  assert.equal(normalizeTour(applied).look.look, 'blueprint');
+  assert.equal(experienceFromBootstrap(applied).stops[1].look.look, 'color', 'looks survive a round trip through the bootstrap');
+  const agent = normalizeAgentDraft({ reply: 'ok', kind: 'tour', style: { look: 'noir', transition: 'fade' },
+    objects: [], effects: [], stops: [{ id: 'one', title: 'One', text: 'Hi', nodeId: 'a', style: { look: 'watercolor' } }, { id: 'two', title: 'Two', text: 'Hi', nodeId: 'a' }] }, parsed, new Set(['a', 'b']));
+  assert.equal(agent.experience.look.look, 'noir');
+  assert.equal(agent.experience.stops[0].look.look, 'watercolor');
+  assert.equal(agent.experience.stops[1].look.look, 'color', 'a stop the agent leaves alone keeps its look');
+});
+
+test('an agent draft keeps going when a model it names is not in the library', () => {
+  const result = normalizeAgentDraft({ reply: 'Placed a temple.', kind: 'tour', objects: [
+    { id: 'temple', name: 'Temple', source: { kind: 'model' } },
+    { id: 'orb', name: 'Orb', source: { kind: 'shape', shape: 'orb' } }
+  ], effects: [], stops: [{ id: 'one', title: 'One', text: 'Hi', nodeId: 'a', objects: ['temple', 'orb'] }] }, parseExperience(tour()), new Set(['a']));
+  assert.deepEqual(result.experience.objects.map((object) => object.id), ['orb']);
+  assert.deepEqual(result.experience.stops[0].objects, ['orb']);
+  assert.match(result.reply, /One object could not be placed/);
+  assert.throws(() => parseExperience({ ...tour(), objects: [{ id: 'x', name: 'X', source: { kind: 'model' }, position: [0, 0, 0] }] }), ExperienceError, 'saved tours are still strict');
+});

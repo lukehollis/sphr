@@ -1,3 +1,4 @@
+import { coreLooks } from "@/lib/experience/core/looks";
 import type { Pack } from "@/lib/experience/registry";
 
 /**
@@ -5,6 +6,7 @@ import type { Pack } from "@/lib/experience/registry";
  * how a pack plugs in. Larger packs register the same way (see packs.ts).
  */
 const core: Pack = {
+  looks: coreLooks,
   id: "core",
   label: "Core",
   effects: [
@@ -46,6 +48,7 @@ const core: Pack = {
     },
     {
       type: "sketch",
+      retired: "Use the Line drawing look with a sweep transition instead.",
       label: "Sketch to color",
       description: "The space appears as a pencil drawing on paper, then a radial scan paints the real colors back in from the target, or turns color into a drawing.",
       targets: ["scene", "point", "object"],

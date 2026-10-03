@@ -1,13 +1,16 @@
-import { effectEntry, shapeEntry } from "@/lib/experience/packs";
+import { effectEntry, lookEntry, shapeEntry } from "@/lib/experience/packs";
 import { resolveParams } from "@/lib/experience/registry";
 import {
   EXPERIENCE_LIMITS as LIMITS,
+  LOOK_TRANSITIONS,
   type EffectInstance,
   type EffectTarget,
   type Experience,
   type ExperienceStop,
   type ObjectSource,
   type PlacedObject,
+  type LookTransition,
+  type StopLook,
   type StopView,
   type Vec3
 } from "@/lib/experience/types";
@@ -67,8 +70,11 @@ export function safeAssetUrl(value: unknown, label: string) {
 function source(value: unknown, label: string, lenient: boolean): ObjectSource | null {
   const input = value as Record<string, unknown> | null;
   if (!input || typeof input !== "object") fail(`${label} needs a source.`);
-  if (input.kind === "model") return { kind: "model", url: safeAssetUrl(input.url, `${label} model`) };
-  if (input.kind === "image") return { kind: "image", url: safeAssetUrl(input.url, `${label} image`) };
+  if (input.kind === "model" || input.kind === "image") {
+    // An agent may name a model that is not in the library; its draft keeps everything else.
+    try { return { kind: input.kind, url: safeAssetUrl(input.url, `${label} ${input.kind}`) }; }
+    catch (error) { if (lenient) return null; throw error; }
+  }
   if (input.kind === "shape") {
     const shape = typeof input.shape === "string" ? input.shape : "";
     if (!shapeEntry(shape)) {
@@ -188,6 +194,20 @@ function files(value: unknown): MediaFile[] | undefined {
   return safe.length ? safe : undefined;
 }
 
+/** A look by ID with clamped parameters; an unknown look is dropped, or refused when strict. */
+function look(value: unknown, label: string, lenient: boolean): StopLook | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const input = (typeof value === "string" ? { look: value } : value) as Record<string, unknown>;
+  if (!input || typeof input !== "object" || typeof input.look !== "string") { if (lenient) return undefined; fail(`${label} has an invalid look.`); }
+  const entry = input.look === "color" ? null : lookEntry(input.look as string);
+  if (input.look !== "color" && !entry) { if (lenient) return undefined; fail(`${label} uses a look this site does not have: ${String(input.look).slice(0, 40)}.`); }
+  const result: StopLook = { look: input.look as string };
+  if (entry?.params.length) result.params = resolveParams(entry, input.params);
+  if (typeof input.transition === "string" && (LOOK_TRANSITIONS as readonly string[]).includes(input.transition)) result.transition = input.transition as LookTransition;
+  if (typeof input.duration === "number" && Number.isFinite(input.duration)) result.duration = Math.round(Math.max(0, Math.min(8, input.duration)) * 100) / 100;
+  return result;
+}
+
 function stop(value: unknown, index: number, objects: Set<string>, effects: Set<string>, options: Options): ExperienceStop {
   const input = value as Record<string, unknown>;
   if (!input || typeof input !== "object") fail(`Stop ${index + 1} is invalid.`);
@@ -215,6 +235,8 @@ function stop(value: unknown, index: number, objects: Set<string>, effects: Set<
   }
   const media = files(input.files);
   if (media) result.files = media;
+  const stopLook = look(input.look, label, Boolean(options.lenient));
+  if (stopLook) result.look = stopLook;
   for (const key of ["sounds", "models", "annotations"] as const) {
     const list = strings(input[key], null);
     if (list.length) result[key] = list;
@@ -259,5 +281,6 @@ export function parseExperience(value: unknown, options: Options = {}): Experien
   }
   const title = text(input.title, LIMITS.title, "Title").trim();
   const finale = text(input.finale, LIMITS.text, "Closing message").trim();
-  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects };
+  const tourLook = look(input.look, "The tour", lenient);
+  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects, ...(tourLook ? { look: tourLook } : {}) };
 }

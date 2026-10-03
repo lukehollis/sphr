@@ -81,7 +81,16 @@ export type PanoramaStyle = {
   uScanColor: { value: THREE.Color };
   uScanDirection: { value: THREE.Vector3 };
   uScanAngle: { value: number };
+  /** Looks: how far a drawn version of the photographs has replaced them, and how it arrives. */
+  uVariantAmount: { value: number };
+  uVariantMode: { value: number };
+  uVariantDirection: { value: THREE.Vector3 };
+  uVariantResolution: { value: THREE.Vector2 };
 };
+
+/** Line-drawn (or watercolor) versions of a space's panorama faces, made offline. */
+type VariantManifest = { styles: Record<string, string>; nodes: string[] };
+type PanoVariant = { urls: string[]; ready: boolean };
 
 const STYLE_VERTEX = /* glsl */ `
   #include <project_vertex>
@@ -123,20 +132,38 @@ const STYLE_FRAGMENT = /* glsl */ `
     float scanFront = 1.0 - smoothstep(0.0, 0.07, abs(scanAngle - uScanAngle));
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.1, scanAhead * uScanDim) + uScanColor * scanFront * uScanGlow;
   }
+  if (uVariantAmount > 0.001 && uHasVariantMap > 0.5) {
+    vec3 drawn = texture2D(uVariantMap, vMapUv).rgb;
+    float shown = uVariantAmount;
+    if (uVariantMode < 0.5) shown = step(0.5, uVariantAmount);
+    else if (uVariantMode < 1.5) shown = uVariantAmount;
+    else if (uVariantMode < 2.5) shown = step(fract(sin(dot(floor(gl_FragCoord.xy / 3.0), vec2(12.9898, 78.233))) * 43758.5453), uVariantAmount);
+    else if (uVariantMode < 3.5) shown = 1.0 - smoothstep(uVariantAmount * 1.2 - 0.11, uVariantAmount * 1.2 - 0.09, gl_FragCoord.x / uVariantResolution.x);
+    else if (uVariantMode < 5.5) {
+      float variantAngle = acos(clamp(dot(normalize(vPanoDirection), uVariantDirection), -1.0, 1.0));
+      shown = 1.0 - smoothstep(uVariantAmount * 3.5 - 0.13, uVariantAmount * 3.5 - 0.07, variantAngle);
+    } else shown = step(fract(sin(dot(floor(gl_FragCoord.xy / (uVariantResolution / vec2(14.0, 30.0))), vec2(12.9898, 78.233))) * 43758.5453), uVariantAmount);
+    diffuseColor.rgb = mix(diffuseColor.rgb, drawn, shown);
+  }
 `;
 
 function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, texture: THREE.Texture | null) {
   const image = texture?.image as { width?: number; height?: number } | undefined;
   const texel = new THREE.Vector2(1 / Math.max(256, image?.width ?? 1024), 1 / Math.max(256, image?.height ?? 1024));
+  // Each face has its own drawn version, so this material keeps its own sampler.
+  const variant = { uVariantMap: { value: null as THREE.Texture | null }, uHasVariantMap: { value: 0 } };
+  material.userData.variant = variant;
   material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, style, { uTexel: { value: texel } });
+    Object.assign(shader.uniforms, style, { uTexel: { value: texel } }, variant);
     shader.vertexShader = "varying vec3 vPanoDirection;\n" + shader.vertexShader.replace("#include <project_vertex>", STYLE_VERTEX);
     shader.fragmentShader = `uniform float uSketch; uniform vec3 uInk; uniform vec3 uPaper; uniform vec3 uRevealDirection;
       uniform float uSketchAngle; uniform float uColorAngle; uniform float uAngleWidth; uniform float uInvert; uniform vec2 uTexel;
       uniform float uScanDim; uniform float uScanGlow; uniform vec3 uScanColor; uniform vec3 uScanDirection; uniform float uScanAngle;
+      uniform float uVariantAmount; uniform float uVariantMode; uniform vec3 uVariantDirection; uniform vec2 uVariantResolution;
+      uniform sampler2D uVariantMap; uniform float uHasVariantMap;
       varying vec3 vPanoDirection;\n` + shader.fragmentShader.replace("#include <map_fragment>", STYLE_FRAGMENT);
   };
-  material.customProgramCacheKey = () => "sphr-panorama-style-v2";
+  material.customProgramCacheKey = () => "sphr-panorama-style-v3";
   return material;
 }
 
@@ -154,8 +181,17 @@ export class PanoramaLayer {
     uScanGlow: { value: 0 },
     uScanColor: { value: new THREE.Color("#7fd6ff") },
     uScanDirection: { value: new THREE.Vector3(0, -1, 0) },
-    uScanAngle: { value: 0 }
+    uScanAngle: { value: 0 },
+    uVariantAmount: { value: 0 },
+    uVariantMode: { value: 1 },
+    uVariantDirection: { value: new THREE.Vector3(0, -1, 0) },
+    uVariantResolution: { value: new THREE.Vector2(1, 1) }
   };
+  private variantSource: string | null = null;
+  private manifest: Promise<VariantManifest | null> | null = null;
+  private variantTemplate: string | null = null;
+  private variantNodes = new Set<string>();
+  private readonly panoVariants = new WeakMap<PanoObject, PanoVariant>();
 
   private active: PanoObject | null = null;
   private outgoing: PanoObject | null = null;
@@ -309,6 +345,7 @@ export class PanoramaLayer {
       sphere.renderOrder = -10;
       sphere.rotation.copy(eulerFromLike(node.rotation));
       group.add(sphere);
+      // Drawn versions exist for cube faces only.
       return { node, group, materials: [material], urls };
     }
 
@@ -332,7 +369,9 @@ export class PanoramaLayer {
       materials.push(material);
     }
     applyProductionCubeRotation(group, node);
-    return { node, group, materials, urls };
+    const pano = { node, group, materials, urls };
+    this.attachVariant(pano);
+    return pano;
   }
 
   private setOpacity(object: PanoObject | null, opacity: number) {
@@ -344,7 +383,72 @@ export class PanoramaLayer {
     });
   }
 
+  /** Where this space's drawn panorama faces are listed, if anywhere. */
+  setVariantSource(url: string | null | undefined) {
+    if ((url ?? null) === this.variantSource) return;
+    this.variantSource = url ?? null;
+    this.manifest = null;
+  }
+
+  /**
+   * Load the drawn version of the photographs ("sketch" uses the line drawings),
+   * starting with the faces in view; resolves to whether this space has it.
+   */
+  async prepareVariant(kind: "sketch" | "watercolor") {
+    if (!this.variantSource) return false;
+    this.manifest ??= fetch(this.variantSource, { credentials: "omit" }).then((response) => response.ok ? response.json() as Promise<VariantManifest> : null).catch(() => null);
+    const manifest = await this.manifest;
+    const template = manifest?.styles?.[kind === "sketch" ? "contour" : "watercolor"] ?? (kind === "sketch" ? manifest?.styles?.anime : undefined);
+    if (!manifest || typeof template !== "string" || !/^https:\/\//.test(template) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(template)) return false;
+    if (template !== this.variantTemplate) {
+      this.variantTemplate = template;
+      this.variantNodes = new Set(Array.isArray(manifest.nodes) ? manifest.nodes : []);
+      for (const pano of [this.active, this.outgoing, this.transitionCapture]) if (pano) this.attachVariant(pano, true);
+    }
+    const active = this.active && this.panoVariants.get(this.active);
+    if (active && !active.ready) await Promise.all(active.urls.map((url) => this.textureCache.loadAsync(url).catch(() => null)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return true;
+  }
+
+  /** Whether the location in view has its drawn faces loaded. */
+  variantReady() {
+    const variant = this.active && this.panoVariants.get(this.active);
+    return Boolean(variant?.ready);
+  }
+
+  /** Blend the photographs toward their drawn version, revealed the way a look's transition says. */
+  showVariant(amount: number, mode: number, direction: THREE.Vector3, resolution: THREE.Vector2) {
+    this.style.uVariantAmount.value = this.variantTemplate ? amount : 0;
+    this.style.uVariantMode.value = mode;
+    this.style.uVariantDirection.value.copy(direction);
+    this.style.uVariantResolution.value.copy(resolution);
+  }
+
+  private attachVariant(pano: PanoObject, replace = false) {
+    if (!this.variantTemplate || pano.materials.length !== 6 || !this.variantNodes.has(pano.node.uuid)) return;
+    const existing = this.panoVariants.get(pano);
+    if (existing && !replace) return;
+    if (existing) this.textureCache.release(existing.urls, false);
+    const template = this.variantTemplate;
+    const urls = Array.from({ length: 6 }, (_, face) => template.replace("{uuid}", encodeURIComponent(pano.node.uuid)).replace("{face}", String(face)));
+    const variant: PanoVariant = { urls, ready: false };
+    this.panoVariants.set(pano, variant);
+    this.textureCache.retain(urls);
+    void Promise.all(urls.map((url) => this.textureCache.loadAsync(url))).then((textures) => {
+      if (this.panoVariants.get(pano) !== variant) return;
+      textures.forEach((texture, face) => {
+        const uniforms = pano.materials[face].userData.variant as { uVariantMap: { value: THREE.Texture | null }; uHasVariantMap: { value: number } };
+        uniforms.uVariantMap.value = texture;
+        uniforms.uHasVariantMap.value = 1;
+      });
+      variant.ready = true;
+    }, (error) => console.warn("Unable to load the drawn version of this panorama", error));
+  }
+
   private disposeObject(object: PanoObject) {
+    const variant = this.panoVariants.get(object);
+    if (variant) { this.textureCache.release(variant.urls, false); this.panoVariants.delete(object); }
     this.textureCache.release(object.urls);
     object.group.traverse((child) => {
       const mesh = child as THREE.Mesh;

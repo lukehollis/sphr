@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
-import { effectEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
+import { effectEntries, lookEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
+import { LOOK_TRANSITIONS } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience } from "@/lib/experience/types";
 import type { NodeData, SphrBootstrap } from "@/lib/types";
@@ -176,8 +177,9 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
-    `Effects you can use:\n${effectEntries().map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : param.type === "sound" ? `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
+    `Effects you can use:\n${effectEntries().filter((entry) => !entry.retired).map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : param.type === "sound" ? `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
     `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
+    `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.` : ""}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
     library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
     `Current draft:\n${JSON.stringify(draft)}`
@@ -190,11 +192,13 @@ A tour is a sequence of stops. Each stop stands at a panorama location (or a fre
 
 You always answer by calling the write_tour tool exactly once with the complete new draft. Keep everything from the current draft that the request does not change, including IDs, text the person wrote and object positions they set.
 
-Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a client view. Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Keep an existing object's position by leaving its position as it is and place null.
+Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a client view. Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Place objects a few meters out in the scene where a visitor will see them, never on the floor right below the camera, which is where the visitor stands. Keep an existing object's position by leaving its position as it is and place null.
 
 Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues describe where to look without naming the exact spot; hints are more direct; found messages reward the visitor with one real detail about the place. Hunt steps should start from a location where the object is reachable but not in the middle of the view.
 
 Sound. A little sound goes a long way: background music or an ambient bed fitting the place (a music effect, always or on chosen stops), and a few sound effects tied to moments. Hunt finds and hints already chime.
+
+Looks. A look restyles the whole frame, like a filter in a video editor: a line drawing, a blueprint, film noir, night vision and more. Set "style" on the tour for its overall look, or on a stop to change the look there, with a transition: cut, fade, dissolve, wipe, iris (opens from what the stop is about), sweep (opens through the space like a scan) or glitch, and a duration in seconds. A stop without "style" keeps the tour's look; give a stop {"look": "color"} to return to the capture itself. Use looks to mark moments and moods (a line drawing that sweeps into color, a blueprint for how a building was planned, noir for a mystery), not on every stop.
 
 Effects. Use effects to serve the story, not everywhere. A stop lists the effect IDs that run while it is shown; "always" effects run through free exploration too. Use the object target to attach an effect to a placed object. Hunt finds already burst with sparkles, so you do not need to add that. Use colors that suit the space.
 
@@ -218,6 +222,13 @@ const placeSchema = {
 
 const vec3Schema = { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 } as const;
 
+/** A look for the frame: the agent's name for a stop's or the tour's StopLook. */
+const styleSchema = {
+  type: "object",
+  properties: { look: { type: "string" }, transition: { type: "string", enum: [...LOOK_TRANSITIONS] }, duration: { type: "number" }, params: { type: "object" } },
+  required: ["look"]
+};
+
 const WRITE_TOUR: Anthropic.Tool = {
   name: "write_tour",
   description: "Save the complete new draft of the tour or scavenger hunt, plus a short reply to the person.",
@@ -227,6 +238,7 @@ const WRITE_TOUR: Anthropic.Tool = {
       reply: { type: "string" },
       kind: { type: "string", enum: ["tour", "hunt"] },
       finale: { type: "string" },
+      style: styleSchema,
       objects: {
         type: "array",
         items: {
@@ -269,6 +281,7 @@ const WRITE_TOUR: Anthropic.Tool = {
             rotation: { type: "object", properties: { azimuth: { type: "number" }, polar: { type: "number" } } },
             position: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
             fov: { type: "number" },
+            style: styleSchema,
             objects: { type: "array", items: { type: "string" } },
             effects: { type: "array", items: { type: "string" } },
             find: { type: "object", properties: { objectId: { type: "string" }, hint: { type: "string" }, found: { type: "string" } }, required: ["objectId"] }
@@ -282,7 +295,7 @@ const WRITE_TOUR: Anthropic.Tool = {
 };
 
 export type RawDraft = {
-  reply?: unknown; kind?: unknown; finale?: unknown;
+  reply?: unknown; kind?: unknown; finale?: unknown; style?: unknown;
   objects?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>>; stops?: Array<Record<string, unknown>>;
 };
 
@@ -330,11 +343,15 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
       id, title: stop.title, text: stop.text, detail: stop.detail,
       view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}) },
       objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
+      look: stop.style === undefined ? before?.look : stop.style,
       files: before?.files, sounds: before?.sounds, models: before?.models, annotations: before?.annotations
     };
   });
-  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
-  const reply = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
+  const look = raw.style === undefined ? previous.look : raw.style;
+  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, look, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
+  const dropped = objects.length - experience.objects.length;
+  const said = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
+  const reply = dropped > 0 ? `${said} (${dropped === 1 ? "One object" : `${dropped} objects`} could not be placed because the model was not found in the library.)` : said;
   return { experience, anchors, reply };
 }
 
