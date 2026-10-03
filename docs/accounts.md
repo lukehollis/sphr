@@ -272,11 +272,11 @@ uploads (`scripts/packages/inspect-inputs.mjs`) and routes each kind of capture:
 | Capture | Skill | Result |
 |---|---|---|
 | Matterport or other E57 with registered panoramas | `sphr-matterport` | Calibrated panoramas, mesh and dollhouse |
-| Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG) | `sphr-splat-package` | Splat space opening in orbit (`build-splat.mjs`) |
-| 360 photos; 360 video | `sphr-panorama-package` | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`) |
-| Ordinary video or photo sets | `sphr-video` | COLMAP poses and a trained splat, or held for an operator without a GPU trainer |
-| Lidar point clouds (LAS/LAZ, E57 without images, PLY, PCD, XYZ) | `sphr-lidar-package` | Point-cloud splat (`build-pointcloud.mjs`) |
-| Scanned meshes (OBJ, GLB, PLY, STL, USDZ, FBX) | `sphr-lidar-package` | Orbitable model (`build-model.mjs`) |
+| Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG; old GaussianSplats3D `.splat` is converted) | `sphr-splat-package` | Splat space orbiting its subject (`build-splat.mjs`) |
+| 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package` | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`) |
+| Ordinary video or photo sets | `sphr-video` | COLMAP poses and a Brush-trained splat on GPU workers, opening from a capture camera (`build-splat.mjs --cameras`); held for an operator without a GPU |
+| Lidar point clouds (LAS/LAZ, E57 without images, PLY, PCD, XYZ) | `sphr-lidar-package` | Point-cloud splat; E57 interiors open where the scanner stood (`build-pointcloud.mjs`) |
+| Scanned meshes (OBJ, GLB, PLY, STL, USDZ, FBX) | `sphr-lidar-package` | Orbitable model, unlit for photo scans and lit for designed models; rigs frozen at their first frame (`build-model.mjs`) |
 
 Every tool writes a `sphr-package-v1` package: `bootstrap.json`, `preview.jpg`, the runtime
 files, and `manifest.json` listing each file with its SHA-256. `validate-package.mjs` checks
