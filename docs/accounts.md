@@ -370,6 +370,36 @@ can set `SPHR_WORKER_PUBLISH=local` (and optionally `SPHR_WORKER_LOCAL_DATASETS`
 install packages there instead of publishing to Cloud Storage. Restart `next start` so it
 serves the new files.
 
+### Isolating the agent on a Linux worker
+
+On Linux the agent's container shares the host's kernel and, on Docker's default network, can reach the
+host's own services, the LAN and the tailnet. A GPU worker such as siracusa therefore runs it on an internal
+network whose only exit is an allowlisting proxy (`scripts/worker/egress-proxy.mjs`):
+
+```sh
+docker network create --internal -o com.docker.network.bridge.inhibit_ipv4=true spacery-sandbox
+docker run -d --name spacery-egress --restart unless-stopped --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --user node --memory 256m --pids-limit 256 -e ALLOW=api.anthropic.com \
+  -v "$PWD/scripts/worker/egress-proxy.mjs:/proxy.mjs:ro" node:22-alpine node /proxy.mjs
+docker network connect spacery-sandbox spacery-egress
+docker build -f scripts/worker/agent.Dockerfile -t sphr-agent .
+docker build -f scripts/worker/agent-gpu.Dockerfile -t sphr-agent-gpu .
+```
+
+`inhibit_ipv4` keeps the host from having an address on that network, so containers cannot reach the host's
+SSH, file shares or dev servers either. The agent command then adds, before the image name:
+
+```
+--network spacery-sandbox --cap-drop ALL --security-opt no-new-privileges --read-only
+--tmpfs /tmp:rw,exec,size=2g --pids-limit 4096 --memory 48g --cpus 6 --gpus all
+-e NVIDIA_DRIVER_CAPABILITIES=all -e HTTPS_PROXY=http://spacery-egress:3128
+-e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -e HOME -e TMPDIR={job}/tmp
+```
+
+and leaves `SPHR_AGENT_HOME` unset so the agent's home is inside the job folder. `docker logs spacery-egress`
+lists every connection the sandbox attempted. The runner never follows symlinks in what the agent writes,
+and gVisor (`--runtime runsc`) adds a user-space kernel when it is installed.
+
 ### Skills the agent learns
 
 When a job needs a method no skill describes, the agent builds the tool in the job folder and

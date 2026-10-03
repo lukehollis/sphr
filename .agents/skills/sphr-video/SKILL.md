@@ -12,8 +12,9 @@ Gaussian splat training. Training needs a GPU trainer; check what this machine h
 command -v colmap; command -v brush_app brush opensplat ns-train 2>/dev/null
 ```
 
-If no trainer is available, do not try to train on the CPU. Extract frames, run COLMAP if it is quick,
-and report `needs_operator` with what you found (frame count, whether COLMAP registered most frames).
+GPU workers have Brush (section 3). If no trainer is available, do not try to train on the CPU. Extract
+frames, run COLMAP if it is quick, and report `needs_operator` with what you found (frame count, whether
+COLMAP registered most frames).
 
 ## 1. Frames
 
@@ -40,7 +41,21 @@ Check `work/colmap/sparse/0` exists and most frames registered (`colmap model_an
 
 ## 3. Train and package
 
-With Brush: `brush_app "$SPHR_JOB_DIR/work/colmap" --total-steps 15000 --export-path "$SPHR_JOB_DIR/work/splat"`.
+**Brush** is installed on GPU workers (`SPHR_GPU=nvidia` is set and `brush_app` exists). It trains on the GPU
+and reads a folder that holds `images/` and `sparse/0/` side by side, so copy COLMAP's model next to the
+frames it used:
+
+```sh
+mkdir -p "$SPHR_JOB_DIR/work/data/sparse"
+cp -r "$SPHR_JOB_DIR/work/colmap/sparse/0" "$SPHR_JOB_DIR/work/data/sparse/0"   # work/data/images = the frames COLMAP used
+brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --export-path "$SPHR_JOB_DIR/work/splat" \
+  --export-name scene.ply --export-every 15000 > "$SPHR_JOB_DIR/work/brush.log" 2>&1
+```
+
+Measured on the RTX 3090 Ti: 105 photos at 1600 px register in COLMAP (CPU) in about 4 minutes and
+train 15,000 steps in about 8.5 minutes, giving a ~100 MB PLY. Write a progress line before training
+("Training the 3D scene on the GPU, about 10 minutes"). Brush loads images at up to 1920 px
+(`--max-resolution`). It runs headless; never pass `--with-viewer`.
 With OpenSplat: `opensplat "$SPHR_JOB_DIR/work/colmap" -n 15000 -o "$SPHR_JOB_DIR/work/splat/scene.ply"`.
 Then package the PLY; COLMAP's axes usually need `--rotation 180,0,0`:
 

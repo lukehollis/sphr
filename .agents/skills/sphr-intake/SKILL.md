@@ -69,9 +69,10 @@ If the data supports a method the tools above do not cover, write the converter 
 `build-panoramas.mjs`, a mesh to `build-model.mjs`, points to `build-pointcloud.mjs`, a splat to
 `build-splat.mjs`. This sandbox has Python at `/opt/venv/bin/python` (numpy, scipy, OpenCV `cv2`, Pillow
 with HEIF/HEIC after `pillow_heif.register_heif_opener()`, open3d, trimesh, pye57, laspy), Node with
-`sharp` (it cannot decode HEIC), `ffmpeg`, `colmap` (CPU only) and `blender`. There is no GPU, no network
-and nothing can be installed. Check the result exactly as in section 3. Write `needs_operator` only when
-the method needs something this sandbox lacks (such as a GPU splat trainer), or you cannot verify the result.
+`sharp` (it cannot decode HEIC), `ffmpeg`, `colmap` (CPU only) and `blender`. GPU workers (`SPHR_GPU` is set)
+also have an NVIDIA GPU and the Brush splat trainer (see sphr-video). There is no network and nothing can be
+installed. Check the result exactly as in section 3. Write `needs_operator` only when the method needs
+something this sandbox lacks (such as a splat trainer on a worker without a GPU), or you cannot verify the result.
 
 ## 3. Check your work
 
