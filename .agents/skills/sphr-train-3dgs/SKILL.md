@@ -77,14 +77,21 @@ overwrite one you may adopt.
 
 ## 3. Judge on held-out photographs, not on PSNR
 
-Render the held-back frames from each candidate at full resolution and put the photograph beside them:
+Render the held-back frames (every eighth image by name, the ones both trainers hold back) from each
+candidate's exported PLY with the same renderer, and put the photograph beside them:
 
 ```sh
-ns-render dataset --load-config ns/scene/splatfacto/appearance/config.yml --output-path renders/ns \
-  --split test --downscale-factor 1 --image-format jpeg --rendered-output-names rgb
+/opt/nerfstudio/bin/python .agents/skills/sphr-train-3dgs/scripts/render_views.py --ply splat-ns/splat.ply \
+  --model data/sparse/0 --out renders/ns --antialiased
+/opt/nerfstudio/bin/python .agents/skills/sphr-train-3dgs/scripts/render_views.py --ply splat/scene.ply \
+  --model data/sparse/0 --out renders/brush
 /opt/venv/bin/python .agents/skills/sphr-train-3dgs/scripts/compare_renders.py \
-  --images data/images --render "splatfacto appearance=renders/ns" [--render "brush=renders/brush"] --out compare
+  --images data/images --render "splatfacto appearance=renders/ns" --render "brush=renders/brush" --out compare
 ```
+
+Pass `--antialiased` for a model trained with antialiased rasterization. Train Brush with
+`--eval-split-every 8` and splatfacto with `--eval-mode interval --eval-interval 8` so the rendered frames are
+ones neither model saw.
 
 Then look at `compare/OVERVIEW.jpg` and a few single sheets. Judge large flat surfaces (ground, walls,
 tables, sky) for blotches and smears, then the edges of thin things (columns, railings, plants) for floaters.

@@ -101,7 +101,7 @@ frames it used:
 ```sh
 mkdir -p "$SPHR_JOB_DIR/work/data/sparse"
 cp -r "$SPHR_JOB_DIR/work/colmap/sparse/0" "$SPHR_JOB_DIR/work/data/sparse/0"   # work/data/images = the frames COLMAP used
-(brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --max-splats 1500000 --export-path "$SPHR_JOB_DIR/work/splat" \
+(brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --max-splats 1500000 --eval-split-every 8 --export-path "$SPHR_JOB_DIR/work/splat" \
   --export-name scene.ply --export-every 5000; echo $? > "$SPHR_JOB_DIR/work/brush.exit") > "$SPHR_JOB_DIR/work/brush.log" 2>&1 &
 ```
 
