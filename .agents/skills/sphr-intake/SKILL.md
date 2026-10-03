@@ -105,9 +105,12 @@ Messages go to the customer as written: no internal paths, commands or stack tra
 Write a skill proposal when this job needed a tool you wrote, handled an input no skill described, or
 showed that a skill's instructions were wrong or incomplete. That includes jobs you could not finish: if
 you worked out what an unfamiliar input is and what it needs (for example a capture app's export that
-needs a GPU trainer), a skill that teaches the next job to recognize it at once, and what to tell the
-operator, saves the next customer the same investigation. Such a skill has no `scripts/`. Skip the
-proposal when an existing skill covered the job as written. Put it in `$SPHR_JOB_DIR/output/skill-proposal/`:
+needs a GPU trainer), a skill that teaches the next job to recognize and read it at once saves the next
+customer the same investigation. Such a skill has no `scripts/`. A skill earns its place with what is new:
+how to recognize and read the input, and what its data means for processing. For steps an existing skill
+already covers, name that skill instead of repeating it, and leave reporting to this skill: do not prescribe
+a result status or what to tell the customer. Skip the proposal when an existing skill covered the job as
+written. Put it in `$SPHR_JOB_DIR/output/skill-proposal/`:
 
 - `SKILL.md`: frontmatter with `name` (lowercase words joined by dashes; for a new skill
   `capture-<what it handles>`, for a correction the existing skill's name) and `description` (which inputs
