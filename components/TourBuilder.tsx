@@ -383,11 +383,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           {adding && <div className="builder-picker">
             <p className="builder-picker-heading">Shapes</p>
             <div className="builder-grid">{shapeEntries().map((entry) => <button type="button" key={entry.shape} onClick={() => addObject({ kind: "shape", shape: entry.shape, ...(entry.text ? { text: "Your text here" } : {}) }, entry.label)}><span className="builder-swatch" style={{ background: entry.color }} />{entry.label}</button>)}</div>
-            {library.length > 0 && <>
-              <p className="builder-picker-heading">Library</p>
-              <div className="builder-grid">{library.map((model) => <button type="button" key={model.id} title={model.category} onClick={() => addObject({ kind: "model", url: model.url }, model.name)}>
-                {model.thumbnail ? <img src={model.thumbnail} alt="" width={48} height={48} /> : <span className="builder-swatch" />}{model.name}</button>)}</div>
-            </>}
+            {library.length > 0 && <LibraryPicker library={library} onAdd={(model) => addObject({ kind: "model", url: model.url }, model.name)} />}
             <ModelUrl onAdd={(url) => addObject({ kind: "model", url }, url.split("/").pop()?.replace(/\.(glb|gltf)(\?.*)?$/i, "") || "Model")} />
           </div>}
           {draft.objects.map((object) => <article key={object.id} className={`builder-card${selected === object.id ? " open current" : ""}`}>
@@ -451,6 +447,24 @@ function Transform({ label, value, step, onChange }: { label: string; value: Vec
         const next = [...value] as Vec3; next[index] = number; onChange(next);
       }} /></label>)}
   </fieldset>;
+}
+
+/** Library models grouped by category, with a search across names, categories and tags. */
+function LibraryPicker({ library, onAdd }: { library: LibraryModel[]; onAdd: (model: LibraryModel) => void }) {
+  const [query, setQuery] = useState("");
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = library.filter((model) => words.every((word) => `${model.name} ${model.category} ${model.pack ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase().includes(word)));
+  const categories = [...new Set(matches.map((model) => model.category))];
+  return <div className="builder-library">
+    <label className="builder-picker-heading" htmlFor="library-search">Library</label>
+    <input id="library-search" type="search" placeholder="Search coins, chests, arrows, plants" value={query} onChange={(event) => setQuery(event.target.value)} />
+    {categories.map((category) => <div key={category}>
+      <p className="builder-picker-heading">{category}</p>
+      <div className="builder-grid">{matches.filter((model) => model.category === category).map((model) => <button type="button" key={model.id} title={`${model.name}, about ${model.height < 1 ? `${Math.round(model.height * 100)} cm` : `${model.height.toFixed(1)} m`} tall`} onClick={() => onAdd(model)}>
+        {model.thumbnail ? <img src={model.thumbnail} alt="" width={36} height={36} loading="lazy" /> : <span className="builder-swatch" />}{model.name}</button>)}</div>
+    </div>)}
+    {!matches.length && <p className="editor-help">No models match.</p>}
+  </div>;
 }
 
 function ModelUrl({ onAdd }: { onAdd: (url: string) => void }) {

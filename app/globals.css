@@ -353,6 +353,8 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .builder-grid button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 8px; background: #262626; color: #f5f3ee; font-size: 13px; text-align: left; line-height: 1.25; }
 .builder-grid img { flex: none; width: 36px; height: 36px; object-fit: contain; background: #333; }
 .builder-swatch { flex: none; display: inline-block; width: 18px; height: 18px; background: #555; }
+.builder-library { display: grid; gap: 8px; }
+.builder-library input { margin-top: 0 !important; }
 .builder-url label { font-size: 13px; }
 .builder-url .builder-row input { margin-top: 0; }
 .builder-transform { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
