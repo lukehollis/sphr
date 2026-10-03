@@ -4,7 +4,13 @@
 // agent uses as a model's url. No dependencies beyond Node 18.
 //
 //   SPHR_LIBRARY_SEARCH_URL=http://127.0.0.1:3035/api/library/search node scripts/agent/library-mcp.mjs
+//
+// With SPHR_LIBRARY_SEARCH_LOG set, each search and how many models it found is appended there,
+// so operators can see what drafting agents look for and what the library lacks.
+import { appendFile } from 'node:fs/promises';
+
 const endpoint = process.env.SPHR_LIBRARY_SEARCH_URL ?? '';
+const log = (line) => process.env.SPHR_LIBRARY_SEARCH_LOG ? appendFile(process.env.SPHR_LIBRARY_SEARCH_LOG, `${new Date().toISOString()} ${line}\n`).catch(() => {}) : undefined;
 
 const tool = {
   name: 'search_models',
@@ -17,9 +23,16 @@ async function search({ query, limit = 16 }) {
   const url = new URL(endpoint);
   url.searchParams.set('q', String(query ?? '').slice(0, 200));
   url.searchParams.set('limit', String(Math.max(1, Math.min(40, Number(limit) || 16))));
-  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-  if (!response.ok) return `The library search failed (HTTP ${response.status}).`;
+  // One retry: the site may be restarting for a moment.
+  let response;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { response = await fetch(url, { signal: AbortSignal.timeout(10000) }); if (response.ok) break; }
+    catch (error) { response = { ok: false, status: error.message }; }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  if (!response.ok) { await log(`${JSON.stringify(query)} failed: ${response.status}`); return `The library search failed (${response.status}). Try again, or use a shape.`; }
   const { models = [], total = 0 } = await response.json();
+  await log(`${JSON.stringify(query)} -> ${models.length} of ${total}${models.length ? `: ${models.slice(0, 3).map((model) => model.id).join(', ')}` : ''}`);
   if (!models.length) return `No models match "${query}" among ${total}. Try other words, or use a shape.`;
   return models.map((model) => `${model.id}: ${model.name} (${model.category}${model.pack ? `, ${model.pack}` : ''}), about ${Math.round(model.height * 100) / 100} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(' ')}` : ''}${model.animations?.length ? `, animated: ${model.animations.join(', ')}` : ''}`).join('\n');
 }

@@ -10,7 +10,8 @@
 //
 // Environment: SPHR_TOUR_AGENT_SERVICE_PORT (3037), SPHR_TOUR_AGENT_CLAUDE (claude),
 // SPHR_TOUR_AGENT_SERVICE_MODEL (opus), SPHR_TOUR_AGENT_SERVICE_TIMEOUT_MS (300000),
-// SPHR_LIBRARY_SEARCH_URL (the site's /api/library/search, for the search_models tool).
+// SPHR_LIBRARY_SEARCH_URL (the site's /api/library/search, for the search_models tool) and
+// SPHR_LIBRARY_SEARCH_LOG (a file that records each search the agent makes).
 // The app sets SPHR_TOUR_AGENT_URL=http://127.0.0.1:3037 and the same token.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -37,7 +38,8 @@ const librarySearch = process.env.SPHR_LIBRARY_SEARCH_URL ?? '';
 const libraryServer = path.join(path.dirname(fileURLToPath(import.meta.url)), 'library-mcp.mjs');
 const mcpConfig = librarySearch && existsSync(libraryServer) ? (() => {
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'sphr-tour-agent-')), 'mcp.json');
-  writeFileSync(file, JSON.stringify({ mcpServers: { library: { command: process.execPath, args: [libraryServer], env: { SPHR_LIBRARY_SEARCH_URL: librarySearch } } } }), { mode: 0o600 });
+  const env = { SPHR_LIBRARY_SEARCH_URL: librarySearch, ...(process.env.SPHR_LIBRARY_SEARCH_LOG ? { SPHR_LIBRARY_SEARCH_LOG: process.env.SPHR_LIBRARY_SEARCH_LOG } : {}) };
+  writeFileSync(file, JSON.stringify({ mcpServers: { library: { command: process.execPath, args: [libraryServer], env } } }), { mode: 0o600 });
   return file;
 })() : null;
 
