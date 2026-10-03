@@ -20,13 +20,15 @@ RUN curl -fsSL "https://github.com/ArthurBrussee/brush/releases/download/${BRUSH
     && ln -s /opt/brush-app-x86_64-unknown-linux-gnu/brush_app /usr/local/bin/brush_app \
     && rm /tmp/brush.tar.xz /tmp/brush.sha256
 # Debian's Blender (3.4) has no USD importer, so USDZ scans from iPhone apps lost their textures. The official
-# LTS build imports USD/USDZ with materials; mesh_to_glb.py uses it through BLENDER.
+# LTS build imports USD/USDZ with materials; mesh_to_glb.py uses it through BLENDER. download.blender.org refuses
+# some networks, so official mirrors are tried in turn; the checksum pins the file either way.
 ARG BLENDER_VERSION=4.2.23
 ARG BLENDER_SHA256=bea0eb3146be13eae6225409a117b215184f41b7f79e799f97cb3abb8f6dc404
 RUN apt-get update && apt-get install -y --no-install-recommends libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 \
       libgl1 libegl1 libxkbcommon0 libsm6 libice6 \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -o /tmp/blender.tar.xz \
+    && for mirror in https://download.blender.org https://mirrors.ocf.berkeley.edu/blender https://mirror.clarkson.edu/blender https://ftp.nluug.nl/pub/graphics/blender; do \
+         curl -fsSL "$mirror/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -o /tmp/blender.tar.xz && break; done \
     && echo "${BLENDER_SHA256}  /tmp/blender.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/blender.tar.xz -C /opt && mv "/opt/blender-${BLENDER_VERSION}-linux-x64" /opt/blender && rm /tmp/blender.tar.xz
 ENV SPHR_GPU=nvidia BLENDER=/opt/blender/blender
