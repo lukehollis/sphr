@@ -12,6 +12,7 @@ import ConnectAgents from "./ConnectAgents";
 import { formatBytes } from "@/lib/bytes";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
 import type { AgentToken } from "@/lib/server/accounts-store";
+import type { TourView } from "@/lib/server/user-tours";
 import type { Plan } from "@/lib/server/billing";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
@@ -165,6 +166,49 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   </article>;
 }
 
+function TourCard({ tour, onDelete }: { tour: TourView; onDelete: (tour: TourView) => void }) {
+  const hunt = tour.kind === "hunt";
+  const count = tour.stops ? `${tour.stops} ${hunt ? (tour.stops === 1 ? "clue" : "clues") : (tour.stops === 1 ? "stop" : "stops")}` : "Not started yet";
+  const media = <>
+    {tour.space ? <img src={tour.space.thumbnail} alt="" loading="lazy" width={960} height={640} /> : <span className="space-art" aria-hidden="true"><ConstructionDrawing /></span>}
+    <span className="space-card-tag"><StatusMark status={!tour.available ? "offline" : tour.public ? "public" : "private"} label={hunt ? "Scavenger hunt" : "Guided tour"} /></span>
+    {tour.available && <span className="space-card-open">Edit<span aria-hidden="true">→</span></span>}
+  </>;
+  return <article className="space-card">
+    {tour.available ? <a className="space-card-media" href={tour.editor} aria-label={`Edit ${tour.title}`}>{media}</a> : <span className="space-card-media">{media}</span>}
+    <div className="space-card-body">
+      <h3>{tour.available ? <a href={tour.editor}>{tour.title}</a> : tour.title}</h3>
+      <p>{!tour.available ? "Its space is no longer available." : `${count} in ${tour.space?.title}. ${tour.public ? "Anyone with the link can open it." : "Only you can open it."}`}</p>
+      <div className="tour-card-actions">
+        {tour.available && <a href={tour.path} target="_blank" rel="noreferrer">Open<span aria-hidden="true"> ↗</span></a>}
+        {!tour.available && <button type="button" className="site-link" onClick={() => onDelete(tour)}>Delete</button>}
+      </div>
+    </div>
+  </article>;
+}
+
+/** Guided tours and scavenger hunts the customer built on their spaces or on Spacery's. */
+function Tours({ initial }: { initial: TourView[] }) {
+  const [tours, setTours] = useState(initial);
+  const [error, setError] = useState("");
+  async function remove(tour: TourView) {
+    if (!window.confirm(`Delete ${tour.title}?`)) return;
+    try { await accountRequest(`/api/account/tours/${tour.id}`, {}, "DELETE"); setTours(current => current.filter(item => item.id !== tour.id)); }
+    catch (failure) { setError((failure as Error).message); }
+  }
+  return <section className="tours" aria-labelledby="tours-title">
+    <div className="spaces-head tours-head">
+      <div>
+        <h2 id="tours-title">Tours and scavenger hunts</h2>
+        <p>Build a guided tour or a scavenger hunt on one of your spaces or on one of ours, then share its link.</p>
+      </div>
+      <a className="site-button site-button-secondary" href="/account/tours/new">Make a tour or hunt</a>
+    </div>
+    {error && <p className="site-alert" role="alert">{error}</p>}
+    {tours.length > 0 && <div className="spaces-grid">{tours.map(tour => <TourCard key={tour.id} tour={tour} onDelete={tour => void remove(tour)} />)}</div>}
+  </section>;
+}
+
 /** Agents on the customer's own computers that can add spaces and upload for them, each of which can be unlinked. */
 function LinkedAgents({ initial }: { initial: AgentToken[] }) {
   const [agents, setAgents] = useState(initial);
@@ -185,8 +229,8 @@ function LinkedAgents({ initial }: { initial: AgentToken[] }) {
   </section>;
 }
 
-export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [] }:
-  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[] }) {
+export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [], tours = [] }:
+  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[]; tours?: TourView[] }) {
   const [spaces, setSpaces] = useState(initial);
   const [account, setAccount] = useState(initialAccount);
   const [error, setError] = useState("");
@@ -335,6 +379,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
           <span className="site-button" aria-hidden="true">Add a space</span>
         </span>
       </button>}
+      <Tours initial={tours} />
       <LinkedAgents initial={agents} />
     </main>
     <SiteFooter brand={brand} links={legalLinks} />

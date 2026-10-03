@@ -161,7 +161,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
             </div>
             <p className="site-hint">{space.scene.public ? "Anyone with the link can open it." : "Only you can open it while it is private."}</p>
             <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/edit`}>Edit title and start view</a>
-            <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/tour`}>Make a tour or scavenger hunt</a>
+            <a className="site-button site-button-secondary site-button-block" href={`/account/tours/new?scene=${space.scene.sceneId}`}>Make a tour or scavenger hunt</a>
           </div>}
           <div className="site-aside-block">
             <h3>Settings</h3>

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, scryptSync } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -339,6 +339,79 @@ try {
   assert.equal(renewed.items.data[0].quantity, 1);
   assert.equal((await alice.get(`/account/spaces/${gallery.id}`)).status, 404);
 
+  // ---- Customers' own tours and scavenger hunts, on their spaces or the operator's ----
+  // The operator's catalog: one public space, one private space and one Matterport embed.
+  const legacy = path.join(root, 'public/datasets/legacy');
+  const operatorScene = (id, slug, title, extra = {}) => ({ sceneId: id, titleSlug: slug, scenePath: `/s/${id}/${slug}`, slug, title,
+    bootstrapUrl: `/datasets/legacy/${slug}/bootstrap.json`, thumbnail: `/datasets/legacy/${slug}/preview.jpg`, nodeCount: 1, createdAt: '2026-01-01', sourceType: 'panoramas', ...extra });
+  for (const slug of ['operator-hall', 'private-hall', 'embedded-hall']) cpSync(installed, path.join(legacy, slug), { recursive: true });
+  writeFileSync(path.join(legacy, 'index.json'), JSON.stringify({ spaces: [operatorScene('0a0a0a0a0a01', 'operator-hall', 'Operator hall'),
+    operatorScene('0a0a0a0a0a02', 'private-hall', 'Private hall'), operatorScene('0a0a0a0a0a03', 'embedded-hall', 'Embedded hall', { sourceType: 'matterport', nodeCount: 0 })] }));
+  for (const [scene, value] of [['0a0a0a0a0a01', 1], ['0a0a0a0a0a02', 0], ['0a0a0a0a0a03', 1]]) database().prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run(scene, value);
+  const node = JSON.parse(readFileSync(path.join(installed, 'bootstrap.json'), 'utf8')).space.space_data.nodes[0].uuid;
+  assert.equal((await anonymous.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 401);
+  assert.equal((await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 403, 'unconfirmed accounts cannot make tours');
+  database().prepare("UPDATE users SET email_verified=1 WHERE email='bob@example.com'").run();
+  let tourPage = (await (await alice.get('/account/tours/new')).text()).replaceAll('<!-- -->', '');
+  for (const title of ['Operator hall', 'Riverside studio, 2nd floor']) assert.ok(tourPage.includes(title), `${title} is offered`);
+  for (const title of ['Private hall', 'Embedded hall']) assert.ok(!tourPage.includes(title), `${title} is not offered`);
+  assert.ok(!(await (await bob.get('/account/tours/new')).text()).includes('Riverside studio'), "another customer's space is never offered, even a public one");
+  assert.equal((await alice.post('/api/account/tours', { sceneId: '0a0a0a0a0a02' })).status, 404, 'private operator spaces are not offered');
+  assert.equal((await alice.post('/api/account/tours', { sceneId: '0a0a0a0a0a03' })).status, 404, 'Matterport embeds cannot hold a tour');
+  assert.equal((await bob.post('/api/account/tours', { sceneId: reserved })).status, 404);
+  body = await (await alice.post('/api/account/tours', { sceneId: '0a0a0a0a0a01', kind: 'hunt' })).json();
+  const hunt = body.tour;
+  assert.equal(hunt.editor, `/account/tours/${hunt.id}`);
+  const ownTour = (await (await alice.post('/api/account/tours', { sceneId: reserved, kind: 'tour' })).json()).tour;
+  assert.ok(ownTour?.id, 'customers build on their own spaces too');
+  assert.equal((await alice.get(hunt.editor)).status, 200);
+  assert.equal((await bob.get(hunt.editor)).status, 404);
+  // Saving: stops stand on the space's own locations, revisions guard concurrent edits.
+  const huntBody = (revision, extra = {}) => ({ revision, title: 'Find the lamps', public: false, ...extra, experience: { version: 1, kind: 'hunt', finale: 'All found.',
+    objects: [{ id: 'lamp', name: 'Brass lamp', source: { kind: 'shape', shape: 'orb' }, position: [0, 1, -2], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    effects: [{ id: 'chime', type: 'sound', target: { kind: 'object', id: 'lamp' }, params: { sound: 'found', trigger: 'found' } }],
+    stops: [{ id: 'clue-1', title: 'Under the window', text: 'Look where the light comes in.', view: { nodeId: node, rotation: { azimuth: 10, polar: 0 } },
+      objects: ['lamp'], effects: ['chime'], find: { objectId: 'lamp', hint: 'Look up.', found: 'Lit.' } }] } });
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(0, { title: '' }) })).status, 400);
+  const badNode = huntBody(0); badNode.experience.stops[0].view.nodeId = 'nowhere';
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: badNode })).status, 400, 'stops must stand in the space');
+  assert.equal((await bob.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(0) })).status, 404);
+  response = await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(0) });
+  assert.equal(response.status, 200);
+  body = await response.json();
+  assert.deepEqual([body.tour.revision, body.tour.title, body.tour.public, body.tour.path], [1, 'Find the lamps', false, `/t/${hunt.id}/find-the-lamps`]);
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(0) })).status, 409, 'stale revisions are refused');
+  const tourLink = body.tour.path;
+  // Watching: the owner always, everyone else once it is shared.
+  assert.equal(location(await anonymous.get(tourLink)), `/account/login?next=${encodeURIComponent(tourLink)}`);
+  assert.equal((await bob.get(tourLink)).status, 404);
+  tourPage = await (await alice.get(tourLink)).text();
+  assert.ok(tourPage.includes('Under the window') && tourPage.includes('noindex'), 'the owner previews a private tour, never indexed');
+  assert.equal(location(await alice.get(`/t/${hunt.id}/old-title`)), tourLink, 'old titles lead to the current link');
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(1, { public: true }) })).status, 200);
+  tourPage = await (await anonymous.get(tourLink)).text();
+  assert.ok(tourPage.includes('Find the lamps') && tourPage.includes('Under the window'), 'shared tours open for anyone');
+  assert.ok(!(await (await anonymous.get('/s/0a0a0a0a0a01/operator-hall')).text()).includes('Under the window'), "the operator's space itself is unchanged");
+  tourPage = (await (await alice.get('/account')).text()).replaceAll('<!-- -->', '');
+  assert.ok(tourPage.includes('Find the lamps') && tourPage.includes(`href="/account/tours/${ownTour.id}">Riverside studio, 2nd floor<`), 'the account lists its tours');
+  // The agent drafts only for the owner; without an agent on this server it says so.
+  assert.equal((await bob.post(`/api/account/tours/${hunt.id}/agent`, { prompt: 'Hide three lamps' })).status, 404);
+  response = await alice.post(`/api/account/tours/${hunt.id}/agent`, { prompt: 'Hide three lamps' });
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).error, /No agent is set up/);
+  // A space taken away takes its tours offline, and they can still be deleted.
+  database().prepare("UPDATE visibility SET public=0 WHERE scene='0a0a0a0a0a01'").run();
+  assert.equal((await anonymous.get(tourLink)).status, 404);
+  assert.equal((await alice.get(hunt.editor)).status, 404);
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(2) })).status, 410);
+  database().prepare("UPDATE visibility SET public=1 WHERE scene='0a0a0a0a0a01'").run();
+  assert.equal((await anonymous.get(tourLink)).status, 200);
+  assert.equal(location(await alice.get(`/account/spaces/${studio.id}/tour`)), `/account/tours/new?scene=${reserved}`, 'the older tour link starts a tour of the space');
+  assert.equal((await bob.request(`/api/account/tours/${hunt.id}`, { method: 'DELETE', json: {} })).status, 404);
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'DELETE', json: {} })).status, 200);
+  assert.equal((await anonymous.get(tourLink)).status, 404);
+  console.log("Passed: customers' tours and scavenger hunts on their own spaces and the operator's public spaces, saving, sharing, the agent's owner check and spaces taken away.");
+
   // A job the agent cannot finish waits for an operator instead of guessing.
   body = await (await aliceLaptop.post('/api/account/spaces', { title: 'Odd capture' })).json();
   const odd = body.space;
@@ -521,6 +594,7 @@ try {
   assert.equal(about("Error in a visitor's browser").filter(item => item.description === 'TypeError: x is undefined').length, 1, 'a repeated browser error is reported once');
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
+  assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));

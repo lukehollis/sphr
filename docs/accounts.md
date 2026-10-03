@@ -85,10 +85,29 @@ code and token sealed with a key derived from the session ID, which only the age
 `node scripts/test-agent-connector.mjs` drives both connectors end to end against a development
 server with local stand-ins for Stripe, Google and email.
 
+## Customers' tours and scavenger hunts
+
+A signed-in customer with a confirmed email can build guided tours and scavenger hunts on any of
+their own finished, hosted spaces and on any of the operator's public spaces (Matterport embeds
+excepted), from *Make a tour or hunt* on *Your spaces* or from a space's page. Each tour is its own
+record (`user_tours` in the state database) pointing at a space; the space itself never changes,
+and a tour does not count as a space for billing. Tours start private and get their own link,
+`/t/<id>/<title>`, which the customer can share with anyone; tour pages are never indexed. A
+shared tour of a private space opens that space for the link's visitors, which is the customer's
+choice. When the space stops being available (the operator makes it private, the customer deletes
+it or hosting lapses), its tours go offline and can only be deleted.
+
+The builder is the same as the operator's (`components/TourBuilder.tsx`), with a title and sharing
+controls. On the tour's link the customer's stops replace any stops the space was published with,
+and the spaces and narration a longer published tour continues into are left out
+(`applyExperience(..., { standalone: true })`). The tour agent drafts for customers too, limited to
+30 requests an hour per account and 400 for everyone; customers see library models whose scope is
+`everyone` only.
+
 ## Operator notifications
 
 With `SPHR_DISCORD_WEBHOOK_URL` set to a Discord channel webhook, the operator hears about new
-accounts, spaces created, spaces submitted for processing (from the website or an agent), spaces
+accounts, spaces created, tours and scavenger hunts started, spaces submitted for processing (from the website or an agent), spaces
 that are ready or need attention, deleted spaces, linked agents, and billing changes: a new
 subscription, a plan change, a failed payment, a scheduled or withdrawn cancellation, and hosting
 stopping. Billing notices compare the saved subscription with Stripe's latest state in one
