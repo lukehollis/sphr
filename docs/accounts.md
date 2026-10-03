@@ -273,10 +273,16 @@ uploads (`scripts/packages/inspect-inputs.mjs`) and routes each kind of capture:
 |---|---|---|
 | Matterport or other E57 with registered panoramas | `sphr-matterport` | Calibrated panoramas, mesh and dollhouse |
 | Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG; old GaussianSplats3D `.splat` is converted) | `sphr-splat-package` | Splat space orbiting its subject (`build-splat.mjs`) |
-| 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package` | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`) |
+| 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package`, or `sphr-video` for 3DGS | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`), or 3DGS from the frames cut into views (`pano_views.py`) |
 | Ordinary video or photo sets | `sphr-video` | COLMAP poses and a Brush-trained splat on GPU workers, opening from a capture camera (`build-splat.mjs --cameras`); held for an operator without a GPU |
 | Lidar point clouds (LAS/LAZ, E57 without images, PLY, PCD, XYZ) | `sphr-lidar-package` | Point-cloud splat; E57 interiors open where the scanner stood (`build-pointcloud.mjs`) |
 | Scanned meshes (OBJ, GLB, PLY, STL, USDZ, FBX) | `sphr-lidar-package` | Orbitable model, unlit for photo scans and lit for designed models; rigs frozen at their first frame (`build-model.mjs`) |
+
+Customers choose **3DGS** or **360 tour** in the upload sheet (or `output` through their agent); the space
+stores `splat`, `tour` or null for automatic, which builds a tour from an E57 scan and 3DGS from anything
+else. Splat training follows `sphr-train-3dgs` (adapted from the real2sim project): nerfstudio splatfacto
+with a bilateral grid, camera optimizer, scale regularization and antialiasing for automatic-exposure
+captures, Brush for locked exposure, judged on held-out photo-versus-render sheets.
 
 Every tool writes a `sphr-package-v1` package: `bootstrap.json`, `preview.jpg`, the runtime
 files, and `manifest.json` listing each file with its SHA-256. `validate-package.mjs` checks

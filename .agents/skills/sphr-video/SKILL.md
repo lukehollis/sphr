@@ -51,7 +51,48 @@ When the walk loses track (fast turns, blank walls), COLMAP starts over and writ
 (`sparse/0`, `sparse/1`, …) in the order it built them, not by size. Run `model_analyzer` on each and train
 on the one with the most registered images; tell the customer if a large part of the video was left out.
 
+## 2b. 360 photos and 360 video as a splat
+
+When the customer wants a splat from a 360 capture (sphr-intake, section 2), get equirectangular frames
+first, then cut each into perspective views, which COLMAP and the trainers need:
+
+- 360 video: `ffmpeg -i <video> -vf fps=2 -q:v 2 "$SPHR_JOB_DIR/work/pano/%05d.jpg"` (2 frames a second of
+  walking is about right; more for a fast walk).
+- 360 photos: copy them into `work/pano/` in capture order (file names or EXIF time).
+- Raw Insta360 files: build the tour with `build-insta360.mjs` first (sphr-panorama-package); its stitched
+  panoramas in the package's `pano/` folder are the frames. Copy them out before building the splat, which
+  replaces the package. The tour is also your fallback if reconstruction fails.
+
+```sh
+/opt/venv/bin/python scripts/packages/pano_views.py --input "$SPHR_JOB_DIR/work/pano" \
+  --output "$SPHR_JOB_DIR/work/data/images" --views 8 --fov 90 --size 1280
+```
+
+It prints the shared pinhole camera (`cameraParams`). Views stay level, so the selfie stick, tripod and
+photographer below the camera are left out; add `--up-ring 4` for ceilings and tree canopies. Run COLMAP
+step by step with that camera fixed, in the background as in section 2:
+
+```sh
+cd "$SPHR_JOB_DIR/work" && mkdir -p colmap/sparse && export QT_QPA_PLATFORM=offscreen
+(colmap feature_extractor --database_path colmap/db.db --image_path data/images --ImageReader.camera_model PINHOLE \
+   --ImageReader.single_camera 1 --ImageReader.camera_params "<cameraParams>" --SiftExtraction.use_gpu 0 \
+ && colmap sequential_matcher --database_path colmap/db.db --SiftMatching.use_gpu 0 --SequentialMatching.overlap 24 \
+ && colmap mapper --database_path colmap/db.db --image_path data/images --output_path colmap/sparse \
+      --Mapper.ba_refine_focal_length 0 --Mapper.ba_refine_principal_point 0 --Mapper.ba_refine_extra_params 0
+ echo $? > colmap.exit) > colmap.log 2>&1 &
+```
+
+The overlap of 24 is three frames' worth of 8 views, so each view is matched with the same direction in the
+neighbouring frames; for photos taken far apart use `colmap exhaustive_matcher` instead. Measured: 36 frames of
+an 18-second 360 walk (288 views at 1024 px) registered completely in one model, 1.1 px reprojection error.
+When less than about two thirds of the views register, build the tour instead (sphr-intake). Otherwise copy
+`colmap/sparse/0` to `data/sparse/0` and train as below; a 360 camera exposes automatically, so follow
+sphr-train-3dgs's appearance recipe.
+
 ## 3. Train and package
+
+Which trainer and settings to use, and how to judge the result, is in the **sphr-train-3dgs** skill; read it
+before training. Brush, below, is the fast trainer for captures with locked exposure.
 
 **Brush** is installed on GPU workers (`SPHR_GPU=nvidia` is set and `brush_app` exists). It trains on the GPU
 and reads a folder that holds `images/` and `sparse/0/` side by side, so copy COLMAP's model next to the
