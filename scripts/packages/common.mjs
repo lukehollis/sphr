@@ -174,8 +174,12 @@ export function viewRotation([x, y, z]) {
   return { azimuth: Math.atan2(-x, -z) * 180 / Math.PI, polar: Math.asin(Math.max(-1, Math.min(1, y / length))) * 180 / Math.PI };
 }
 
-/** Renders colored points with a simple depth buffer, as the viewer's camera sees them. */
-export async function pointPreview(positions, colors, box, out, camera = orbitCamera(box)) {
+/**
+ * Renders colored points with a simple depth buffer, as the viewer's camera sees them. With `sizes` (each
+ * splat's largest extent, in scene units) every point is drawn at its size on screen, so a first-person view
+ * inside a splat reads like the splat instead of scattered specks.
+ */
+export async function pointPreview(positions, colors, box, out, camera = orbitCamera(box), sizes = null) {
   const { width, height } = previewSize;
   const pixels = graphPaper(width, height);
   const depths = new Float32Array(width * height).fill(Infinity);
@@ -194,8 +198,10 @@ export async function pointPreview(positions, colors, box, out, camera = orbitCa
     if (depth <= 0.05) continue;
     const cx = dx * right[0] + dz * right[2], cy = dx * up[0] + dy * up[1] + dz * up[2];
     const u = Math.round(width / 2 + focal * cx / depth), v = Math.round(height / 2 - focal * cy / depth);
-    for (let oy = 0; oy < size; oy++) for (let ox = 0; ox < size; ox++) {
-      const px = u + ox, py = v + oy;
+    const side = sizes ? Math.max(1, Math.min(14, Math.round(1.5 * sizes[index] * focal / depth))) : size;
+    const offset = sizes ? Math.floor(side / 2) : 0;
+    for (let oy = 0; oy < side; oy++) for (let ox = 0; ox < side; ox++) {
+      const px = u + ox - offset, py = v + oy - offset;
       if (px < 0 || py < 0 || px >= width || py >= height) continue;
       const cell = py * width + px;
       if (depth >= depths[cell]) continue;

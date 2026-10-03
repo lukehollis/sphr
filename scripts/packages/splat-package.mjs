@@ -1,8 +1,8 @@
 // Packages a splat file (from a trainer, or converted from a point cloud) as an SPHR space.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, subjectCore, titlePreview, viewRotation, writePackage } from './common.mjs';
-import { cameraLevelRotation, cameraStartView } from './colmap-cameras.mjs';
+import { bounds, denseCore, eulerTurningToUp, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, subjectCore, titlePreview, viewRotation, writePackage } from './common.mjs';
+import { cameraStartView, cameraUp } from './colmap-cameras.mjs';
 import { sampleSplats } from './splat-reader.mjs';
 
 /** 5th and 95th percentile of each axis. */
@@ -50,7 +50,7 @@ export async function packageSplat(input, id, { rotation, level = false, interio
   mkdirSync(path.join(id.folder, 'splat'));
   const file = `splat/scene.${extension}`;
   copyFileSync(input, path.join(id.folder, file));
-  const sample = sampleSplats(input);
+  const sample = sampleSplats(input, 1_000_000);
   let camera, box = null, leveled = null, start = null;
   // The cameras of the reconstruction the splat was trained from (COLMAP) know where up is and where the
   // capture was taken from, but only if the trainer kept COLMAP's axes.
@@ -58,9 +58,24 @@ export async function packageSplat(input, id, { rotation, level = false, interio
     start = { kind: 'ignored', reason: 'the camera positions do not lie inside the splat' };
     cameras = null;
   }
-  // An explicit rotation wins; then the cameras' up direction; then the splat's ground plane when one exists.
-  if (!rotation && level && cameras?.length) rotation = cameraLevelRotation(cameras);
+  // An explicit rotation wins. With cameras: the ground plane when it agrees with them, otherwise their up.
+  // Without: the ground plane when one exists.
   if (!rotation && level && sample?.positions.length) leveled = levelRotation(sample.positions);
+  if (!rotation && level && cameras?.length) {
+    // The cameras' up assumes they were held without roll; a 360 camera on a tilted stick breaks that, so a
+    // clear ground plane within 30 degrees of it is the better measurement. A wall that outnumbers the floor
+    // lies far from the cameras' up and is ignored.
+    const up = cameraUp(cameras);
+    const agreement = leveled ? leveled.up.reduce((sum, value, axis) => sum + value * up[axis], 0) : 0;
+    if (Math.abs(agreement) > Math.cos(30 * Math.PI / 180)) {
+      rotation = eulerTurningToUp(leveled.up.map(value => value * Math.sign(agreement)));
+      start = { leveledBy: 'ground' };
+    } else {
+      rotation = eulerTurningToUp(up);
+      leveled = null;
+      start = { leveledBy: 'cameras' };
+    }
+  }
   rotation ??= leveled?.rotation ?? [0, 0, 0];
   if (sample?.positions.length) {
     rotatePositions(sample.positions, rotation);
@@ -69,7 +84,7 @@ export async function packageSplat(input, id, { rotation, level = false, interio
     if (cameras?.length && !interior && elevation === undefined && distance === undefined) {
       const view = cameraStartView(cameras, rotation);
       camera = view.camera;
-      start = { kind: view.kind, from: view.camera.from };
+      start = { ...start, kind: view.kind, from: view.camera.from };
     }
     // Scanner stations are only known unrotated, so they are used when the capture keeps its axes.
     if (interior && stations?.length && !rotation.some(Boolean)) camera = stationView(stations[0], box);
@@ -78,7 +93,7 @@ export async function packageSplat(input, id, { rotation, level = false, interio
     camera ??= interior
       ? { position: middle, rotation: { azimuth: 0, polar: 0 }, target: middle }
       : orbitCamera(box, { ...(elevation !== undefined ? { elevation } : {}), ...(distance !== undefined ? { distance } : {}) });
-    await pointPreview(sample.positions, sample.colors, box, path.join(id.folder, 'preview.jpg'), camera);
+    await pointPreview(sample.positions, sample.colors, box, path.join(id.folder, 'preview.jpg'), camera, sample.extents);
   } else {
     camera = { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 }, rotation: { azimuth: 0, polar: -20 }, distance: 6 };
     await titlePreview(id.title, path.join(id.folder, 'preview.jpg'));

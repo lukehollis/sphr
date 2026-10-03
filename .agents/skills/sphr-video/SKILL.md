@@ -129,10 +129,14 @@ node scripts/packages/build-splat.mjs --input "$SPHR_JOB_DIR/work/splat/scene.pl
   --cameras "$SPHR_JOB_DIR/work/data/sparse/0"
 ```
 
-`--cameras` levels the capture from how the camera was held and opens the space from a real capture
-position: photos circling a subject orbit the point every camera looked at, and a walkthrough starts in
-first person a few steps into the walk. The output's `start.kind` says which (`orbit` or `walkthrough`);
+`--cameras` levels the capture (on the ground plane when it agrees with how the cameras were held, which also
+covers a 360 camera on a tilted stick; otherwise on the cameras) and opens the space from a real capture
+position: photos circling a subject orbit the point every camera looked at, and a walkthrough (including
+360 footage cut into views) starts in first person a few steps into the walk. The output's `start.kind`
+says which (`orbit` or `walkthrough`) and `start.leveledBy` how it was levelled;
 `ignored` means the camera positions did not match the splat (another trainer moved the axes), and the
 package fell back to framing the splat's dense body. Look at `preview.jpg`: it is drawn from the opening
-view. If the floor is still not at the bottom, pass `--rotation` (degrees about x,y,z) as well, which
-replaces the leveling but keeps the camera-based view.
+view, with every splat at its size on screen, so a walkthrough's preview shows the scene in first person
+(sky splats can leave gaps). If the floor is still not at the bottom, pass `--rotation` (degrees about x,y,z)
+as well, which replaces the leveling but keeps the camera-based view. Never drop `--cameras` for an orbit
+of a walkthrough: from outside the walk the view runs straight into floaters no camera constrained.

@@ -103,8 +103,11 @@ something this sandbox lacks (such as a splat trainer on a worker without a GPU)
 ## 3. Check your work
 
 Every tool writes `preview.jpg` into the package, drawn from the space's opening view. **Look at it.** It
-must show the capture upright and recognizable, from a viewpoint a visitor would want to start at. If it is upside down, sideways, empty or mostly noise, fix the options (for example
-`--rotation 180,0,0` for splats or `--up z` for point clouds) and rebuild. Then validate:
+must show the capture upright and recognizable, from a viewpoint a visitor would want to start at. If it is
+upside down, sideways, empty or mostly noise, fix the options (for example `--up z` for point clouds) and
+rebuild. For a splat you trained from COLMAP, always package with `--cameras` (sphr-video): it levels the
+scene and opens it where the capture was taken. Do not swap that for `--rotation` or an orbit: an orbit from
+outside a walkthrough looks straight into the floaters no camera constrained. Then validate:
 
 ```sh
 node scripts/packages/validate-package.mjs "$SPHR_JOB_DIR/output/public/datasets/matterport/$SPHR_SCENE_SLUG" \

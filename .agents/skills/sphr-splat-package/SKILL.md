@@ -17,8 +17,8 @@ splat (ignoring stray floaters) and turns it horizontal, with up on the side the
 It frames the opening orbit on the dense body of the capture. Check `preview.jpg`: the ground must be
 at the bottom and the subject in view. If it is not:
 
-- `--rotation x,y,z` in degrees replaces the automatic leveling (for example `180,0,0` for an upside-down
-  COLMAP-frame export when there is no clear ground). `--no-level` keeps the file's own axes.
+- `--rotation x,y,z` in degrees replaces the automatic leveling, for an uploaded splat that still comes out
+  tilted. For a splat you trained yourself, use `--cameras` instead (sphr-video).
 - `--interior` opens standing inside the capture (rooms, buildings you walk through) instead of orbiting
   it from outside (objects, statues, exteriors, drone captures).
 - `--elevation 25` sets how steeply the opening orbit looks down (degrees).
