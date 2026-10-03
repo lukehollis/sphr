@@ -223,6 +223,10 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid #4a4a4a; border-radius: 0; background: #1c1c1c; color: #f5f3ee; font: inherit; font-size: 15px; line-height: 1.45; }
 .tour-builder textarea { resize: vertical; min-height: 44px; }
 .tour-builder input::placeholder, .tour-builder textarea::placeholder { color: #8a867e; }
+.tour-builder-panel h1 + .builder-space { margin: -14px 0 18px; color: #9a968e; font-size: 14px; }
+.builder-settings { display: grid; gap: 10px; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #383838; }
+.builder-settings .builder-kind { margin-bottom: 0; }
+.builder-settings .builder-quiet { justify-self: start; min-height: 32px; padding: 0; text-decoration: underline; text-underline-offset: 4px; }
 .builder-kind { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin-bottom: 20px; }
 .builder-kind button { min-height: 44px; background: #222; color: #cfcbc2; }
 .builder-kind button[aria-checked="true"] { background: #f5f3ee; color: #111; }

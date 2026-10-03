@@ -171,7 +171,7 @@ export class ViewerSession {
       if (update.points.length) data.mode = 'guided';
     }
     if (segment) {
-      if (update.points.length) segment.tourpoints = update.points;
+      if (update.points.length || update.standalone) segment.tourpoints = update.points;
       segment.objects = update.objects;
       segment.effects = update.effects;
     }

@@ -64,7 +64,8 @@ export function panoramaPixelDirection(node: NodeData, x: number, y: number, fac
 /**
  * Uniforms shared by every panorama material, so effects can restyle the
  * photographs: a pencil sketch from the photo's own edges, revealed or hidden
- * in a widening circle around a direction.
+ * in a widening circle around a direction, and a scan that darkens the photo
+ * ahead of a glowing front opening around another direction.
  */
 export type PanoramaStyle = {
   uSketch: { value: number };
@@ -75,6 +76,11 @@ export type PanoramaStyle = {
   uColorAngle: { value: number };
   uAngleWidth: { value: number };
   uInvert: { value: number };
+  uScanDim: { value: number };
+  uScanGlow: { value: number };
+  uScanColor: { value: THREE.Color };
+  uScanDirection: { value: THREE.Vector3 };
+  uScanAngle: { value: number };
 };
 
 const STYLE_VERTEX = /* glsl */ `
@@ -111,6 +117,12 @@ const STYLE_FRAGMENT = /* glsl */ `
     vec3 page = mix(uPaper, drawing, drawn);
     diffuseColor.rgb = mix(diffuseColor.rgb, mix(page, diffuseColor.rgb, colored), uSketch);
   }
+  if (uScanDim + uScanGlow > 0.001) {
+    float scanAngle = acos(clamp(dot(normalize(vPanoDirection), uScanDirection), -1.0, 1.0));
+    float scanAhead = smoothstep(uScanAngle - 0.06, uScanAngle + 0.03, scanAngle);
+    float scanFront = 1.0 - smoothstep(0.0, 0.07, abs(scanAngle - uScanAngle));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.1, scanAhead * uScanDim) + uScanColor * scanFront * uScanGlow;
+  }
 `;
 
 function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, texture: THREE.Texture | null) {
@@ -121,9 +133,10 @@ function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, textu
     shader.vertexShader = "varying vec3 vPanoDirection;\n" + shader.vertexShader.replace("#include <project_vertex>", STYLE_VERTEX);
     shader.fragmentShader = `uniform float uSketch; uniform vec3 uInk; uniform vec3 uPaper; uniform vec3 uRevealDirection;
       uniform float uSketchAngle; uniform float uColorAngle; uniform float uAngleWidth; uniform float uInvert; uniform vec2 uTexel;
+      uniform float uScanDim; uniform float uScanGlow; uniform vec3 uScanColor; uniform vec3 uScanDirection; uniform float uScanAngle;
       varying vec3 vPanoDirection;\n` + shader.fragmentShader.replace("#include <map_fragment>", STYLE_FRAGMENT);
   };
-  material.customProgramCacheKey = () => "sphr-panorama-style-v1";
+  material.customProgramCacheKey = () => "sphr-panorama-style-v2";
   return material;
 }
 
@@ -136,7 +149,12 @@ export class PanoramaLayer {
     uSketchAngle: { value: 4 },
     uColorAngle: { value: 0 },
     uAngleWidth: { value: 0.12 },
-    uInvert: { value: 0 }
+    uInvert: { value: 0 },
+    uScanDim: { value: 0 },
+    uScanGlow: { value: 0 },
+    uScanColor: { value: new THREE.Color("#7fd6ff") },
+    uScanDirection: { value: new THREE.Vector3(0, -1, 0) },
+    uScanAngle: { value: 0 }
   };
 
   private active: PanoObject | null = null;

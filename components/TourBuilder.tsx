@@ -24,22 +24,27 @@ type Props = {
   agentReady: boolean;
   back: { href: string; label: string };
   api: string;
+  /** A customer's own tour of the space, with its own title, link and sharing. */
+  tour?: { id: string; title: string; public: boolean; path: string; spaceTitle: string };
 };
 
 type Turn = { prompt: string; reply: string };
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
 type Tab = "stops" | "objects" | "effects";
 
-function updateFor(draft: Experience) {
-  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale };
+function updateFor(draft: Experience, standalone: boolean) {
+  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, standalone };
 }
 
-export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api }: Props) {
+export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api, tour }: Props) {
   const session = useRef<ViewerSession | null>(null);
   const views = useRef(new Map<string, ViewCamera>());
   const [draft, setDraftState] = useState<Experience>(initial);
   const [saved, setSaved] = useState(initialSaved);
   const [baseline, setBaseline] = useState(() => JSON.stringify(initial));
+  const [meta, setMeta] = useState({ title: tour?.title ?? "", public: tour?.public ?? false });
+  const [savedMeta, setSavedMeta] = useState(meta);
+  const [link, setLink] = useState(tour?.path ?? scene.scenePath);
   const [ready, setReady] = useState(false);
   const [state, setState] = useState<RuntimeState | null>(null);
   const [tab, setTab] = useState<Tab>("stops");
@@ -56,10 +61,12 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   const [revision, setRevision] = useState(0);
   const [adding, setAdding] = useState(false);
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaving = useRef(false);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  const viewerEdits = useMemo(() => ({ ...edits, experience: initial }), [edits, initial]);
+  const standalone = Boolean(tour);
+  const viewerEdits = useMemo(() => ({ ...edits, experience: initial, standalone }), [edits, initial, standalone]);
   const editor = useMemo(() => ({
     mode: "tour" as const,
     onReady: (runtime: ViewerSession | null) => { session.current = runtime; setReady(Boolean(runtime)); },
@@ -76,22 +83,22 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
       const value = typeof next === "function" ? next(current) : next;
       if (pushTimer.current) clearTimeout(pushTimer.current);
       pushTimer.current = setTimeout(() => {
-        void session.current?.setExperience(updateFor(draftRef.current)).then(() => setRevision((count) => count + 1));
+        void session.current?.setExperience(updateFor(draftRef.current, standalone)).then(() => setRevision((count) => count + 1));
       }, immediate ? 0 : 250);
       return value;
     });
-  }, []);
+  }, [standalone]);
 
-  const dirty = JSON.stringify(draft) !== baseline;
+  const dirty = JSON.stringify(draft) !== baseline || meta.title !== savedMeta.title || meta.public !== savedMeta.public;
   useEffect(() => {
     if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    const warn = (event: BeforeUnloadEvent) => { if (leaving.current) return; event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
   // Unsaved drafts and the agent conversation survive a reload of the page.
-  const storageKey = `sphr-tour-draft:${scene.sceneId}`;
+  const storageKey = `sphr-tour-draft:${tour ? `tour-${tour.id}` : scene.sceneId}`;
   const restored = useRef(false);
   useEffect(() => {
     if (!ready || restored.current) return;
@@ -169,7 +176,14 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
     const objects = experience.objects.map((object) => {
       const anchor = anchors?.objects?.[object.id];
       const spot = anchor ? resolve(anchor) : null;
-      return spot ? { ...object, position: spot.position } : object;
+      if (!spot) return object;
+      // Signs and other flat things face the view they were placed from, unless the agent turned them,
+      // and things placed far off grow so they still read from there, up to five times.
+      const turned = object.rotation.some((value) => value !== 0);
+      const grow = spot.distance ? Math.min(5, Math.max(1, spot.distance / 5)) : 1;
+      return { ...object, position: spot.position,
+        ...(turned ? {} : { rotation: [0, Number(spot.rotation.azimuth.toFixed(1)), 0] as Vec3 }),
+        ...(grow > 1 ? { scale: object.scale.map((value) => Number((value * grow).toFixed(3))) as Vec3 } : {}) };
     });
     const effects = experience.effects.map((effect) => {
       const anchor = anchors?.effects?.[effect.id];
@@ -196,15 +210,38 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
     try {
       const response = await fetch(api, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revision: saved.revision, experience: remove ? null : draft })
+        body: JSON.stringify(tour ? { revision: saved.revision, experience: draft, title: meta.title, public: meta.public }
+          : { revision: saved.revision, experience: remove ? null : draft })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to save. Try again.");
-      setSaved(result.tour);
+      setSaved({ experience: result.tour.experience, revision: result.tour.revision });
       setBaseline(JSON.stringify(remove ? draft : result.tour.experience ?? draft));
-      setMessage(remove ? "The authored tour was removed. Visitors see the original space." : "Saved. Visitors see this tour now.");
+      if (tour) {
+        const next = { title: result.tour.title, public: result.tour.public };
+        setMeta(next); setSavedMeta(next); setLink(result.tour.path);
+        setMessage(next.public ? "Saved. Anyone with the link sees this version." : "Saved. Only you can open it until you share it.");
+      } else setMessage(remove ? "The authored tour was removed. Visitors see the original space." : "Saved. Visitors see this tour now.");
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(false); }
+  }
+
+  async function deleteTour() {
+    if (!window.confirm(`Delete ${meta.title || "this tour"}? Its link stops working. The space itself is not changed.`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(api, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Unable to delete. Try again.");
+      try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }
+      leaving.current = true;
+      window.location.assign(back.href);
+    } catch (failure) { setError((failure as Error).message); setBusy(false); }
+  }
+
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(new URL(link, window.location.href).href); setMessage("Link copied."); }
+    catch { setMessage(new URL(link, window.location.href).href); }
   }
 
   // ---- Stops ----
@@ -305,12 +342,22 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
 
     <aside className="tour-builder-panel">
       <div className="builder-scroll">
-        <nav aria-label="Builder"><a href={back.href}>← {back.label}</a><a href={scene.scenePath} target="_blank" rel="noreferrer">View space ↗</a></nav>
-        <h1>{scene.title}</h1>
+        <nav aria-label="Builder"><a href={back.href}>← {back.label}</a><a href={link} target="_blank" rel="noreferrer">{tour ? (hunt ? "Open hunt ↗" : "Open tour ↗") : "View space ↗"}</a></nav>
+        <h1>{tour ? meta.title || "Untitled" : scene.title}</h1>
+        {tour && <p className="builder-space">On {tour.spaceTitle}</p>}
         <div className="builder-kind" role="radiogroup" aria-label="What to make">
           <button type="button" role="radio" aria-checked={!hunt} onClick={() => setKind("tour")}>Guided tour</button>
           <button type="button" role="radio" aria-checked={hunt} onClick={() => setKind("hunt")}>Scavenger hunt</button>
         </div>
+
+        {tour && <div className="builder-settings">
+          <label>Title<input value={meta.title} maxLength={200} onChange={(event) => setMeta((current) => ({ ...current, title: event.target.value }))} /></label>
+          <div className="builder-kind" role="radiogroup" aria-label="Who can open it">
+            <button type="button" role="radio" aria-checked={!meta.public} onClick={() => setMeta((current) => ({ ...current, public: false }))}>Only you</button>
+            <button type="button" role="radio" aria-checked={meta.public} onClick={() => setMeta((current) => ({ ...current, public: true }))}>Anyone with the link</button>
+          </div>
+          {savedMeta.public && <button type="button" className="builder-quiet" onClick={() => void copyLink()}>Copy the link</button>}
+        </div>}
 
         <form className="builder-agent" onSubmit={(event) => { event.preventDefault(); void askAgent(); }}>
           <label htmlFor="agent-prompt">Tell your agent what to make</label>
@@ -431,7 +478,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
       <div className="builder-footer">
         <div className="editor-feedback" aria-live="polite">{message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}</div>
         <div className="builder-row">
-          {saved.experience && <button type="button" className="builder-quiet" disabled={busy} onClick={() => { if (window.confirm("Remove the authored tour? Visitors will see the space as it was.")) void save(true); }}>Remove tour</button>}
+          {tour ? <button type="button" className="builder-quiet" disabled={busy} onClick={() => void deleteTour()}>Delete</button>
+            : saved.experience && <button type="button" className="builder-quiet" disabled={busy} onClick={() => { if (window.confirm("Remove the authored tour? Visitors will see the space as it was.")) void save(true); }}>Remove tour</button>}
           <button type="button" className="editor-save" disabled={busy || !dirty} onClick={() => void save()}>{busy ? "Saving" : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>

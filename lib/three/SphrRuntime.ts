@@ -38,7 +38,8 @@ export type GizmoMode = "translate" | "rotate" | "scale";
 export type PixelAnchor = { nodeId?: string; face?: number; x: number; y: number; camera?: ViewCamera };
 /** A camera pose remembered with a captured view, so later placements aim from where it was taken. */
 export type ViewCamera = { position: Vec3; quaternion: [number, number, number, number]; fov: number; aspect: number };
-export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string };
+/** Live edits from the builder. A `standalone` tour's points replace the stops even when there are none. */
+export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; standalone?: boolean };
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -1013,7 +1014,7 @@ export class SphrRuntime {
   }
 
   /** Where a pixel lands in the space: the surface it shows, or two meters out. */
-  resolveAnchor(anchor: PixelAnchor): { position: Vec3; normal: Vec3 | null; hit: boolean; rotation: { azimuth: number; polar: number } } | null {
+  resolveAnchor(anchor: PixelAnchor): { position: Vec3; normal: Vec3 | null; hit: boolean; distance: number | null; rotation: { azimuth: number; polar: number } } | null {
     const node = anchor.nodeId ? this.resolveNode(anchor.nodeId) : null;
     if (anchor.nodeId && !node) return null;
     const ray = new THREE.Raycaster();
@@ -1041,13 +1042,13 @@ export class SphrRuntime {
     };
     if (!hit) {
       const point = ray.ray.at(2.5, new THREE.Vector3());
-      return { position: [point.x, point.y, point.z], normal: null, hit: false, rotation };
+      return { position: [point.x, point.y, point.z], normal: null, hit: false, distance: null, rotation };
     }
     const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
     if (normal && normal.dot(direction) > 0) normal.negate();
     // Rest on floors; stand slightly off walls toward the viewer.
     const point = hit.point.clone().addScaledVector(normal ?? direction.clone().negate(), normal && normal.y > 0.7 ? 0.01 : 0.06);
-    return { position: [point.x, point.y, point.z], normal: normal ? [normal.x, normal.y, normal.z] : null, hit: true, rotation };
+    return { position: [point.x, point.y, point.z], normal: normal ? [normal.x, normal.y, normal.z] : null, hit: true, distance: hit.distance, rotation };
   }
 
   /** A JPEG of the current view for the tour agent, with the camera it was taken from. */

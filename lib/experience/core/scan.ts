@@ -6,8 +6,11 @@ import { num, str } from "@/lib/experience/registry";
  * A ring of light that sweeps outward from the target across the capture.
  * In a splat space every splat is rewritten on the GPU: splats beyond the
  * front stay hidden while revealing, the front glows, and the scanned area
- * keeps a faint tint. In a panorama space the band is drawn over the space's
- * mesh so it sweeps across the photograph like a laser scan.
+ * keeps a faint tint. Standing at a panorama, the photograph itself darkens
+ * and comes back behind a glowing front that opens from the ground at your
+ * feet (or from the target) up to the sky, so parts of the photo the capture
+ * mesh does not cover are scanned too. In the overview the band is drawn over
+ * the space's mesh.
  */
 
 const surfaceVertex = /* glsl */ `
@@ -52,6 +55,11 @@ const create: EffectFactory = (context, instance) => {
   let maxRadius = 30;
   let strength = 0;
   let sinceStart = 0;
+  // At a panorama the front opens as an angle, about one radian per three meters.
+  const panorama = context.panorama;
+  const direction = new THREE.Vector3(0, -1, 0);
+  let angle = 0;
+  const firstPerson = () => Boolean(panorama) && context.viewMode() === "FPV";
 
   // Surfaces: overlay meshes that share the capture mesh's geometry.
   const overlays = new THREE.Group();
@@ -139,7 +147,10 @@ const create: EffectFactory = (context, instance) => {
       }
     }
     maxRadius = Math.min(maxRadius, 400);
+    if (instance.target.kind === "scene" && !object) direction.set(0, -1, 0);
+    else direction.copy(origin).sub(context.camera.position).normalize();
     radius = 0;
+    angle = 0;
     sinceStart = 0;
     running = true;
   };
@@ -151,6 +162,14 @@ const create: EffectFactory = (context, instance) => {
     material.uniforms.uRadius.value = radius;
     material.uniforms.uStrength.value = strength;
     material.uniforms.uReveal.value = str(params, "mode", "reveal") === "reveal" ? 1 : 0;
+    if (panorama) {
+      const shown = firstPerson() && running ? strength : 0;
+      panorama.uScanDim.value = str(params, "mode", "reveal") === "reveal" ? shown * 0.92 : 0;
+      panorama.uScanGlow.value = shown * 0.85;
+      panorama.uScanColor.value.copy(color);
+      panorama.uScanDirection.value.copy(direction);
+      panorama.uScanAngle.value = angle;
+    }
     if (uniforms && splats) {
       uniforms.origin.value.copy(origin);
       uniforms.radius.value = radius;
@@ -179,14 +198,17 @@ const create: EffectFactory = (context, instance) => {
         sinceStart += delta;
         if (running) {
           radius += delta * num(params, "speed", 6) * (context.reducedMotion ? 3 : 1);
-          if (radius > maxRadius + num(params, "width", 0.6)) {
+          angle = radius / 3;
+          const done = firstPerson() ? angle > Math.PI + 0.2 : radius > maxRadius + num(params, "width", 0.6);
+          if (done) {
             running = false;
             radius = maxRadius * 4 + 100;
             changed = true;
           }
         } else if (pulse && sinceStart > num(params, "every", 6)) start();
       }
-      overlays.visible = strength > 0.002 && (running || pulse);
+      // Standing at a panorama the photograph carries the scan; the mesh band serves the overview.
+      overlays.visible = strength > 0.002 && (running || pulse) && !firstPerson();
       if (changed) sync();
     },
     setActive(value) {
@@ -198,6 +220,7 @@ const create: EffectFactory = (context, instance) => {
     play() { start(); active = true; },
     setParams(next) { params = next; sync(); },
     dispose() {
+      if (panorama) { panorama.uScanDim.value = 0; panorama.uScanGlow.value = 0; }
       removeModifier?.();
       context.scene.remove(overlays);
       material.dispose();

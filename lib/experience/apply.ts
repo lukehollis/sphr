@@ -30,24 +30,34 @@ export function stopToTourPoint(stop: ExperienceStop): TourPoint {
   };
 }
 
-/** Write an authored tour or hunt into the opening space of a bootstrap. */
-export function applyExperience(input: SphrBootstrap, experience: Experience): SphrBootstrap {
+/**
+ * Write an authored tour or hunt into the opening space of a bootstrap. A
+ * `standalone` tour is someone's own tour of a space: it replaces the space's
+ * authored stops even when it has none yet, and leaves out the spaces and
+ * narration a longer authored tour would continue into.
+ */
+export function applyExperience(input: SphrBootstrap, experience: Experience, { standalone = false } = {}): SphrBootstrap {
   const result = structuredClone(input);
   const data = result.tour?.tour_data ?? {};
   const spaces = data.spaces ?? data.tourmodels ?? [];
   const segment: TourSpace = spaces[0] ?? { id: result.space.id, title: result.space.title, tourpoints: [] };
   const points = experience.stops.map(stopToTourPoint);
-  const updated: TourSpace = { ...segment, tourpoints: points.length ? points : segment.tourpoints, objects: experience.objects, effects: experience.effects };
+  const updated: TourSpace = { ...segment, tourpoints: points.length || standalone ? points : segment.tourpoints, objects: experience.objects, effects: experience.effects };
+  if (standalone) {
+    result.space = result.orderedSpaces?.find((space) => String(space.id) === String(segment.id)) ?? result.space;
+    result.orderedSpaces = undefined;
+  }
   result.tour = {
     ...result.tour,
     tour_data: {
       ...data,
-      ...(points.length ? { mode: "guided" as const } : {}),
+      ...(points.length ? { mode: "guided" as const } : standalone ? { mode: "explore" as const } : {}),
+      ...(standalone ? { audio: {}, autoplay: false } : {}),
       kind: experience.kind,
       finale: experience.finale,
       objects: experience.objects,
       effects: experience.effects,
-      spaces: [updated, ...spaces.slice(1)],
+      spaces: standalone ? [updated] : [updated, ...spaces.slice(1)],
       tourmodels: undefined
     }
   };

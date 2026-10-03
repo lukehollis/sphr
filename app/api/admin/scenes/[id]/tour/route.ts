@@ -1,10 +1,9 @@
 import { readSourceScenes } from '@/lib/scene-catalog';
-import { openingSpace } from '@/lib/scene-edits';
-import { ExperienceError, parseExperience } from '@/lib/experience/validate';
+import { ExperienceError } from '@/lib/experience/validate';
 import { EditConflict, saveSceneTour } from '@/lib/server/admin-store';
 import { adminResponse, readAdminBody } from '@/lib/server/auth';
-import { readSceneBootstrap } from '@/lib/server/scene-editor';
 import { canEditTour } from '@/lib/server/tour-access';
+import { parseExperienceFor } from '@/lib/server/tour-requests';
 
 /** Save a space's tour or scavenger hunt, or remove it with `experience: null`. */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,12 +16,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const scene = (await readSourceScenes()).find(item => item.sceneId === id);
   if (!scene) return adminResponse({ error: 'Space not found.' }, 404);
   try {
-    let experience = null;
-    if (body.experience !== null) {
-      const data = openingSpace(await readSceneBootstrap(scene)).space_data;
-      const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
-      experience = parseExperience(body.experience, { nodeIds: nodes.length ? new Set(nodes.map(node => node.uuid)) : undefined });
-    }
+    const experience = body.experience === null ? null : await parseExperienceFor(scene, body.experience);
     return adminResponse({ ok: true, tour: saveSceneTour(id, body.revision, experience) });
   } catch (error) {
     const status = error instanceof EditConflict ? 409 : error instanceof ExperienceError ? 400 : 500;

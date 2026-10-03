@@ -62,6 +62,11 @@ them directly in `tour_data`:
 }
 ```
 
+A viewer can also apply an experience as a tour of its own (`{ experience, standalone: true }`
+in the viewer's edits): its stops replace the space's published stops even when it has none, and
+the spaces and narration a longer published tour continues into are left out. The app uses this
+for customers' tours of a space, each with its own link.
+
 Rotations of objects are degrees. Object and effect IDs are listed per stop;
 `always` objects and effects also show in free exploration. Objects and effects
 belong to the first space of a multi-space tour.
@@ -73,7 +78,10 @@ plain metadata, which the builder, the validator and the agent read, and loads
 its Three.js code lazily only when a space uses it. Core ships five effects
 (`sparkles`, `scan`, `sketch`, `dust`, `beacon`) and four shapes (`marker`, `orb`,
 `box`, `sign`). `sketch` draws the space in pencil and ink, then a radial scan
-paints the color back in (or turns color into a drawing). Splats are restyled on
+paints the color back in (or turns color into a drawing). `scan` sweeps a ring of light outward; standing at a
+panorama, the photograph itself darkens and comes back behind a front that opens from the ground
+at the viewer's feet (or from the target), so sky and other parts the capture mesh misses are
+scanned too. Splats are restyled on
 the GPU; panoramas are drawn from the photograph's own edges. A space can also
 carry a companion splat trained on line drawings of its photos
 (`{ "url": "...", "role": "sketch" }` in `space_data.splats`, in the manner of

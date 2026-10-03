@@ -7,8 +7,7 @@ import { ViewerSession } from "@/lib/viewer/ViewerSession";
 import HudControls from "@/components/HudControls";
 import LoadingScreen from "@/components/LoadingScreen";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
-import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type SceneEdits } from '@/lib/scene-edits';
-import type { Experience } from "@/lib/experience/types";
+import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -27,7 +26,7 @@ const initialRuntimeState: RuntimeState = {
 };
 
 type Props = { configUrl?: string; preview?: { title: string; image: string };
-  edits?: Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null };
+  edits?: ViewerEdits;
   editor?: {
     onReady: (session: ViewerSession | null, issue: string | null) => void;
     onState: (state: RuntimeState) => void;
