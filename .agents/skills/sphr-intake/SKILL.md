@@ -70,14 +70,15 @@ If the data supports a method the tools above do not cover, write the converter 
 `build-splat.mjs`. This sandbox has Python at `/opt/venv/bin/python` (numpy, scipy, OpenCV `cv2`, Pillow
 with HEIF/HEIC after `pillow_heif.register_heif_opener()`, open3d, trimesh, pye57, laspy), Node with
 `sharp` (it cannot decode HEIC), `ffmpeg`, `colmap` (CPU only) and `blender`. GPU workers (`SPHR_GPU` is set)
-also have an NVIDIA GPU and the Brush splat trainer (see sphr-video). There is no network and nothing can be
+also have an NVIDIA GPU, the Brush splat trainer (see sphr-video) and Blender 4.2 with USD import at
+`$BLENDER` (the plain `blender` is 3.4, which cannot read USD). There is no network and nothing can be
 installed. Check the result exactly as in section 3. Write `needs_operator` only when the method needs
 something this sandbox lacks (such as a splat trainer on a worker without a GPU), or you cannot verify the result.
 
 ## 3. Check your work
 
-Every tool writes `preview.jpg` into the package. **Look at it.** It must show the capture upright and
-recognizable. If it is upside down, sideways, empty or mostly noise, fix the options (for example
+Every tool writes `preview.jpg` into the package, drawn from the space's opening view. **Look at it.** It
+must show the capture upright and recognizable, from a viewpoint a visitor would want to start at. If it is upside down, sideways, empty or mostly noise, fix the options (for example
 `--rotation 180,0,0` for splats or `--up z` for point clouds) and rebuild. Then validate:
 
 ```sh
