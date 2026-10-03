@@ -22,8 +22,10 @@ exact poses and its laser points are a far better starting cloud than any recons
 It writes `work/data/images/` and `work/data/sparse/0/` in the scan's own axes, leaving out photos that look
 straight down at the tripod. Several E57 files of one site (a Matterport export split into parts) share one
 coordinate frame: convert each into its own folder and merge them, or train on the largest. Scanners change
-exposure between positions, so use the appearance recipe below. Run every long step in the background with an exit file, as
-sphr-video describes; your commands stop after 10 minutes.
+exposure between positions, so train with the appearance model on (section 1).
+
+Run every long step in the background with an exit file, as sphr-video describes; your commands stop after
+10 minutes.
 
 ## 1. Choose the recipe from how the capture was exposed
 
