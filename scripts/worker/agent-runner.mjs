@@ -21,6 +21,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { readJobFile } from './job-files.mjs';
 import { canAutoPromote, promote, storeProposal, writeMeta } from './skill-proposals.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -142,6 +143,8 @@ function sandbox(dir, text, { extraEnv = {}, minutes, logName = 'agent.log' }) {
   const childEnv = Object.fromEntries(names.filter(name => !blocked.test(name) && process.env[name] !== undefined).map(name => [name, process.env[name]]));
   const home = env('SPHR_AGENT_HOME') ?? path.join(dir, 'home');
   mkdirSync(home, { recursive: true });
+  // A sandbox with a read-only root filesystem keeps scratch files in the job folder (pass -e TMPDIR={job}/tmp).
+  mkdirSync(path.join(dir, 'tmp'), { recursive: true });
   Object.assign(childEnv, { HOME: home, SPHR_JOB_DIR: dir, ...extraEnv });
   return new Promise((resolve) => {
     const output = createWriteStream(path.join(dir, logName), { flags: 'a' });
@@ -217,6 +220,12 @@ async function reviewProposal(stored) {
 /** Keeps a proposal the agent left in output/skill-proposal/, reviews it, and promotes approved new skills. */
 async function learn(job, result) {
   const source = path.join(jobDir(job), 'output/skill-proposal');
+  if (!existsSync(source)) return;
+  // A proposal folder (or the output folder above it) that is a link elsewhere is never read.
+  if (!lstatSync(source).isDirectory() || !realpathSync(source).startsWith(realpathSync(jobDir(job)) + path.sep)) {
+    log(job, 'skill proposal ignored: output/skill-proposal is not a folder inside the job');
+    return;
+  }
   if (!existsSync(path.join(source, 'SKILL.md'))) return;
   const stored = storeProposal(source, { id: job.id, sceneId: job.sceneId, slug: job.slug, dir: jobDir(job), title: job.space.title,
     files: job.uploads.map(upload => upload.name) }, result);
@@ -237,11 +246,10 @@ async function learn(job, result) {
 
 /** Forwards the newest line of output/progress.log to the customer's page every few seconds. */
 function relayProgress(job) {
-  const file = path.join(jobDir(job), 'output/progress.log');
   let sent = '';
   const timer = setInterval(() => {
     let latest = '';
-    try { latest = readFileSync(file, 'utf8').trim().split('\n').pop() ?? ''; } catch { return; }
+    try { latest = readJobFile(jobDir(job), 'output/progress.log', { maxBytes: 65536, tail: true }).trim().split('\n').pop() ?? ''; } catch { return; }
     latest = latest.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 300);
     if (!latest || latest === sent) return;
     sent = latest;
@@ -252,7 +260,7 @@ function relayProgress(job) {
 
 function readResult(job) {
   try {
-    const result = JSON.parse(readFileSync(path.join(jobDir(job), 'output/result.json'), 'utf8'));
+    const result = JSON.parse(readJobFile(jobDir(job), 'output/result.json'));
     if (!['ready', 'failed', 'needs_operator'].includes(result?.status)) return undefined;
     const message = typeof result.message === 'string' ? result.message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 1000) : '';
     return { status: result.status, message };
@@ -378,6 +386,9 @@ async function processJob(queued) {
   log(job, `agent exited with ${outcome.signal ?? outcome.code}`);
   const result = await finish(job);
   await learn(job, result).catch(error => log(job, `skill proposal not kept: ${error.message}`));
+  if (result !== 'held' && env('SPHR_KEEP_JOB_FILES') !== '1') {
+    for (const folder of ['input', 'work', 'tmp']) rmSync(path.join(jobDir(job), folder), { recursive: true, force: true });
+  }
   return result;
 }
 

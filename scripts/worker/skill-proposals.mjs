@@ -48,8 +48,11 @@ export function checkProposal(dir, job) {
     text += `\n${readFileSync(file.full, 'utf8')}`;
   }
   if (total > limits.totalBytes) problems.push('the proposal is larger than 4 MB');
-  const skillFile = path.join(dir, 'SKILL.md');
-  const head = existsSync(skillFile) ? frontmatter(readFileSync(skillFile, 'utf8')) : {};
+  // Only regular files are read: a proposal's names may be links to files elsewhere on the worker.
+  const regular = name => files.find(file => file.rel === name && file.regular);
+  const skillFile = regular('SKILL.md');
+  if (!skillFile) problems.push('SKILL.md is missing or not a regular file');
+  const head = skillFile ? frontmatter(readFileSync(skillFile.full, 'utf8')) : {};
   const name = head.name ?? '';
   const description = head.description ?? '';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64) problems.push('SKILL.md needs a lowercase dashed name');
@@ -60,7 +63,7 @@ export function checkProposal(dir, job) {
     ...(job.files ?? []).filter(name => name.length >= 6).map(name => [name, 'uploaded file name'])];
   for (const [needle, label] of needles) if (needle && text.includes(needle)) problems.push(`it mentions this job's ${label}`);
   let proposal = {};
-  try { proposal = JSON.parse(readFileSync(path.join(dir, 'proposal.json'), 'utf8')); } catch { problems.push('proposal.json is missing or not JSON'); }
+  try { proposal = JSON.parse(readFileSync(regular('proposal.json').full, 'utf8')); } catch { problems.push('proposal.json is missing, not a regular file or not JSON'); }
   const exists = Boolean(name) && existsSync(path.join(skillsRoot, name));
   const kind = proposal.kind === 'update' || exists ? 'update' : 'new';
   return { ok: !problems.length, problems, name, description, kind, updates: String(proposal.updates ?? '').slice(0, 200),
