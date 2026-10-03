@@ -3,19 +3,25 @@ import { bell, noiseSource, note, pad, pluck, render, sweep } from "@/lib/experi
 
 /** Spacery's sound library: recordings from the original garden tour, and generated beds and music. */
 
-const hosted = (url: string): SoundRenderer => async (rate) => {
+/** A recording on static.mused.org; short effects are brought to the same peak as the synthesized ones. */
+const hosted = (url: string, peak?: number): SoundRenderer => async (rate) => {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return new OfflineAudioContext(2, 1, rate).decodeAudioData(await response.arrayBuffer());
+  const buffer = await new OfflineAudioContext(2, 1, rate).decodeAudioData(await response.arrayBuffer());
+  if (!peak) return buffer;
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel));
+  const highest = Math.max(...channels.map((data) => data.reduce((max, value) => Math.max(max, Math.abs(value)), 0)));
+  if (highest > 1e-4) for (const data of channels) for (let index = 0; index < data.length; index += 1) data[index] *= peak / highest;
+  return buffer;
 };
 
 export const gardenMusic = hosted("https://static.mused.org/sounds/harumachi_peaceful_garden.mp3");
 export const gardenBirds = hosted("https://static.mused.org/sounds/backyard_garden_birds.mp3");
 export const nightAmbience = hosted("https://static.mused.org/sounds/night_ambience.mp3");
-export const ding = hosted("https://static.mused.org/sounds/interface_ding.mp3");
-export const drum = hosted("https://static.mused.org/sounds/bassdrum_64k.mp3");
-export const lowBell = hosted("https://static.mused.org/sounds/bell_low_0.mp3");
-export const lowBellHigh = hosted("https://static.mused.org/sounds/bell_low_2.mp3");
+export const ding = hosted("https://static.mused.org/sounds/interface_ding.mp3", 0.6);
+export const drum = hosted("https://static.mused.org/sounds/bassdrum_64k.mp3", 0.6);
+export const lowBell = hosted("https://static.mused.org/sounds/bell_low_0.mp3", 0.6);
+export const lowBellHigh = hosted("https://static.mused.org/sounds/bell_low_2.mp3", 0.6);
 
 // ---- Sound effects ----
 
