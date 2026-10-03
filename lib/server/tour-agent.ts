@@ -109,7 +109,42 @@ function decodeClientImage(value: string) {
 }
 
 /** Everything the agent needs to know about the space, as text plus images. */
-export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false) {
+const STOPWORDS = new Set("the and for with that this make tour hunt space around into from each stop stops find things about some have will they them their where what when then than like want please also very more most just".split(" "));
+
+/**
+ * Libraries run to thousands of models, too many to list in every request. The agent sees
+ * the models whose name, category, tags or pack match a word of the request or are already
+ * placed, plus a few from every category, under short codes the server maps back to URLs.
+ */
+export function pickLibrary(library: LibraryModel[], prompt: string, draft: Experience, limit = 180, perCategory = 4) {
+  const words = [...new Set((prompt.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((word) => !STOPWORDS.has(word)).map((word) => word.replace(/(ies|es|s)$/, "")))];
+  const placed = new Set(draft.objects.flatMap((object) => object.source.kind === "model" ? [object.source.url] : []));
+  const scored = library.map((model, index) => {
+    const text = `${model.name} ${model.category} ${model.pack ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase();
+    return { model, index, score: placed.has(model.url) ? 100 : words.filter((word) => text.includes(word)).length };
+  });
+  const chosen = new Set(scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, limit).map((item) => item.model));
+  const seen = new Map<string, number>();
+  for (const model of library) {
+    const count = seen.get(model.category) ?? 0;
+    if (count < perCategory && !chosen.has(model)) chosen.add(model);
+    seen.set(model.category, count + 1);
+  }
+  const listed = library.filter((model) => chosen.has(model));
+  const codes = new Map(listed.map((model, index) => [`lib${index + 1}`, model.url]));
+  return { listed, codes, counts: [...seen] };
+}
+
+/** Swap library codes in the agent's draft back to model URLs. */
+export function resolveLibraryCodes(raw: RawDraft, codes: Map<string, string>) {
+  for (const object of raw.objects ?? []) {
+    const source = object.source as Record<string, unknown> | undefined;
+    if (source?.kind === "model" && typeof source.url === "string" && codes.has(source.url.trim())) source.url = codes.get(source.url.trim());
+  }
+  return raw;
+}
+
+export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "") {
   const space = bootstrap.space;
   const data = space.space_data;
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
@@ -134,6 +169,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
 
   const listed = nodes.length > 300 ? sampleNodes(nodes, preferred, 300) : nodes;
   const library = await libraryModels(team);
+  const picked = pickLibrary(library, prompt, draft);
   const lines = [
     `Space title: ${space.title}`,
     `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(data.sceneGraph ?? bootstrap.tour?.tour_data?.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
@@ -143,10 +179,10 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     `Effects you can use:\n${effectEntries().map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : param.type === "sound" ? `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
     `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
-    library.length ? `Library models you can place (source {"kind":"model","url":...}):\n${library.map((model) => `${model.url} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
+    library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
     `Current draft:\n${JSON.stringify(draft)}`
   ].filter(Boolean);
-  return { text: lines.join("\n\n"), images, library };
+  return { text: lines.join("\n\n"), images, library, codes: picked.codes };
 }
 
 const SYSTEM = `You build guided tours and scavenger hunts inside captured 3D spaces for Spacery's viewer.
@@ -245,7 +281,7 @@ const WRITE_TOUR: Anthropic.Tool = {
   }
 };
 
-type RawDraft = {
+export type RawDraft = {
   reply?: unknown; kind?: unknown; finale?: unknown;
   objects?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>>; stops?: Array<Record<string, unknown>>;
 };
@@ -439,13 +475,13 @@ export async function composeTour(options: {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
-  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team);
+  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
-  const check = (raw: RawDraft) => { normalizeAgentDraft(raw, options.draft, nodeIds); };
+  const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
     ? await viaApi(context, options.history, prompt, check)
     : process.env.SPHR_TOUR_AGENT_URL?.trim()
       ? await viaService(context, options.history, prompt)
       : await viaCommand(context, options.history, prompt);
-  return { ...normalizeAgentDraft(raw, options.draft, nodeIds), library: context.library };
+  return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes), options.draft, nodeIds), library: context.library };
 }

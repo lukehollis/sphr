@@ -501,17 +501,24 @@ function Transform({ label, value, step, onChange }: { label: string; value: Vec
 /** Library models grouped by category, with a search across names, categories and tags. */
 function LibraryPicker({ library, onAdd }: { library: LibraryModel[]; onAdd: (model: LibraryModel) => void }) {
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<string[]>([]);
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = library.filter((model) => words.every((word) => `${model.name} ${model.category} ${model.pack ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase().includes(word)));
   const categories = [...new Set(matches.map((model) => model.category))];
   return <div className="builder-library">
     <label className="builder-picker-heading" htmlFor="library-search">Library</label>
-    <input id="library-search" type="search" placeholder="Search coins, chests, arrows, plants" value={query} onChange={(event) => setQuery(event.target.value)} />
-    {categories.map((category) => <div key={category}>
-      <p className="builder-picker-heading">{category}</p>
-      <div className="builder-grid">{matches.filter((model) => model.category === category).map((model) => <button type="button" key={model.id} title={`${model.name}, about ${model.height < 1 ? `${Math.round(model.height * 100)} cm` : `${model.height.toFixed(1)} m`} tall`} onClick={() => onAdd(model)}>
-        {model.thumbnail ? <img src={model.thumbnail} alt="" width={36} height={36} loading="lazy" /> : <span className="builder-swatch" />}{model.name}</button>)}</div>
-    </div>)}
+    <input id="library-search" type="search" placeholder="Search pyramids, coins, dogs, statues" value={query} onChange={(event) => setQuery(event.target.value)} />
+    {categories.map((category) => {
+      const models = matches.filter((model) => model.category === category);
+      // Large libraries show a few of each category until searched or opened.
+      const shown = words.length || open.includes(category) ? models : models.slice(0, 8);
+      return <div key={category}>
+        <p className="builder-picker-heading">{category}</p>
+        <div className="builder-grid">{shown.map((model) => <button type="button" key={model.id} title={`${model.name}, about ${model.height < 1 ? `${Math.round(model.height * 100)} cm` : `${model.height.toFixed(1)} m`} tall${model.credit ? `, by ${model.credit}` : ""}`} onClick={() => onAdd(model)}>
+          {model.thumbnail ? <img src={model.thumbnail} alt="" width={36} height={36} loading="lazy" /> : <span className="builder-swatch" />}{model.name}</button>)}
+          {shown.length < models.length && <button type="button" className="builder-quiet" onClick={() => setOpen([...open, category])}>All {models.length}</button>}</div>
+      </div>;
+    })}
     {!matches.length && <p className="editor-help">No models match.</p>}
   </div>;
 }

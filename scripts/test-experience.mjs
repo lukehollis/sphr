@@ -29,7 +29,7 @@ const { applyExperience, experienceFromBootstrap } = await import('../lib/experi
 const { applySceneEdits } = await import('../lib/scene-edits.ts');
 const { normalizeTour } = await import('../lib/bootstrap.ts');
 const { tourSegment } = await import('../lib/viewer/segments.ts');
-const { normalizeAgentDraft, extractJson } = await import('../lib/server/tour-agent.ts');
+const { normalizeAgentDraft, extractJson, pickLibrary, resolveLibraryCodes } = await import('../lib/server/tour-agent.ts');
 const { panoramaPixelDirection } = await import('../lib/three/renderers/PanoramaLayer.ts');
 const store = await import('../lib/server/admin-store.ts');
 const { readSceneTour } = await import('../lib/server/tours.ts');
@@ -173,4 +173,24 @@ test('stores tours with revision checks', () => {
   assert.throws(() => store.saveSceneTour('abcdefabcdef', 0, experience), store.EditConflict);
   store.saveSceneTour('abcdefabcdef', 1, null);
   assert.deepEqual(readSceneTour('abcdefabcdef'), { experience: null, revision: 2 });
+});
+
+test('the agent sees the library models that match the request, under codes it can place', () => {
+  const library = [
+    ...Array.from({ length: 30 }, (_, index) => ({ id: `chair-${index}`, name: `Chair ${index}`, category: 'Furniture', url: `https://cdn.example/chair-${index}.glb`, height: 1 })),
+    { id: 'sphinx', name: 'Sphinx', category: 'Ancient Egypt', url: 'https://cdn.example/sphinx.glb', height: 3, tags: ['egypt'] },
+    { id: 'pyramid', name: 'Pyramid', category: 'Ancient Egypt', url: 'https://cdn.example/pyramid.glb', height: 4, tags: ['egypt'] },
+    { id: 'coin', name: 'Gold coin', category: 'Collectibles', url: 'https://cdn.example/coin.glb', height: 0.06 }
+  ];
+  const draft = parseExperience({ version: 1, kind: 'hunt', stops: [], effects: [], objects: [
+    { id: 'seat', name: 'Seat', source: { kind: 'model', url: 'https://cdn.example/chair-29.glb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }] });
+  const picked = pickLibrary(library, 'A hunt for Egyptian treasures and gold coins', draft, 180, 2);
+  const urls = picked.listed.map((model) => model.url);
+  assert.ok(urls.includes('https://cdn.example/sphinx.glb') && urls.includes('https://cdn.example/coin.glb'));
+  assert.ok(urls.includes('https://cdn.example/chair-29.glb'), 'models already placed stay listed');
+  assert.equal(urls.filter((url) => url.includes('chair')).length, 3, 'other categories show only a few');
+  const code = [...picked.codes].find(([, url]) => url.endsWith('sphinx.glb'))[0];
+  const raw = resolveLibraryCodes({ objects: [{ id: 'a', source: { kind: 'model', url: code } }, { id: 'b', source: { kind: 'model', url: 'https://other.example/x.glb' } }] }, picked.codes);
+  assert.equal(raw.objects[0].source.url, 'https://cdn.example/sphinx.glb');
+  assert.equal(raw.objects[1].source.url, 'https://other.example/x.glb');
 });
