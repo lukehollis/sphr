@@ -1,0 +1,27 @@
+[Unit]
+Description=SPHR tour agent (Claude CLI with no tools, for drafting tours)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sphr-agent
+Group=sphr-agent
+WorkingDirectory=/var/lib/sphr-agent
+ExecStart=/opt/sphr/runtime/node /opt/sphr-agent/tour-agent-service.mjs
+Environment=HOME=/var/lib/sphr-agent
+Environment=SPHR_TOUR_AGENT_CLAUDE=/opt/sphr-agent/bin/claude
+Environment=SPHR_TOUR_AGENT_SERVICE_PORT=3037
+EnvironmentFile=/etc/sphr-agent/environment
+Restart=on-failure
+RestartSec=5
+MemoryHigh=1200M
+MemoryMax=1600M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sphr-agent
+
+[Install]
+WantedBy=multi-user.target
