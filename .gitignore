@@ -68,4 +68,4 @@ mp_e57_*.zip
 !/docs/matterport-web-archives.md
 
 # Licensed model library assets are hosted separately (see scripts/library).
-/public/library/
+/public/library
