@@ -10,7 +10,19 @@ or packaging later, so train for appearance first. This skill is adapted from th
 train-3dgs skill, which established the recipe below on handheld room captures.
 
 Start from a COLMAP model the way sphr-video leaves it: `$SPHR_JOB_DIR/work/data/images/` (the frames COLMAP
-used) and `$SPHR_JOB_DIR/work/data/sparse/0/`. Run every long step in the background with an exit file, as
+used) and `$SPHR_JOB_DIR/work/data/sparse/0/`.
+
+An **E57 scan with calibrated photos** (Matterport, Leica, NavVis, Faro) needs no COLMAP: its photos carry
+exact poses and its laser points are a far better starting cloud than any reconstruction.
+
+```sh
+/opt/venv/bin/python scripts/packages/e57_to_colmap.py --input <scan.e57> --output "$SPHR_JOB_DIR/work/data"
+```
+
+It writes `work/data/images/` and `work/data/sparse/0/` in the scan's own axes, leaving out photos that look
+straight down at the tripod. Several E57 files of one site (a Matterport export split into parts) share one
+coordinate frame: convert each into its own folder and merge them, or train on the largest. Scanners change
+exposure between positions, so use the appearance recipe below. Run every long step in the background with an exit file, as
 sphr-video describes; your commands stop after 10 minutes.
 
 ## 1. Choose the recipe from how the capture was exposed

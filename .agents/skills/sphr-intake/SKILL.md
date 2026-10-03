@@ -48,7 +48,7 @@ Then route by what the files can become:
 |---|---|---|
 | Ordinary video or overlapping photos | sphr-video | cannot be a tour; build the splat and say a tour needs 360 photos or video |
 | 360 photos, 360 video, raw Insta360 `.insv`/`.insp` | sphr-video, 360 section (cut into views, reconstruct, train) | sphr-panorama-package |
-| E57 with panoramic images (Matterport and terrestrial scanners) | sphr-lidar-package point-cloud splat of the scan | sphr-matterport |
+| E57 with panoramic images (Matterport and terrestrial scanners) | sphr-train-3dgs from the scan's own photos (`e57_to_colmap.py`) | sphr-matterport |
 | Gaussian splat file | sphr-splat-package | already a splat; package it and say so |
 | Point cloud or E57 without images | sphr-lidar-package | no panoramas exist; build the point cloud and say so |
 | Scanned mesh | sphr-lidar-package model | a model is neither; build it and say so |
