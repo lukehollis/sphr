@@ -30,8 +30,15 @@ report `failed` and ask for a slower walkthrough that circles the space.
 
 ```sh
 QT_QPA_PLATFORM=offscreen colmap automatic_reconstructor --workspace_path "$SPHR_JOB_DIR/work/colmap" \
-  --image_path "$SPHR_JOB_DIR/work/frames" --dense 0 --single_camera 1 --quality medium --use_gpu 0
+  --image_path "$SPHR_JOB_DIR/work/frames" --dense 0 --single_camera 1 --quality medium --use_gpu 0 \
+  --data_type video     # frames from one video; use --data_type individual for a set of photos
 ```
+
+Matching runs on the CPU, so pick the matcher by where the frames came from. `video` matches each frame
+with its neighbours (about 4 s a frame for 108 frames at 1600 px, so 8 minutes); `individual` matches every
+pair, which suits orbit photo sets up to about 150 but took 6.5 minutes per block of a 108-frame video. Run
+COLMAP in the background with its output in `work/colmap.log` and check on it, rather than letting a
+command time out and starting over.
 
 COLMAP here is built without CUDA: its default GPU SIFT crashes with a stack trace, so keep `--use_gpu 0`
 (for the step-by-step commands, `--SiftExtraction.use_gpu 0` and `--SiftMatching.use_gpu 0`). Phone
