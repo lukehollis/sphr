@@ -2,6 +2,7 @@
 // Packages a lidar point cloud (LAS/LAZ, E57 without panoramas, PLY/PCD points, XYZ/PTS)
 // as a splat space, each point a small round splat.
 //   node scripts/packages/build-pointcloud.mjs --input scan.laz --title "Title" [--up z|y] [--max-points 4000000] [--interior] [--elevation 35]
+// With --interior, an E57 opens where the scanner stood for its first scan, looking across the space.
 // E57 exports that include panoramic images are better as panorama spaces: try the Matterport
 // importer first (sphr-matterport skill), which works for any E57 with registered images.
 import { spawnSync } from 'node:child_process';
@@ -28,6 +29,6 @@ try {
   if (converted.status !== 0) fail('The point cloud could not be converted.');
   const conversion = JSON.parse(converted.stdout.trim().split('\n').pop());
   const result = await packageSplat(output, id, { kind: 'pointcloud', tool: 'build-pointcloud', inputs: [input], interior: Boolean(options.interior),
-    elevation: Number(options.elevation ?? 35), notes: { conversion } });
+    elevation: Number(options.elevation ?? 35), stations: conversion.stations, floor: 0, notes: { conversion } });
   console.log(JSON.stringify({ ...result, conversion }, null, 2));
 } finally { rmSync(work, { recursive: true, force: true }); }

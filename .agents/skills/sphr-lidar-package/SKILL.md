@@ -17,7 +17,9 @@ Choose by what the scanner exported:
    Each point becomes a small round splat; up to 4 million points keep phones responsive, thinned on a voxel
    grid. Colors come from the scan's RGB, else intensity, else height. LAS, E57 and text files are usually
    z-up, PLY and PCD y-up; if `preview.jpg` shows the scan on its side, rebuild with the other `--up`.
-   Georeferenced coordinates are recentered automatically. Use `--interior` for building interiors.
+   Georeferenced coordinates are recentered automatically. Use `--interior` for building interiors and
+   enclosed sites: an E57 then opens where the scanner stood for its first scan, looking across the space
+   (other formats open at eye height in the middle). Orbit (the default) suits exteriors and objects.
 3. **Meshes** from phone lidar and photogrammetry apps (OBJ with MTL and textures, GLB/glTF, PLY with faces,
    STL, USDZ, FBX, DAE):
    ```sh

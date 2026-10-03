@@ -1,7 +1,7 @@
 // Packages a splat file (from a trainer, or converted from a point cloud) as an SPHR space.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, subjectCore, titlePreview, writePackage } from './common.mjs';
+import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, subjectCore, titlePreview, viewRotation, writePackage } from './common.mjs';
 import { cameraLevelRotation, cameraStartView } from './colmap-cameras.mjs';
 import { sampleSplats } from './splat-reader.mjs';
 
@@ -13,7 +13,14 @@ function camerasMatch(cameras, box) {
   return inside.length >= 0.8 * cameras.length;
 }
 
-export async function packageSplat(input, id, { rotation, level = false, interior = false, elevation, distance, cameras, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
+/** First-person view from a scanner station, looking level toward the middle of the capture. */
+function stationView([x, y, z], box) {
+  const toward = [box.median.x - x, 0, box.median.z - z];
+  const rotation = Math.hypot(...toward) > 0.5 ? viewRotation(toward) : { azimuth: 0, polar: 0 };
+  return { position: { x, y, z }, rotation, target: { x, y, z } };
+}
+
+export async function packageSplat(input, id, { rotation, level = false, interior = false, elevation, distance, cameras, stations, floor, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
   const extension = path.extname(input).slice(1).toLowerCase();
   freshFolder(id.folder);
   mkdirSync(path.join(id.folder, 'splat'));
@@ -40,8 +47,12 @@ export async function packageSplat(input, id, { rotation, level = false, interio
       camera = view.camera;
       start = { kind: view.kind, from: view.camera.from };
     }
+    // Scanner stations are only known unrotated, so they are used when the capture keeps its axes.
+    if (interior && stations?.length && !rotation.some(Boolean)) camera = stationView(stations[0], box);
+    // Without a station, stand in the middle; at eye height when the floor level is known.
+    const middle = floor === undefined ? { ...box.median } : { ...box.median, y: floor + Math.min(1.6, (box.max.y - floor) * 0.6) };
     camera ??= interior
-      ? { position: { ...box.median }, rotation: { azimuth: 0, polar: 0 }, target: box.median }
+      ? { position: middle, rotation: { azimuth: 0, polar: 0 }, target: middle }
       : orbitCamera(box, { ...(elevation !== undefined ? { elevation } : {}), ...(distance !== undefined ? { distance } : {}) });
     await pointPreview(sample.positions, sample.colors, box, path.join(id.folder, 'preview.jpg'), camera);
   } else {
