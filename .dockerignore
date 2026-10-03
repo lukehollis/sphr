@@ -1,0 +1,11 @@
+.git
+node_modules
+.next
+local
+public/datasets
+public/demo
+data
+**/*.e57
+**/*.zip
+**/*.tgz
+*.log
