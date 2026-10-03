@@ -75,7 +75,8 @@ export class SphrRuntime {
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
   private panorama: PanoramaLayer | null = null;
-  private readonly looks: LookPass;
+  // Optional only for tests that build a runtime without its constructor.
+  private readonly looks?: LookPass;
   private lookStarted = false;
   private iiif: IiifImageLayer | null = null;
   private nav: NavigationLayer | null = null;
@@ -473,7 +474,7 @@ export class SphrRuntime {
     this.gizmo = null;
     this.effects?.dispose();
     this.objects?.dispose();
-    this.looks.dispose();
+    this.looks?.dispose();
     this.experienceAudio?.dispose();
     this.experienceAudio = null;
     this.tooltip?.remove();
@@ -874,7 +875,7 @@ export class SphrRuntime {
 
   /** Previews of the current view in each look, for the builder. */
   lookThumbnails(ids: string[], width?: number) {
-    return this.looks.thumbnails(this.scene, this.camera, ids, width);
+    return this.looks?.thumbnails(this.scene, this.camera, ids, width) ?? {};
   }
 
   private applyExperienceForPoint(point?: TourPoint) {
@@ -891,9 +892,9 @@ export class SphrRuntime {
     // A tour that opens on a stop with its own look starts in the tour's look and transitions from it.
     if (!this.lookStarted) {
       this.lookStarted = true;
-      if (lookKey(look) !== lookKey(this.tour.look)) this.looks.set(this.tour.look, this.camera, null, { instant: true });
+      if (lookKey(look) !== lookKey(this.tour.look)) this.looks?.set(this.tour.look, this.camera, null, { instant: true });
     }
-    this.looks.set(look, this.camera, anchor ? new THREE.Vector3(...anchor) : null);
+    this.looks?.set(look, this.camera, anchor ? new THREE.Vector3(...anchor) : null);
     this.state.hunt = hunt ? {
       found: [...this.huntFound],
       stepFound: Boolean(point?.find && this.huntFound.has(point.find.objectId)),
@@ -1261,10 +1262,11 @@ export class SphrRuntime {
       this.nav?.update(this.camera, this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);
       this.effects?.update(now / 1000, elapsed);
-      this.looks.update(elapsed);
+      this.looks?.update(elapsed);
       this.splats?.update();
       this.cursor?.update(now);
-      this.looks.render(this.scene, this.camera, now / 1000);
+      if (this.looks) this.looks.render(this.scene, this.camera, now / 1000);
+      else this.renderer.render(this.scene, this.camera);
       this.cursor?.render(this.renderer, this.camera);
     });
   }
