@@ -118,6 +118,16 @@ export function promote(id, { commit = true, by = 'operator' } = {}) {
   return { name: meta.name, target, commit: hash };
 }
 
+/**
+ * Whether the runner may install an approved proposal without a person: only new skills (corrections to
+ * existing ones wait), and a skill that ships scripts only once a job using them has published.
+ */
+export function canAutoPromote(meta, result) {
+  if (meta.status !== 'approved' || meta.kind !== 'new' || !meta.checks?.ok) return false;
+  const scripts = (meta.files ?? []).some(file => file.startsWith('scripts/') || /\.(py|mjs|js|sh)$/i.test(file));
+  return !scripts || result === 'done';
+}
+
 export function reject(id, reason = 'rejected by the operator') {
   return writeMeta(id, { status: 'rejected', rejectedAt: new Date().toISOString(), reason });
 }

@@ -56,8 +56,10 @@ and 360 photos), build the one that is most complete and mention the others in y
 
 Decide from what the data supports, not from file types alone. For example:
 
-- Photos whose recorded camera positions barely move (the phone turned in place) have no parallax for
-  COLMAP or a splat, but their rotations and intrinsics stitch into an equirectangular panorama.
+- Recorded camera positions that are all zero or missing often mean the app did not export them, not that
+  the camera stood still. Look at the images: the same object or room seen from different sides is an
+  orbit or walkthrough (photogrammetry: COLMAP, then a splat trainer); views outward in every direction
+  from one spot are a turn-in-place, whose rotations and intrinsics stitch into an equirectangular panorama.
 - Per-frame depth maps with camera poses fuse into a point cloud or mesh.
 - A short video that orbits a finished 3D model on a plain background is a preview render, not capture
   data. Ask for the scan's model export (GLB, USDZ, OBJ or PLY) rather than reconstructing the render.
@@ -101,8 +103,11 @@ Messages go to the customer as written: no internal paths, commands or stack tra
 ## 5. Teach the next job
 
 Write a skill proposal when this job needed a tool you wrote, handled an input no skill described, or
-showed that a skill's instructions were wrong or incomplete. Skip it when an existing skill covered the
-job as written. Put it in `$SPHR_JOB_DIR/output/skill-proposal/`:
+showed that a skill's instructions were wrong or incomplete. That includes jobs you could not finish: if
+you worked out what an unfamiliar input is and what it needs (for example a capture app's export that
+needs a GPU trainer), a skill that teaches the next job to recognize it at once, and what to tell the
+operator, saves the next customer the same investigation. Such a skill has no `scripts/`. Skip the
+proposal when an existing skill covered the job as written. Put it in `$SPHR_JOB_DIR/output/skill-proposal/`:
 
 - `SKILL.md`: frontmatter with `name` (lowercase words joined by dashes; for a new skill
   `capture-<what it handles>`, for a correction the existing skill's name) and `description` (which inputs

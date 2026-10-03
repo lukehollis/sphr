@@ -10,7 +10,7 @@ process.env.SPHR_SKILL_PROPOSALS_DIR = path.join(scratch, 'proposals');
 process.env.SPHR_SKILLS_DIR = path.join(scratch, 'skills');
 mkdirSync(path.join(scratch, 'skills/sphr-intake'), { recursive: true });
 writeFileSync(path.join(scratch, 'skills/sphr-intake/SKILL.md'), '---\nname: sphr-intake\ndescription: existing\n---\n');
-const { checkProposal, storeProposal, promote, reject } = await import('./worker/skill-proposals.mjs');
+const { canAutoPromote, checkProposal, storeProposal, promote, reject } = await import('./worker/skill-proposals.mjs');
 
 const job = { id: 'abcdef0123456789', sceneId: '0123456789ab', slug: 'customer-fedcba987654', dir: '/jobs/abcdef0123456789',
   title: 'Riverside studio', files: ['studio_capture_07.zip'] };
@@ -80,4 +80,16 @@ test('a proposal that failed its checks cannot be promoted, and can be rejected'
   assert.equal(stored.meta.status, 'rejected');
   assert.throws(() => promote(stored.id, { commit: false }), /failed its checks/);
   assert.equal(reject(stored.id, 'not general').status, 'rejected');
+});
+
+test('only reviewed new skills promote themselves, and tools only after a job published', () => {
+  const base = { status: 'approved', kind: 'new', checks: { ok: true } };
+  const knowledge = { ...base, files: ['SKILL.md', 'proposal.json'] };
+  const tools = { ...base, files: ['SKILL.md', 'proposal.json', 'scripts/stitch.py'] };
+  assert.equal(canAutoPromote(knowledge, 'held'), true, 'knowledge from a held job');
+  assert.equal(canAutoPromote(tools, 'held'), false, 'unproven tools wait');
+  assert.equal(canAutoPromote(tools, 'done'), true, 'tools from a published job');
+  assert.equal(canAutoPromote({ ...tools, kind: 'update' }, 'done'), false, 'corrections wait for a person');
+  assert.equal(canAutoPromote({ ...knowledge, status: 'pending' }, 'done'), false, 'unreviewed');
+  assert.equal(canAutoPromote({ ...knowledge, checks: { ok: false } }, 'done'), false, 'failed checks');
 });

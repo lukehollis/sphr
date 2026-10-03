@@ -28,9 +28,13 @@ report `failed` and ask for a slower walkthrough that circles the space.
 ## 2. Camera poses
 
 ```sh
-colmap automatic_reconstructor --workspace_path "$SPHR_JOB_DIR/work/colmap" --image_path "$SPHR_JOB_DIR/work/frames" \
-  --dense 0 --single_camera 1 --quality medium
+QT_QPA_PLATFORM=offscreen colmap automatic_reconstructor --workspace_path "$SPHR_JOB_DIR/work/colmap" \
+  --image_path "$SPHR_JOB_DIR/work/frames" --dense 0 --single_camera 1 --quality medium --use_gpu 0
 ```
+
+COLMAP here is built without CUDA: its default GPU SIFT crashes with a stack trace, so keep `--use_gpu 0`
+(for the step-by-step commands, `--SiftExtraction.use_gpu 0` and `--SiftMatching.use_gpu 0`). Phone
+captures are often HEIC; convert frames to JPEG first with Pillow and `pillow_heif`.
 
 Check `work/colmap/sparse/0` exists and most frames registered (`colmap model_analyzer --path work/colmap/sparse/0`).
 

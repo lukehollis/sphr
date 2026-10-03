@@ -21,7 +21,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { promote, storeProposal, writeMeta } from './skill-proposals.mjs';
+import { canAutoPromote, promote, storeProposal, writeMeta } from './skill-proposals.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const env = name => process.env[name]?.trim() || undefined;
@@ -220,11 +220,10 @@ async function learn(job, result) {
   log(job, `skill proposal "${meta.name}" (${meta.kind}) kept as ${stored.id}${meta.checks.ok ? '' : `; not usable: ${meta.checks.problems.join('; ')}`}`);
   if (!meta.checks.ok || env('SPHR_SKILL_REVIEW') === 'off') return;
   const review = await reviewProposal(stored);
-  writeMeta(stored.id, { review, status: review.verdict === 'approve' ? 'approved' : 'rejected' });
+  const reviewed = writeMeta(stored.id, { review, status: review.verdict === 'approve' ? 'approved' : 'rejected' });
   log(job, `skill review: ${review.verdict}${review.summary ? ` (${review.summary})` : ''}`);
   if (review.verdict !== 'approve') return;
-  // Only a new skill proven by a published job is promoted without a person; corrections to existing skills wait.
-  if (env('SPHR_SKILL_AUTOPROMOTE') === '1' && result === 'done' && meta.kind === 'new') {
+  if (env('SPHR_SKILL_AUTOPROMOTE') === '1' && canAutoPromote(reviewed, result)) {
     const done = promote(stored.id, { by: 'runner after review' });
     log(job, `learned skill ${done.name}${done.commit ? ` (commit ${done.commit})` : ''}; later jobs will use it`);
   } else {
