@@ -346,6 +346,22 @@ test('in a guided tour, objects come into the view of the stop that shows them',
   assert.ok(hunt.objects[0].position[2] > 4, 'a hunt object behind the visitor stays behind');
 });
 
+test('a tour stop high above its objects turns toward them', async () => {
+  const { frameStops, inFrame } = await import('../lib/server/tour-placement.ts');
+  assert.ok(inFrame({ azimuth: 0, polar: 0 }, { azimuth: -30, polar: -20 }), 'right of center and a little below is framed');
+  assert.ok(!inFrame({ azimuth: 0, polar: 0 }, { azimuth: 25, polar: 0 }), 'the left, under the text on wide screens, is not');
+  const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [{ uuid: 'a', position: { x: 0, y: 20, z: 0 }, image: 'https://example.com/a.jpg' }] } } };
+  const experience = parseExperience({ version: 1, kind: 'tour', effects: [],
+    objects: [{ id: 'cart', name: 'Cart', source: { kind: 'shape', shape: 'box' }, position: [0, 0, -15], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    stops: [{ id: 'one', title: 'Over the arena', text: 'Look out.', view: { nodeId: 'a', rotation: { azimuth: 0, polar: 5 } }, objects: ['cart'], effects: [] },
+      { id: 'two', title: 'Again', text: 'Look down.', view: { nodeId: 'a', rotation: { azimuth: 0, polar: -40 } }, objects: ['cart'], effects: [] }] });
+  const [one, two] = frameStops(space, experience);
+  assert.ok(one.view.rotation.polar < -20 && one.view.rotation.polar >= -35, `it tilts down toward the cart (${one.view.rotation.polar})`);
+  assert.ok(inFrame(one.view.rotation, { azimuth: 0, polar: -51.6 }) || one.view.rotation.polar === -35, 'the cart is in its frame');
+  assert.ok(one.view.rotation.azimuth > 0, 'the cart sits right of center');
+  assert.deepEqual(two.view.rotation, { azimuth: 0, polar: -40 }, 'a stop that already shows its objects keeps its view');
+});
+
 test('agents learn the looks, effects and sounds a site has', async () => {
   const { experienceCatalog } = await import('../lib/experience/catalog.ts');
   const catalog = experienceCatalog();

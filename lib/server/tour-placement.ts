@@ -73,98 +73,172 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     const aimed = standing && spot.hit ? aimFrom(toArray(worldFromGroupedPoint(standing.position, settings)), spot.position) : null;
     return { ...stop, view: { ...stop.view, rotation: aimed ?? { azimuth: Number(spot.rotation.azimuth.toFixed(2)), polar: Number(spot.rotation.polar.toFixed(2)) } } };
   });
-  const objects = meshes.length ? keepNoticeable(placed) : placed;
-  return parseExperience({ ...experience, objects, effects, stops }, { lenient: true });
+  const placedNow = new Set(Object.keys(anchors.objects));
+  const objects = meshes.length ? keepNoticeable(bootstrap, { ...experience, objects: placed, stops }, meshes, placedNow) : placed;
+  const framed = experience.kind === "tour" ? frameStops(bootstrap, { ...experience, objects, stops }, placedNow) : stops;
+  return parseExperience({ ...experience, objects, effects, stops: framed }, { lenient: true });
+}
 
-  /**
-   * The agent picks spots in photos taken from many places, so an object can end up out of
-   * the view of the stop that shows it, behind a step or a wall (a hunt's object would then
-   * be impossible to click), or so far across a large space that it is too small to notice.
-   * Seen from the first stop that lists it: in a guided tour, an object well off that stop's
-   * view comes into it, onto the ground a few meters ahead; one more than 18 meters away
-   * comes along the same line of sight onto the surface at 18 meters; and one the capture
-   * hides comes forward onto the surface in the way, or the floor just in front of that.
-   */
-  function keepNoticeable(list: typeof placed) {
-    const firstStop = new Map<string, (typeof stops)[number]>();
-    for (const stop of stops) {
-      if (!stop.view.nodeId) continue;
-      for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop);
-    }
-    const down = new THREE.Vector3(0, -1, 0);
-    const up = new THREE.Vector3(0, 1, 0);
-    const nearby = 18;
-    const moved = new Map<string, number>();
-    const surfaceBelow = (from: THREE.Vector3, within: number) => {
-      raycaster.set(from, down);
-      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < within);
-      if (!hit) return null;
-      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : up;
-      return Math.abs(normal.y) > 0.7 ? hit.point : null;
+/**
+ * Whether a direction (heading and tilt in degrees) shows well in a stop's view: up to 20
+ * degrees left of center (the tour's text covers the left of wide screens), 32 right, and
+ * 28 up or down. Positive `across` is to the left.
+ */
+export function inFrame(rotation: { azimuth: number; polar: number }, aim: { azimuth: number; polar: number }) {
+  const across = ((aim.azimuth - rotation.azimuth) % 360 + 540) % 360 - 180;
+  return across <= 20 && across >= -32 && Math.abs(aim.polar - rotation.polar) <= 28;
+}
+
+/**
+ * A guided tour stop whose objects are all out of its frame (a high vantage point looking
+ * out over a space whose ground is far below) turns toward them, the nearest one (or the
+ * middle of them when they fit together) a little right of and below center, tilting no
+ * more than 35 degrees down or 20 up.
+ */
+export function frameStops(bootstrap: SphrBootstrap, experience: Experience, only?: Set<string>) {
+  const data = openingSpace(bootstrap).space_data;
+  const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
+  const settings = sceneGroupSettings("nodes", data);
+  const objects = new Map(experience.objects.map((object) => [object.id, object]));
+  return experience.stops.map((stop) => {
+    const node = stop.view.nodeId ? nodes.get(stop.view.nodeId) : undefined;
+    const rotation = stop.view.rotation;
+    const shown = stop.objects.filter((id) => !only || only.has(id)).map((id) => objects.get(id)).filter((object): object is NonNullable<typeof object> => Boolean(object));
+    if (!node || !rotation || !shown.length) return stop;
+    const eye = worldFromGroupedPoint(node.position, settings);
+    const aims = shown.map((object) => {
+      const point = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.3, 0));
+      const aim = aimFrom([eye.x, eye.y, eye.z], [point.x, point.y, point.z]);
+      return aim ? { aim, distance: point.distanceTo(eye) } : null;
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item));
+    if (!aims.length || aims.some(({ aim }) => inFrame(rotation, aim))) return stop;
+    // Between them when they fit in one view, otherwise the nearest.
+    const nearest = aims.reduce((best, item) => item.distance < best.distance ? item : best).aim;
+    const spread = aims.map(({ aim }) => ((aim.azimuth - nearest.azimuth) % 360 + 540) % 360 - 180);
+    const together = Math.max(...spread) - Math.min(...spread) <= 40;
+    const azimuth = (together ? nearest.azimuth + (Math.max(...spread) + Math.min(...spread)) / 2 : nearest.azimuth) + 8;
+    const polar = THREE.MathUtils.clamp((together ? aims.reduce((sum, { aim }) => sum + aim.polar, 0) / aims.length : nearest.polar) + 12, -35, 20);
+    return { ...stop, view: { ...stop.view, rotation: { azimuth: Number((((azimuth + 540) % 360) - 180).toFixed(2)), polar: Number(polar.toFixed(2)) } } };
+  });
+}
+
+/**
+ * The agent picks spots in photos taken from many places, so an object can end up out of
+ * the view of the stop that shows it, behind a step or a wall (a hunt's object would then
+ * be impossible to click), or so far across a large space that it is too small to notice.
+ * Seen from the first stop that lists it: in a guided tour, an object toward the edge of
+ * that stop's view or out of it comes onto the ground a few meters ahead, a little right of
+ * center (the tour's text covers the left on wide screens); one more than 18 meters away
+ * comes to the first ground along the same line of sight; and one the capture hides comes
+ * forward onto the surface in the way, or the floor just in front of that. Ground can be
+ * sloped (seating, a hillside) but not a wall. `only` limits it to objects just placed.
+ */
+export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience, meshes: THREE.Object3D[], only?: Set<string>) {
+  const data = openingSpace(bootstrap).space_data;
+  const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
+  const settings = sceneGroupSettings("nodes", data);
+  const toArray = (vector: THREE.Vector3) => [vector.x, vector.y, vector.z] as Vec3;
+  const raycaster = new THREE.Raycaster();
+  raycaster.far = 500;
+  const down = new THREE.Vector3(0, -1, 0);
+  const lift = (point: THREE.Vector3, height: number) => point.clone().add(new THREE.Vector3(0, height, 0));
+  const nearby = 18;
+
+  const firstStop = new Map<string, Experience["stops"][number]>();
+  for (const stop of experience.stops) {
+    if (!stop.view.nodeId) continue;
+    for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop);
+  }
+  const normalOf = (hit: THREE.Intersection) => hit.face
+    ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
+    : null;
+  /** The ground below a point: the first surface under it, if it is not a wall. */
+  const groundBelow = (from: THREE.Vector3, within: number) => {
+    raycaster.set(from, down);
+    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < within);
+    const normal = hit ? normalOf(hit) : null;
+    return hit && (!normal || Math.abs(normal.y) > 0.5) ? hit.point : null;
+  };
+  /** Whether nothing in the capture stands between the eye and a point (rough meshes get some slack). */
+  const visibleFrom = (eye: THREE.Vector3, point: THREE.Vector3) => {
+    const toward = point.clone().sub(eye);
+    raycaster.set(eye, toward.clone().normalize());
+    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+    return !hit || hit.distance >= toward.length() - 0.4;
+  };
+  const moved = new Map<string, number>();
+
+  return experience.objects.map((original) => {
+    let object = original;
+    const stop = firstStop.get(object.id);
+    const node = nodes.get(stop?.view.nodeId ?? "");
+    if (!stop || !node || (only && !only.has(object.id))) return object;
+    const eye = worldFromGroupedPoint(node.position, settings);
+    let target = lift(new THREE.Vector3(...object.position), 0.1);
+    const turned = object.rotation.some((value, axis) => axis !== 1 && value !== 0);
+    const put = (point: THREE.Vector3) => {
+      const heading = aimFrom(toArray(eye), toArray(point))?.azimuth ?? 0;
+      object = { ...object, position: [point.x, point.y + 0.01, point.z] as Vec3, ...(turned ? {} : { rotation: [0, Number(heading.toFixed(1)), 0] as Vec3 }) };
+      target = lift(point, 0.11);
     };
-    const visibleFrom = (eye: THREE.Vector3, point: THREE.Vector3) => {
-      const toward = point.clone().sub(eye);
-      raycaster.set(eye, toward.clone().normalize());
-      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
-      return !hit || hit.distance >= toward.length() - 0.15;
+    const rotation = stop.view.rotation;
+    const tour = experience.kind === "tour" && Boolean(rotation);
+    const framed = (point: THREE.Vector3) => {
+      const aim = rotation ? aimFrom(toArray(eye), toArray(point)) : null;
+      return !rotation || !aim || inFrame(rotation, aim);
     };
-    const heading = (eye: THREE.Vector3, point: THREE.Vector3) => aimFrom(toArray(eye), toArray(point))?.azimuth ?? 0;
+    /** Stands the object on the ground under a point, if the visitor would see it there (and, in a tour, in the stop's view). */
+    const tryGround = (point: THREE.Vector3, within: number, inView = tour) => {
+      const ground = groundBelow(lift(point, 0.5), within);
+      if (!ground || !visibleFrom(eye, lift(ground, 0.1)) || ground.distanceTo(eye) > 32) return false;
+      if (inView && !framed(lift(ground, 0.3))) return false;
+      put(ground);
+      return true;
+    };
 
-    return list.map((original) => {
-      let object = original;
-      const stop = firstStop.get(object.id);
-      const node = nodes.get(stop?.view.nodeId ?? "");
-      if (!stop || !node || !anchors.objects[object.id]) return object;
-      const eye = worldFromGroupedPoint(node.position, settings);
-      let target = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
-      const turned = object.rotation.some((value, axis) => axis !== 1 && value !== 0);
-      const put = (point: THREE.Vector3) => {
-        object = { ...object, position: [point.x, point.y + 0.01, point.z] as Vec3, ...(turned ? {} : { rotation: [0, Number(heading(eye, point).toFixed(1)), 0] as Vec3 }) };
-        target = point.clone().add(new THREE.Vector3(0, 0.11, 0));
-      };
-
-      // A guided tour shows a stop's objects: one toward the edges of its view (where the
-      // tour's text covers the left on wide screens) or out of it comes in, a little right of center.
-      if (experience.kind === "tour" && stop.view.rotation) {
-        const view = cameraDirection(stop.view.rotation);
-        const flat = new THREE.Vector3(view.x, 0, view.z);
-        const toward = target.clone().sub(eye);
-        const sideways = ((THREE.MathUtils.radToDeg(Math.atan2(-toward.x, -toward.z)) - stop.view.rotation.azimuth) % 360 + 540) % 360 - 180;
-        const tilt = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(toward.y / toward.length(), -1, 1))) - stop.view.rotation.polar;
-        if ((Math.abs(sideways) > 30 || Math.abs(tilt) > 28) && flat.lengthSq() > 0.01) {
-          flat.normalize();
-          const side = new THREE.Vector3(-flat.z, 0, flat.x);
-          const index = moved.get(stop.id) ?? 0;
-          moved.set(stop.id, index + 1);
-          const offset = [0.8, 2.2, -0.6][index % 3];
-          for (const reach of [6, 4, 3]) {
-            const ground = surfaceBelow(eye.clone().addScaledVector(flat, reach).addScaledVector(side, offset), 12);
-            if (ground && visibleFrom(eye, ground.clone().add(new THREE.Vector3(0, 0.1, 0)))) { put(ground); break; }
+    // A guided tour shows a stop's objects in its view, clear of the text on the left: on the
+    // ground a few meters ahead, a little right of center, or where the stop's gaze lands.
+    let framedHere = false;
+    if (tour && rotation && !framed(target)) {
+      const view = cameraDirection(rotation);
+      const flat = new THREE.Vector3(view.x, 0, view.z);
+      if (flat.lengthSq() > 0.01) {
+        flat.normalize();
+        const side = new THREE.Vector3(-flat.z, 0, flat.x);
+        const index = moved.get(stop.id) ?? 0;
+        moved.set(stop.id, index + 1);
+        const offset = [0.8, 2.2, -0.6][index % 3];
+        for (const reach of [6, 8, 4, 10, 3, 13]) {
+          if ((framedHere = tryGround(eye.clone().addScaledVector(flat, reach).addScaledVector(side, offset * reach / 6), 30))) break;
+        }
+        if (!framedHere) {
+          raycaster.set(eye, view);
+          const gaze = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 1);
+          if (gaze) {
+            const near = gaze.point.clone().addScaledVector(view, -Math.min(2, gaze.distance / 4)).addScaledVector(side, offset);
+            framedHere = tryGround(near, 30) || tryGround(gaze.point, 30);
           }
         }
       }
-      // Not across the valley: the first ground along the same line within reach.
-      if (target.distanceTo(eye) > nearby) {
-        const line = target.clone().sub(eye).normalize();
-        for (const reach of [nearby, 14, 10, 7]) {
-          const ground = surfaceBelow(eye.clone().addScaledVector(line, reach).add(new THREE.Vector3(0, 0.5, 0)), 40);
-          if (ground && visibleFrom(eye, ground.clone().add(new THREE.Vector3(0, 0.1, 0)))) { put(ground); break; }
-        }
-      }
-      // Not behind a wall.
-      const toward = target.clone().sub(eye);
-      const distance = toward.length();
-      if (distance < 0.5) return object;
-      raycaster.set(eye, toward.clone().normalize());
-      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
-      if (!hit || hit.distance >= distance - 0.15) return object;
-      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
-      if (normal && normal.dot(toward) > 0) normal.negate();
-      if (normal && normal.y >= 0.7) { put(hit.point); return object; }
-      // A wall or a step's face: stand on the floor just in front of it.
-      const ground = surfaceBelow(hit.point.clone().addScaledVector(toward.normalize(), -0.3).add(new THREE.Vector3(0, 0.3, 0)), 40);
-      if (ground) put(ground);
-      return object;
-    });
-  }
+    }
+    // Not across the valley: the first ground along the same line within reach (in a tour,
+    // still in the stop's view).
+    if (!framedHere && target.distanceTo(eye) > nearby) {
+      const line = target.clone().sub(eye).normalize();
+      for (const reach of [nearby, 14, 10, 7]) if (tryGround(eye.clone().addScaledVector(line, reach), 40)) break;
+    }
+    // Not behind a wall: forward onto what is in the way, or the floor in front of it.
+    const toward = target.clone().sub(eye);
+    const distance = toward.length();
+    if (distance < 0.5) return object;
+    raycaster.set(eye, toward.clone().normalize());
+    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+    if (!hit || hit.distance >= distance - 0.15) return object;
+    const normal = normalOf(hit);
+    if (normal && normal.dot(toward) > 0) normal.negate();
+    if (normal && normal.y >= 0.7) { put(hit.point); return object; }
+    const ground = groundBelow(lift(hit.point.clone().addScaledVector(toward.normalize(), -0.3), 0.3), 40);
+    if (ground) put(ground);
+    return object;
+  });
 }

@@ -201,12 +201,15 @@ visitor's feet, open air puts it on the ground four meters out, far things grow
 up to five times). Stops aim from where they stand toward the same spot. The
 agent picks spots in photos taken from many places, so seen from the first stop
 that shows it: in a guided tour, an object toward the edge of that stop's view
-(more than 30 degrees to the side, where the tour's text covers the left on wide
-screens, or out of the frame) comes onto the ground a few meters ahead, a little
+(more than 20 degrees left, where the tour's text covers the left on wide
+screens, 32 right, or out of the frame) comes onto the ground a few meters ahead, a little
 right of center (a hunt keeps its objects where they were hidden); an object more than 18 meters away comes along
 the same line of sight onto the surface at 18 meters; and one the capture hides
 (behind a step or a wall) comes forward onto the surface in the way, or the floor
 just in front of it, which keeps every hunt object clickable from its clue. A
+guided tour stop on a high vantage point, whose objects stand on ground far
+below its frame, turns toward them instead, keeping them a little right of
+center and tilting no more than 35 degrees down. A
 space without a capture mesh uses the floor under each location as the ground.
 
 ## Checks
