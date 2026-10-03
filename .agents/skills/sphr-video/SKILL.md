@@ -64,10 +64,17 @@ train 15,000 steps in about 8.5 minutes, giving a ~100 MB PLY. Write a progress 
 ("Training the 3D scene on the GPU, about 10 minutes"). Brush loads images at up to 1920 px
 (`--max-resolution`). It runs headless; never pass `--with-viewer`.
 With OpenSplat: `opensplat "$SPHR_JOB_DIR/work/colmap" -n 15000 -o "$SPHR_JOB_DIR/work/splat/scene.ply"`.
-Then package the PLY; COLMAP's axes usually need `--rotation 180,0,0`:
+Then package the PLY with the COLMAP model it was trained from:
 
 ```sh
-node scripts/packages/build-splat.mjs --input "$SPHR_JOB_DIR/work/splat/scene.ply" --title "<title>" --rotation 180,0,0
+node scripts/packages/build-splat.mjs --input "$SPHR_JOB_DIR/work/splat/scene.ply" --title "<title>" \
+  --cameras "$SPHR_JOB_DIR/work/data/sparse/0"
 ```
 
-Look at `preview.jpg` and adjust the rotation until the floor is at the bottom.
+`--cameras` levels the capture from how the camera was held and opens the space from a real capture
+position: photos circling a subject orbit the point every camera looked at, and a walkthrough starts in
+first person a few steps into the walk. The output's `start.kind` says which (`orbit` or `walkthrough`);
+`ignored` means the camera positions did not match the splat (another trainer moved the axes), and the
+package fell back to framing the splat's dense body. Look at `preview.jpg`: it is drawn from the opening
+view. If the floor is still not at the bottom, pass `--rotation` (degrees about x,y,z) as well, which
+replaces the leveling but keeps the camera-based view.

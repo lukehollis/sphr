@@ -149,8 +149,9 @@ try {
   shots.sort((x, y) => x.order.localeCompare(y.order));
   const id = identity(options);
   const sources = [...clips.flatMap(clip => clip.files), ...[...stills.values()].flat()];
+  // Frames are named by camera timestamps; visitors see numbered stops in capture order instead.
   const { used, skipped: notPanoramas } = await buildPanoramas(shots.map(shot => shot.file), id,
-    { maxWidth: Number(options['max-width'] ?? 8192), kind: 'insta360', tool: 'build-insta360', inputs: sources });
+    { maxWidth: Number(options['max-width'] ?? 8192), kind: 'insta360', tool: 'build-insta360', inputs: sources, labels: 'stops' });
   console.log(JSON.stringify({
     folder: id.folder, preview: path.join(id.folder, 'preview.jpg'), panoramas: used.length, everySeconds: Number(step.toFixed(2)),
     stitch: { fov, roll, width },
