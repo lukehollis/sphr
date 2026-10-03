@@ -74,8 +74,16 @@ async function download(job) {
   const input = path.join(jobDir(job), 'input');
   mkdirSync(input, { recursive: true });
   const files = [];
+  // Inputs keep the customer's file names: tools order photos and label tour stops by name. Two uploads with
+  // the same name get " (2)", " (3)" in upload order, so a retried job maps them the same way.
+  const taken = new Set();
   for (const upload of job.uploads) {
-    const target = path.join(input, `${upload.id}-${upload.name.replace(/[/\\]/g, '_')}`);
+    const clean = upload.name.replace(/[/\\]/g, '_');
+    const extension = path.extname(clean), stem = clean.slice(0, clean.length - extension.length) || 'file';
+    let name = clean;
+    for (let copy = 2; taken.has(name.toLowerCase()); copy++) name = `${stem} (${copy})${extension}`;
+    taken.add(name.toLowerCase());
+    const target = path.join(input, name);
     if (!existsSync(target) || statSync(target).size !== upload.size) {
       rmSync(target, { force: true });
       if (upload.source.gcs) {
