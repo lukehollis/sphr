@@ -294,6 +294,11 @@ test('agent drafts are placed on the server like the builder places them', async
   assert.ok(Math.abs(near.position[1] - 0.01 - ground(near.position)) < 0.02 && reach(near.position) < out, 'it rests on the rising ground, nearer than the flat floor would put it');
   assert.ok(reach(far.position) > 4 && far.scale[0] > 1, 'far ground is reached, and what lands there grows to be seen');
   assert.ok(Math.abs(reach(sky.position) - 4) < 1e-6, 'sky still stands four meters out');
+  const { placeObjectAt } = await import('../lib/experience/placement.ts');
+  const spot = { position: [0, 0, -40], normal: [0, 1, 0], hit: true, distance: 40, origin: [0, 1.5, 0], floor: 0, rotation: { azimuth: 0, polar: -2 } };
+  const statue = { id: 'statue', name: 'Statue', source: { kind: 'model', url: 'https://cdn.example/statue.glb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+  assert.deepEqual(placeObjectAt(statue, spot).scale, [2, 2, 2], 'life-size models grow at most twice');
+  assert.deepEqual(placeObjectAt({ ...statue, source: { kind: 'shape', shape: 'marker' } }, spot).scale, [5, 5, 5], 'markers grow up to five times');
 });
 
 test('agents learn the looks, effects and sounds a site has', async () => {

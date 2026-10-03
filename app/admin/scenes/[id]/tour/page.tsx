@@ -10,7 +10,7 @@ import { isAdmin } from '@/lib/server/auth';
 import { libraryModels } from '@/lib/server/library';
 import { readSceneBootstrap } from '@/lib/server/scene-editor';
 import { tourAgentConfigured } from '@/lib/server/tour-agent';
-import { variantsUrl } from "@/lib/server/variants";
+import { existingVariantsUrl } from "@/lib/server/variants";
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Tour builder', robots: { index: false, follow: false } };
@@ -23,7 +23,7 @@ export default async function TourBuilderPage({ params }: { params: Promise<{ id
   const scene = (await readAllScenes()).find(item => item.sceneId === id);
   if (!scene) notFound();
   const sceneEdits = readSceneEdits().get(id);
-  const edits = { title: scene.title, startView: sceneEdits?.startView ?? null, variants: variantsUrl(scene.sceneId) };
+  const edits = { title: scene.title, startView: sceneEdits?.startView ?? null, variants: await existingVariantsUrl(scene.sceneId) };
   const saved = readSceneTour(id);
   let initial = saved.experience;
   if (!initial) {

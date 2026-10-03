@@ -23,13 +23,16 @@ const DEG = Math.PI / 180;
  * The rules for an object the agent placed, the same in the builder and on the
  * server. Signs and other flat things face the view they were placed from, unless
  * the agent turned them, and things placed far off grow so they still read from
- * there, up to five times. Nothing lands at the visitor's feet: a spot on the
- * floor right below the camera moves out to two meters. Pointed at sky or open
- * air, it stands on the ground a few meters out in that direction.
+ * there: markers and other shapes up to five times, models of real things (life
+ * size in a photographic capture) at most twice. Nothing lands at the visitor's
+ * feet: a spot on the floor right below the camera moves out to two meters.
+ * Pointed at sky or open air, it stands on the ground a few meters out in that
+ * direction.
  */
 export function placeObjectAt(object: PlacedObject, spot: AnchorSpot): PlacedObject {
   const turned = object.rotation.some((value) => value !== 0);
-  const grow = spot.distance ? Math.min(5, Math.max(1, spot.distance / 5)) : 1;
+  const most = object.source.kind === "shape" ? 5 : 2;
+  const grow = spot.distance ? Math.min(most, Math.max(1, spot.distance / 5)) : 1;
   const heading = DEG * spot.rotation.azimuth;
   const away = [spot.position[0] - spot.origin[0], spot.position[2] - spot.origin[2]];
   const reach = Math.hypot(away[0], away[1]);
