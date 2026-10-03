@@ -3,7 +3,7 @@ import { lookEntry } from "@/lib/experience/packs";
 import { resolveParams, type LookMeta } from "@/lib/experience/registry";
 import type { EffectParams } from "@/lib/experience/types";
 import type { LookTransition, StopLook } from "@/lib/experience/types";
-import { LOOK_VERTEX, lookFragment } from "./shader";
+import { LOOK_VERTEX, lookFragment } from "@/lib/three/looks/shader";
 
 /**
  * Looks restyle the whole frame, like filters and transitions in a video
