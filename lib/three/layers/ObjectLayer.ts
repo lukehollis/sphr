@@ -241,7 +241,7 @@ export class ObjectLayer {
     const clips = (record.content?.userData.clips ?? []) as THREE.AnimationClip[];
     if (!record.content || !clips.length) return;
     const clip = clips.find((item) => item.name === record.data.animation)
-      ?? clips.find((item) => /idle/i.test(item.name)) ?? clips[0];
+      ?? clips.find((item) => /^idle/i.test(item.name)) ?? clips.find((item) => /idle/i.test(item.name)) ?? clips[0];
     record.mixer = new THREE.AnimationMixer(record.content);
     const action = record.mixer.clipAction(clip);
     action.play();
