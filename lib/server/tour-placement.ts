@@ -67,7 +67,9 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
   /**
    * The agent picks spots in photos taken from many places, so an object can end up behind
    * a step or a wall as seen from the stop that shows it, and a hunt's object would then be
-   * impossible to click. From the first stop that lists it, when the capture hides it, it
+   * impossible to click; or so far across a large space that it is too small to notice.
+   * Seen from the first stop that lists it, an object more than 18 meters away comes along
+   * the same line of sight onto the surface below at 18 meters, and one the capture hides
    * comes forward onto the surface in the way, or onto the floor just in front of that.
    */
   function keepInSight(placed: typeof objects) {
@@ -77,11 +79,21 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
       for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop.view.nodeId);
     }
     const down = new THREE.Vector3(0, -1, 0);
+    const nearby = 18;
     return placed.map((object) => {
       const node = nodes.get(firstStop.get(object.id) ?? "");
       if (!node || !anchors.objects[object.id]) return object;
       const eye = worldFromGroupedPoint(node.position, settings);
-      const target = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
+      let target = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
+      if (target.distanceTo(eye) > nearby) {
+        const closer = eye.clone().addScaledVector(target.clone().sub(eye).normalize(), nearby);
+        raycaster.set(closer.clone().add(new THREE.Vector3(0, 0.5, 0)), down);
+        const ground = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < 40);
+        if (ground) {
+          object = { ...object, position: [ground.point.x, ground.point.y + 0.01, ground.point.z] as Vec3 };
+          target = ground.point.clone().add(new THREE.Vector3(0, 0.11, 0));
+        }
+      }
       const toward = target.clone().sub(eye);
       const distance = toward.length();
       if (distance < 0.5) return object;

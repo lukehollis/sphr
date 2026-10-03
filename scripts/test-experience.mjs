@@ -305,20 +305,21 @@ test('a hunt object hidden from its clue comes forward where the visitor can see
   const THREE = await import('three');
   const { placeOnServer } = await import('../lib/server/tour-placement.ts');
   const shape = (id) => ({ id, name: id, source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
-  const experience = parseExperience({ version: 1, kind: 'hunt', objects: [shape('coin'), shape('cup')], effects: [], stops: [
+  const experience = parseExperience({ version: 1, kind: 'hunt', objects: [shape('coin'), shape('cup'), shape('far')], effects: [], stops: [
     { id: 'one', title: 'One', text: 'Find the coin.', view: { nodeId: 'a' }, objects: ['coin'], effects: [], find: { objectId: 'coin', hint: 'Up the step.', found: 'Found.' } },
-    { id: 'two', title: 'Two', text: 'Find the cup.', view: { nodeId: 'a' }, objects: ['cup'], effects: [], find: { objectId: 'cup', hint: 'Behind you.', found: 'Found.' } }] });
+    { id: 'two', title: 'Two', text: 'Find the cup.', view: { nodeId: 'a' }, objects: ['cup', 'far'], effects: [], find: { objectId: 'cup', hint: 'Behind you.', found: 'Found.' } }] });
   const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [
     { uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, image: 'https://example.com/a.jpg' }, { uuid: 'b', position: { x: 0, y: 3.5, z: 7 }, image: 'https://example.com/b.jpg' }] } } };
   // Open floor, and a two-meter step between the clue's location and the far side.
   const surface = (geometry) => { const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })); mesh.updateMatrixWorld(true); return mesh; };
-  const meshes = [surface(new THREE.PlaneGeometry(40, 40).rotateX(-Math.PI / 2)), surface(new THREE.PlaneGeometry(10, 2).translate(0, 1, 3)),
+  const meshes = [surface(new THREE.PlaneGeometry(100, 100).rotateX(-Math.PI / 2)), surface(new THREE.PlaneGeometry(10, 2).translate(0, 1, 3)),
     surface(new THREE.PlaneGeometry(10, 3).rotateX(-Math.PI / 2).translate(0, 2, 4.5))];
   // The coin was picked in the photo from the top of the step; the cup in plain view behind the clue's location.
-  const placed = placeOnServer(space, experience, { objects: { coin: { nodeId: 'b', x: 0.75, y: 0.75 }, cup: { nodeId: 'a', x: 0.75, y: 0.6 } }, effects: {}, stops: {} }, meshes);
-  const [coin, cup] = placed.objects;
+  const placed = placeOnServer(space, experience, { objects: { coin: { nodeId: 'b', x: 0.75, y: 0.75 }, cup: { nodeId: 'a', x: 0.75, y: 0.6 }, far: { nodeId: 'a', x: 0.75, y: 0.5175 } }, effects: {}, stops: {} }, meshes);
+  const [coin, cup, far] = placed.objects;
   assert.ok(Math.abs(coin.position[1] - 0.01) < 1e-3 && coin.position[2] > 2 && coin.position[2] < 3, `it comes down in front of the step (${coin.position.map((value) => value.toFixed(2))})`);
   assert.ok(Math.abs(cup.position[1]) < 0.02 && cup.position[2] < -4, 'what the visitor can already see stays where it was put');
+  assert.ok(Math.abs(Math.hypot(far.position[0], far.position[2]) - 18) < 0.5 && Math.abs(far.position[1] - 0.01) < 1e-3, `far across the space it comes to 18 meters along the same line (${far.position.map((value) => value.toFixed(1))})`);
 });
 
 test('agents learn the looks, effects and sounds a site has', async () => {
