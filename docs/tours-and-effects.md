@@ -20,6 +20,7 @@ The agent is configured on the server, first match wins:
 | Variable | Agent |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude through the Messages API (`SPHR_TOUR_AGENT_MODEL`, default `claude-opus-5-5`) |
+| `SPHR_TOUR_AGENT_URL` | `scripts/agent/tour-agent-service.mjs` running beside the app as its own user, wrapping an agent CLI that is logged in on the server (`CLAUDE_CODE_OAUTH_TOKEN` or a login). It runs the CLI with no tools and passes the space's images on standard input. `SPHR_TOUR_AGENT_TOKEN` must match the service's `SPHR_TOUR_AGENT_SERVICE_TOKEN`. |
 | `SPHR_TOUR_AGENT_COMMAND` | Your own agent CLI as a JSON array, for example `["claude","-p","--output-format","json","--allowedTools","Read"]`. The prompt is piped to standard input unless an argument contains `{prompt}`. Images of the space are files in the working directory (`{dir}`). |
 
 Without either, the builder still works by hand.

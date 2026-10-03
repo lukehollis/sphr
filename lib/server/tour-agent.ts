@@ -21,6 +21,9 @@ import { libraryModels } from "@/lib/server/library";
  *
  * Backends, first configured wins:
  *   ANTHROPIC_API_KEY            Claude through the Messages API.
+ *   SPHR_TOUR_AGENT_URL          scripts/agent/tour-agent-service.mjs, which runs an
+ *                                agent CLI logged in on the server, with no tools
+ *                                (SPHR_TOUR_AGENT_TOKEN authenticates).
  *   SPHR_TOUR_AGENT_COMMAND      Your own agent CLI, as a JSON array. A {prompt}
  *                                placeholder inlines the prompt, otherwise it is
  *                                piped to standard input; {dir} is the folder of
@@ -43,7 +46,8 @@ export type AgentResult = { experience: Experience; anchors: AgentAnchors; reply
 export class TourAgentError extends Error {}
 
 export function tourAgentConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim() || process.env.SPHR_TOUR_AGENT_COMMAND?.trim());
+  return Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
+    || process.env.SPHR_TOUR_AGENT_URL?.trim() || process.env.SPHR_TOUR_AGENT_COMMAND?.trim());
 }
 
 type AgentImage = { label: string; data: string };
@@ -381,6 +385,26 @@ async function viaCommand(context: { text: string; images: AgentImage[] }, histo
   }
 }
 
+/** The agent service: images travel as content blocks, the CLI has no tools. */
+async function viaService(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Promise<RawDraft> {
+  const url = process.env.SPHR_TOUR_AGENT_URL!.trim().replace(/\/$/, "");
+  const schema = JSON.stringify(WRITE_TOUR.input_schema);
+  const text = `Instead of calling a tool, answer with only one JSON object matching this schema, and nothing else:\n${schema}\n\n`
+    + userContent({ text: context.text, images: [] }, history, prompt).map((block) => block.type === "text" ? block.text : "").join("\n");
+  let response: Response;
+  try {
+    response = await fetch(`${url}/compose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.SPHR_TOUR_AGENT_TOKEN ?? ""}` },
+      body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images }),
+      signal: AbortSignal.timeout(330_000)
+    });
+  } catch { throw new TourAgentError("The agent is not reachable right now. Try again in a minute."); }
+  const result = await response.json().catch(() => ({})) as { output?: string; error?: string };
+  if (!response.ok || typeof result.output !== "string") throw new TourAgentError(result.error || "The agent could not finish. Try again.");
+  return extractJson(result.output);
+}
+
 /** Pull the draft out of CLI output, which may wrap it in a JSON envelope or prose. */
 export function extractJson(output: string): RawDraft {
   const candidates: string[] = [output.trim()];
@@ -409,7 +433,7 @@ export function extractJson(output: string): RawDraft {
 export async function composeTour(options: {
   bootstrap: SphrBootstrap; draft: Experience; prompt: string; history: AgentTurn[]; views: ClientView[]; origin: string; kind: "tour" | "hunt"; team?: boolean;
 }): Promise<AgentResult & { library: LibraryModel[] }> {
-  if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY or SPHR_TOUR_AGENT_COMMAND.");
+  if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
   const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team);
@@ -417,6 +441,8 @@ export async function composeTour(options: {
   const check = (raw: RawDraft) => { normalizeAgentDraft(raw, options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
     ? await viaApi(context, options.history, prompt, check)
-    : await viaCommand(context, options.history, prompt);
+    : process.env.SPHR_TOUR_AGENT_URL?.trim()
+      ? await viaService(context, options.history, prompt)
+      : await viaCommand(context, options.history, prompt);
   return { ...normalizeAgentDraft(raw, options.draft, nodeIds), library: context.library };
 }
