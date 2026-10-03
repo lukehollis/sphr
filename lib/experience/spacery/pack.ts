@@ -1,4 +1,4 @@
-import type { EffectEntry, Pack, ShapeEntry } from "@/lib/experience/registry";
+import type { EffectEntry, Pack, ShapeEntry, SoundEntry } from "@/lib/experience/registry";
 
 /** Spacery's own effects and collectibles for app.spacery.dev, beyond the open source core. */
 
@@ -101,6 +101,37 @@ const shapes: ShapeEntry[] = [
   { shape: "balloon", label: "Balloon", description: "A balloon floating on its string.", color: "#ff4f6d", size: 0.78, load: shape("balloon") }
 ];
 
-const spacery: Pack = { id: "spacery", label: "Spacery", effects, shapes };
+const sound = (name: keyof typeof import("@/lib/experience/spacery/sounds")) => () => import("@/lib/experience/spacery/sounds").then((module) => ({ default: module[name] }));
+
+const sounds: SoundEntry[] = [
+  { id: "garden-music", label: "Peaceful garden", kind: "music", description: "Soft acoustic music from the original garden tour.", load: sound("gardenMusic") },
+  { id: "wonder", label: "Wonder", kind: "music", description: "Bright, rising arpeggios for discovery and big reveals.", load: sound("wonder") },
+  { id: "mystery", label: "Mystery", kind: "music", description: "Sparse minor chords and distant bells, for hunts and old places.", load: sound("mystery") },
+  { id: "adventure", label: "Adventure", kind: "music", description: "A driving pulse with bold arpeggios, for quests.", load: sound("adventure") },
+  { id: "playful", label: "Playful", kind: "music", description: "Bouncy major melody, for kids and games.", load: sound("playful") },
+  { id: "nocturne", label: "Nocturne", kind: "music", description: "Slow, warm minor chords for night and reflection.", load: sound("nocturne") },
+  { id: "garden-birds", label: "Garden birds", kind: "ambient", description: "Recorded birdsong in a backyard garden.", load: sound("gardenBirds") },
+  { id: "night-ambience", label: "Night", kind: "ambient", description: "A recorded night soundscape.", load: sound("nightAmbience") },
+  { id: "wind", label: "Wind", kind: "ambient", description: "Wind with slow gusts, for open sites and heights.", load: sound("wind") },
+  { id: "rain", label: "Rain", kind: "ambient", description: "Steady rain with drops.", load: sound("rain") },
+  { id: "waves", label: "Waves", kind: "ambient", description: "Surf rolling in and out, for coasts and harbors.", load: sound("waves") },
+  { id: "forest", label: "Forest", kind: "ambient", description: "Leaves and scattered bird calls.", load: sound("forest") },
+  { id: "fire", label: "Fire", kind: "ambient", description: "A crackling fire.", load: sound("fire") },
+  { id: "cave", label: "Cave", kind: "ambient", description: "A low drone with dripping water, for caves, tombs and crypts.", load: sound("cave") },
+  { id: "space", label: "Space", kind: "ambient", description: "A deep, slowly shifting drone with distant tones.", load: sound("space") },
+  { id: "crickets", label: "Crickets", kind: "ambient", description: "Crickets on a warm night.", load: sound("crickets") },
+  { id: "ding", label: "Ding", kind: "sfx", description: "The interface ding from the garden tour.", load: sound("ding") },
+  { id: "drum", label: "Soft drum", kind: "sfx", description: "A soft bass drum hit, for emphasis.", load: sound("drum") },
+  { id: "temple-bell", label: "Temple bell", kind: "sfx", description: "A deep struck bell.", load: sound("lowBell") },
+  { id: "temple-bell-high", label: "Temple bell (higher)", kind: "sfx", description: "A struck bell a little higher.", load: sound("lowBellHigh") },
+  { id: "coin", label: "Coin", kind: "sfx", description: "A classic game coin pickup.", load: sound("coin") },
+  { id: "magic", label: "Magic", kind: "sfx", description: "A shimmering magical rise, for portals and transformations.", load: sound("magic") },
+  { id: "harp", label: "Harp", kind: "sfx", description: "A harp glissando, for transitions and dreams.", load: sound("harp") },
+  { id: "gong", label: "Gong", kind: "sfx", description: "A long ringing gong.", load: sound("gong") },
+  { id: "shutter", label: "Camera shutter", kind: "sfx", description: "A camera shutter click.", load: sound("shutter") },
+  { id: "fanfare", label: "Fanfare", kind: "sfx", description: "A short triumphant brass fanfare, for finishing a hunt.", load: sound("fanfare") }
+];
+
+const spacery: Pack = { id: "spacery", label: "Spacery", effects, shapes, sounds };
 
 export default spacery;
