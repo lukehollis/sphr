@@ -19,5 +19,15 @@ RUN curl -fsSL "https://github.com/ArthurBrussee/brush/releases/download/${BRUSH
     && tar -xJf /tmp/brush.tar.xz -C /opt \
     && ln -s /opt/brush-app-x86_64-unknown-linux-gnu/brush_app /usr/local/bin/brush_app \
     && rm /tmp/brush.tar.xz /tmp/brush.sha256
-ENV SPHR_GPU=nvidia
+# Debian's Blender (3.4) has no USD importer, so USDZ scans from iPhone apps lost their textures. The official
+# LTS build imports USD/USDZ with materials; mesh_to_glb.py uses it through BLENDER.
+ARG BLENDER_VERSION=4.2.23
+ARG BLENDER_SHA256=bea0eb3146be13eae6225409a117b215184f41b7f79e799f97cb3abb8f6dc404
+RUN apt-get update && apt-get install -y --no-install-recommends libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 \
+      libgl1 libegl1 libxkbcommon0 libsm6 libice6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "https://download.blender.org/release/Blender4.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -o /tmp/blender.tar.xz \
+    && echo "${BLENDER_SHA256}  /tmp/blender.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/blender.tar.xz -C /opt && mv "/opt/blender-${BLENDER_VERSION}-linux-x64" /opt/blender && rm /tmp/blender.tar.xz
+ENV SPHR_GPU=nvidia BLENDER=/opt/blender/blender
 USER node
