@@ -37,7 +37,7 @@ export function jobDetails(job: Job) {
   const bucket = uploadBucket();
   return {
     id: job.id, status: job.status, sceneId: job.sceneId, slug: `customer-${space.id}`, created: job.created, started: job.started,
-    space: { id: space.id, title: space.title, notes: space.notes, reprocessing: Boolean(space.sceneId) },
+    space: { id: space.id, title: space.title, notes: space.notes, output: space.output ?? "auto", reprocessing: Boolean(space.sceneId) },
     uploads: listUploads(space.id).filter(upload => upload.status === "complete").map(upload => ({
       id: upload.id, name: upload.name, size: upload.size, type: upload.type,
       source: bucket ? { gcs: `gs://${bucket}/${upload.object}` } : { url: `/api/worker/uploads/${upload.id}` }

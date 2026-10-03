@@ -393,7 +393,7 @@ async function runUploader(space) {
     if (job.submit) {
       job.status = 'submitting';
       persist(true);
-      await api(`/api/account/spaces/${space}/submit`, { method: 'POST', body: job.notes ? { notes: job.notes } : {} });
+      await api(`/api/account/spaces/${space}/submit`, { method: 'POST', body: { ...(job.notes ? { notes: job.notes } : {}), ...(job.output ? { output: job.output } : {}) } });
       job.status = 'submitted';
       job.submitted = new Date().toISOString();
       log('Submitted for processing');
@@ -452,6 +452,7 @@ const tools = [
       space_id: spaceId,
       paths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to files or folders.' },
       notes: { type: 'string', description: 'Optional notes for the processing team, such as what the capture is or how the tour should go (up to 2000 characters).' },
+      output: { type: 'string', enum: ['splat', 'tour', 'auto'], description: 'What to build: "splat", a 3DGS (3D Gaussian splat) visitors move through freely (the default for photos, video and 360 captures); "tour", a guided tour of 360 panoramas (the default for E57 scans); or "auto" to use those defaults. Set it only when the person asks for one.' },
       submit: { type: 'boolean', description: 'Submit for processing when the upload finishes. Defaults to true; use false to add more files in another call first.' }
     }, required: ['space_id', 'paths'] },
     run: uploadFiles
@@ -615,7 +616,8 @@ async function waitForPayment({ space_id }) {
   }
 }
 
-async function uploadFiles({ space_id, paths, notes, submit = true }) {
+async function uploadFiles({ space_id, paths, notes, output, submit = true }) {
+  if (output !== undefined && !['splat', 'tour', 'auto'].includes(output)) throw new Problem('output is "splat", "tour" or "auto".');
   const { space } = await api(`/api/account/spaces/${encodeURIComponent(space_id)}`);
   if (space.status === 'unpaid') throw new Problem('This space is waiting for payment. Call wait_for_payment first.');
   if (!space.hosted) throw new Problem('Billing needs attention before files can upload. Ask the person to open their account page.');
@@ -631,7 +633,7 @@ async function uploadFiles({ space_id, paths, notes, submit = true }) {
   if (account.maxSpaceBytes && total > account.maxSpaceBytes) throw new Problem(`That is ${formatBytes(total)}, more than the ${formatBytes(account.maxSpaceBytes)} one space can hold.`);
   // Files already uploaded under the same name and size are not sent twice.
   const complete = new Set(already.filter(upload => upload.status === 'complete').map(upload => `${upload.name}:${upload.size}`));
-  const job = { spaceId: space.id, title: space.title, email: credentials()?.email, notes: typeof notes === 'string' ? notes.slice(0, 2000) : '',
+  const job = { spaceId: space.id, title: space.title, email: credentials()?.email, notes: typeof notes === 'string' ? notes.slice(0, 2000) : '', output,
     submit: submit !== false, status: 'waiting', created: new Date().toISOString(),
     files: found.map(file => ({ ...file, sent: 0, done: complete.has(`${file.name}:${file.size}`) })) };
   saveJob(job);

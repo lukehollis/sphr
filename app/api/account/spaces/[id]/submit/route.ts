@@ -1,4 +1,4 @@
-import { AccountError, cleanText, listUploads, readCustomerSpace, submitCustomerSpace } from "@/lib/server/accounts-store";
+import { AccountError, cleanText, listUploads, parseSpaceOutput, readCustomerSpace, submitCustomerSpace } from "@/lib/server/accounts-store";
 import { allowAttempt } from "@/lib/server/admin-store";
 import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { describeSpace } from "@/lib/server/customer-spaces";
@@ -21,14 +21,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return accountResponse({ error: "This space has been submitted many times today. Try again tomorrow, or contact support." }, 429);
   }
   try {
-    submitCustomerSpace(space.id, cleanText(body?.notes, 2000));
+    if (body?.output !== undefined && parseSpaceOutput(body.output) === undefined) {
+      return accountResponse({ error: "Choose splat, tour or auto for the output." }, 400);
+    }
+    submitCustomerSpace(space.id, cleanText(body?.notes, 2000), parseSpaceOutput(body?.output));
     announceJob();
     const files = listUploads(space.id).filter(upload => upload.status === "complete");
     await recordEvent("space_submitted", { userId: user.id, props: { files: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0),
       from: agent ? "agent" : "web" } });
     void notifyTeam({ title: "Space uploaded for processing", fields: [["Title", space.title], ["Account", user.email], ["Files", filesSummary(files)],
       ["Kinds", [...new Set(files.map(file => file.name.split(".").pop()?.toLowerCase()).filter(Boolean))].slice(0, 8).join(", ")],
-      ["From", agent ? "Their agent" : "The website"], ["Notes", cleanText(body?.notes, 300)]] });
+      ["Build as", readCustomerSpace(space.id)?.output ?? "auto"], ["From", agent ? "Their agent" : "The website"], ["Notes", cleanText(body?.notes, 300)]] });
     // Not awaited: the page should not wait on the mail server.
     void notifyOwner(user, filesReceivedEmail(siteBrand(), publicOrigin(request), space,
       { count: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0) }));

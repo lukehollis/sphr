@@ -14,6 +14,7 @@ const progress = line => appendFileSync(path.join(dir, 'output/progress.log'), `
 // The runner must never hand the agent its own credentials.
 if (Object.keys(process.env).some(name => /WORKER_TOKEN|STRIPE|PUBLISH/.test(name))) { result('failed', 'Credentials leaked to the agent.'); process.exit(0); }
 if (!job.inputs.every(input => existsSync(input.path) && statSync(input.path).size === input.size)) { result('failed', 'Inputs missing.'); process.exit(0); }
+if (!['splat', 'tour', 'auto'].includes(job.output)) { result('failed', 'job.json does not say what to build.'); process.exit(0); }
 if (job.notes?.includes('needs a person')) { result('needs_operator', 'Unfamiliar capture format.'); process.exit(0); }
 progress('Inspecting 1 file');
 // Pretend the upload was a 360 photo: render one and package it with the real tool.

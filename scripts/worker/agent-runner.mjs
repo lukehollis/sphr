@@ -112,7 +112,8 @@ inputs and which skill and tool to use for each kind of capture: Matterport or o
 it explains how to build one here, and how to leave a skill proposal so later jobs know the method.
 
 Job directory: ${dir}
-- job.json: the reserved scene ID, storage slug, the customer's title and notes, and the input files.
+- job.json: the reserved scene ID, storage slug, the customer's title and notes, what they asked the capture to
+  become ("output": "splat", "tour" or "auto"), and the input files.
 - input/: the customer's uploaded files. Read them; never modify them.
 - work/: scratch space.
 - output/: your results. Append one short line per major step to output/progress.log (for example
@@ -383,7 +384,8 @@ async function processJob(queued) {
   try {
     const files = await download(job);
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
-      notes: job.space.notes, reprocessing: job.space.reprocessing, inputs: files }, null, 2) + '\n');
+      notes: job.space.notes, output: ['splat', 'tour'].includes(job.space.output) ? job.space.output : 'auto',
+      reprocessing: job.space.reprocessing, inputs: files }, null, 2) + '\n');
     rmSync(path.join(jobDir(job), 'output/result.json'), { force: true });
   } catch (error) {
     log(job, `returning the job to the queue: ${error.message}`);

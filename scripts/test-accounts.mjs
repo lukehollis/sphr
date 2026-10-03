@@ -150,8 +150,15 @@ test('spaces, uploads and the processing queue', async () => {
   assert.deepEqual(store.readCustomerListings(), [listing], 'the listing is served from the database');
   assert.throws(() => store.finishJob(job.id, { ok: true, message: null, listing }), /not running/);
 
+  // The customer's choice of output is kept until they make another; "auto" hands it back to the agent.
+  assert.equal(store.readCustomerSpace(space.id).output, null);
+  assert.equal(store.parseSpaceOutput('tour'), 'tour');
+  assert.equal(store.parseSpaceOutput('auto'), null);
+  assert.equal(store.parseSpaceOutput('mesh'), undefined);
+
   // Reprocessing keeps the space's scene ID so links survive.
-  const redo = store.submitCustomerSpace(space.id, null);
+  const redo = store.submitCustomerSpace(space.id, null, 'tour');
+  assert.equal(store.readCustomerSpace(space.id).output, 'tour');
   assert.equal(redo.sceneId, job.sceneId);
   store.claimJob(redo.id, 'worker-a');
   const held = store.holdJob(redo.id, 'Unfamiliar format.');
@@ -170,9 +177,11 @@ test('spaces, uploads and the processing queue', async () => {
   assert.equal(failed.space.sceneId, job.sceneId, 'a failed reprocess keeps the published scene');
   // Submitting again replaces an attempt still waiting for an operator.
   const stuck = store.submitCustomerSpace(space.id, null);
+  assert.equal(store.readCustomerSpace(space.id).output, 'tour', 'a submission without a choice keeps the last one');
   store.claimJob(stuck.id, 'worker-a');
   store.holdJob(stuck.id, 'Unfamiliar format.');
-  const retry = store.submitCustomerSpace(space.id, null);
+  const retry = store.submitCustomerSpace(space.id, null, null);
+  assert.equal(store.readCustomerSpace(space.id).output, null, 'auto clears the choice');
   assert.equal(store.readJob(stuck.id).status, 'canceled', 'a resubmission replaces the held job');
   assert.match(store.readJob(stuck.id).message, /^Replaced by a new submission\. Unfamiliar format\./);
   assert.deepEqual(store.listJobs(['held']).map(item => item.id), [], 'nothing stale waits for an operator');
