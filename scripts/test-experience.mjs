@@ -322,6 +322,26 @@ test('a hunt object hidden from its clue comes forward where the visitor can see
   assert.ok(Math.abs(Math.hypot(far.position[0], far.position[2]) - 18) < 0.5 && Math.abs(far.position[1] - 0.01) < 1e-3, `far across the space it comes to 18 meters along the same line (${far.position.map((value) => value.toFixed(1))})`);
 });
 
+test('in a guided tour, objects come into the view of the stop that shows them', async () => {
+  const THREE = await import('three');
+  const { placeOnServer } = await import('../lib/server/tour-placement.ts');
+  const shape = (id) => ({ id, name: id, source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
+  const stops = [{ id: 'one', title: 'One', text: 'Look ahead.', view: { nodeId: 'a', rotation: { azimuth: 0, polar: -10 } }, objects: ['behind', 'ahead'], effects: [] }];
+  const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [{ uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, image: 'https://example.com/a.jpg' }] } } };
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  floor.updateMatrixWorld(true);
+  const anchors = { objects: { behind: { nodeId: 'a', x: 0.25, y: 0.6 }, ahead: { nodeId: 'a', x: 0.75, y: 0.6 } }, effects: {}, stops: {} };
+  const tour = placeOnServer(space, parseExperience({ version: 1, kind: 'tour', objects: [shape('behind'), shape('ahead')], effects: [], stops }), anchors, [floor]);
+  const [behind, ahead] = tour.objects;
+  assert.ok(behind.position[2] < -2.5 && Math.abs(behind.position[1] - 0.01) < 1e-3, `what was behind the visitor stands ahead (${behind.position.map((value) => value.toFixed(1))})`);
+  assert.ok(Math.abs(Math.atan2(-behind.position[0], -behind.position[2])) < Math.PI / 4, 'inside the view');
+  assert.ok(ahead.position[2] < -4 && Math.abs(ahead.position[0]) < 0.01, 'what is already in view stays where it was put');
+  // A hunt keeps its objects out of the middle of the view: finding them is the game.
+  const hunt = placeOnServer(space, parseExperience({ version: 1, kind: 'hunt', objects: [shape('behind'), shape('ahead')], effects: [],
+    stops: [{ ...stops[0], objects: ['behind'], find: { objectId: 'behind', hint: 'Turn around.', found: 'Found.' } }] }), anchors, [floor]);
+  assert.ok(hunt.objects[0].position[2] > 4, 'a hunt object behind the visitor stays behind');
+});
+
 test('agents learn the looks, effects and sounds a site has', async () => {
   const { experienceCatalog } = await import('../lib/experience/catalog.ts');
   const catalog = experienceCatalog();

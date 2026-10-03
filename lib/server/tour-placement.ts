@@ -3,7 +3,7 @@ import { parseExperience } from "@/lib/experience/validate";
 import type { Experience, Vec3 } from "@/lib/experience/types";
 import { aimFrom, placeObjectAt, type AnchorSpot } from "@/lib/experience/placement";
 import { openingSpace } from "@/lib/scene-edits";
-import { sceneGroupSettings, worldFromGroupedPoint } from "@/lib/three/math";
+import { cameraDirection, sceneGroupSettings, worldFromGroupedPoint } from "@/lib/three/math";
 import { panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
 import type { SphrBootstrap } from "@/lib/types";
 import type { AgentAnchors } from "@/lib/server/tour-agent";
@@ -53,68 +53,16 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     return { ...base, position: toArray(origin.clone().addScaledVector(direction, 2.5)), normal: null, hit: false, distance: null };
   };
 
-  let objects = experience.objects.map((object) => {
+  const placed = experience.objects.map((object) => {
     const anchor = anchors.objects[object.id];
     const spot = anchor ? resolve(anchor) : null;
     return spot ? placeObjectAt(object, spot) : object;
   });
-  if (meshes.length) objects = keepInSight(objects);
   const effects = experience.effects.map((effect) => {
     const anchor = anchors.effects[effect.id];
     const spot = anchor && effect.target.kind === "point" ? resolve(anchor) : null;
     return spot ? { ...effect, target: { kind: "point" as const, position: spot.position } } : effect;
   });
-  /**
-   * The agent picks spots in photos taken from many places, so an object can end up behind
-   * a step or a wall as seen from the stop that shows it, and a hunt's object would then be
-   * impossible to click; or so far across a large space that it is too small to notice.
-   * Seen from the first stop that lists it, an object more than 18 meters away comes along
-   * the same line of sight onto the surface below at 18 meters, and one the capture hides
-   * comes forward onto the surface in the way, or onto the floor just in front of that.
-   */
-  function keepInSight(placed: typeof objects) {
-    const firstStop = new Map<string, string>();
-    for (const stop of experience.stops) {
-      if (!stop.view.nodeId) continue;
-      for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop.view.nodeId);
-    }
-    const down = new THREE.Vector3(0, -1, 0);
-    const nearby = 18;
-    return placed.map((object) => {
-      const node = nodes.get(firstStop.get(object.id) ?? "");
-      if (!node || !anchors.objects[object.id]) return object;
-      const eye = worldFromGroupedPoint(node.position, settings);
-      let target = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
-      if (target.distanceTo(eye) > nearby) {
-        const closer = eye.clone().addScaledVector(target.clone().sub(eye).normalize(), nearby);
-        raycaster.set(closer.clone().add(new THREE.Vector3(0, 0.5, 0)), down);
-        const ground = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < 40);
-        if (ground) {
-          object = { ...object, position: [ground.point.x, ground.point.y + 0.01, ground.point.z] as Vec3 };
-          target = ground.point.clone().add(new THREE.Vector3(0, 0.11, 0));
-        }
-      }
-      const toward = target.clone().sub(eye);
-      const distance = toward.length();
-      if (distance < 0.5) return object;
-      raycaster.set(eye, toward.normalize());
-      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
-      if (!hit || hit.distance >= distance - 0.15) return object;
-      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
-      if (normal && normal.dot(toward) > 0) normal.negate();
-      let spot = hit.point.clone();
-      if (!normal || normal.y < 0.7) {
-        // A wall or a step's face: stand on the floor just in front of it.
-        const before = hit.point.clone().addScaledVector(toward, -0.3);
-        raycaster.set(before.clone().add(new THREE.Vector3(0, 0.3, 0)), down);
-        const floor = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05);
-        if (!floor) return object;
-        spot = floor.point;
-      }
-      return { ...object, position: [spot.x, spot.y + 0.01, spot.z] as Vec3 };
-    });
-  }
-
   // A stop looks from where it stands toward the spot the agent pointed at, even when
   // that spot was picked in a photo taken somewhere else.
   const stops = experience.stops.map((stop) => {
@@ -125,5 +73,91 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     const aimed = standing && spot.hit ? aimFrom(toArray(worldFromGroupedPoint(standing.position, settings)), spot.position) : null;
     return { ...stop, view: { ...stop.view, rotation: aimed ?? { azimuth: Number(spot.rotation.azimuth.toFixed(2)), polar: Number(spot.rotation.polar.toFixed(2)) } } };
   });
+  const objects = meshes.length ? keepNoticeable(placed) : placed;
   return parseExperience({ ...experience, objects, effects, stops }, { lenient: true });
+
+  /**
+   * The agent picks spots in photos taken from many places, so an object can end up out of
+   * the view of the stop that shows it, behind a step or a wall (a hunt's object would then
+   * be impossible to click), or so far across a large space that it is too small to notice.
+   * Seen from the first stop that lists it: in a guided tour, an object well off that stop's
+   * view comes into it, onto the ground a few meters ahead; one more than 18 meters away
+   * comes along the same line of sight onto the surface at 18 meters; and one the capture
+   * hides comes forward onto the surface in the way, or the floor just in front of that.
+   */
+  function keepNoticeable(list: typeof placed) {
+    const firstStop = new Map<string, (typeof stops)[number]>();
+    for (const stop of stops) {
+      if (!stop.view.nodeId) continue;
+      for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop);
+    }
+    const down = new THREE.Vector3(0, -1, 0);
+    const up = new THREE.Vector3(0, 1, 0);
+    const nearby = 18;
+    const moved = new Map<string, number>();
+    const surfaceBelow = (from: THREE.Vector3, within: number) => {
+      raycaster.set(from, down);
+      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < within);
+      if (!hit) return null;
+      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : up;
+      return Math.abs(normal.y) > 0.7 ? hit.point : null;
+    };
+    const visibleFrom = (eye: THREE.Vector3, point: THREE.Vector3) => {
+      const toward = point.clone().sub(eye);
+      raycaster.set(eye, toward.clone().normalize());
+      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+      return !hit || hit.distance >= toward.length() - 0.15;
+    };
+    const heading = (eye: THREE.Vector3, point: THREE.Vector3) => aimFrom(toArray(eye), toArray(point))?.azimuth ?? 0;
+
+    return list.map((original) => {
+      let object = original;
+      const stop = firstStop.get(object.id);
+      const node = nodes.get(stop?.view.nodeId ?? "");
+      if (!stop || !node || !anchors.objects[object.id]) return object;
+      const eye = worldFromGroupedPoint(node.position, settings);
+      let target = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
+      const turned = object.rotation.some((value, axis) => axis !== 1 && value !== 0);
+      const put = (point: THREE.Vector3) => {
+        object = { ...object, position: [point.x, point.y + 0.01, point.z] as Vec3, ...(turned ? {} : { rotation: [0, Number(heading(eye, point).toFixed(1)), 0] as Vec3 }) };
+        target = point.clone().add(new THREE.Vector3(0, 0.11, 0));
+      };
+
+      // A guided tour shows a stop's objects: one well off its view comes into it.
+      if (experience.kind === "tour" && stop.view.rotation) {
+        const view = cameraDirection(stop.view.rotation);
+        const flat = new THREE.Vector3(view.x, 0, view.z);
+        if (THREE.MathUtils.radToDeg(view.angleTo(target.clone().sub(eye))) > 60 && flat.lengthSq() > 0.01) {
+          flat.normalize();
+          const side = new THREE.Vector3(-flat.z, 0, flat.x);
+          const index = moved.get(stop.id) ?? 0;
+          moved.set(stop.id, index + 1);
+          const offset = ((index % 3) - 1) * 1.2;
+          for (const reach of [6, 4, 3]) {
+            const ground = surfaceBelow(eye.clone().addScaledVector(flat, reach).addScaledVector(side, offset), 12);
+            if (ground && visibleFrom(eye, ground.clone().add(new THREE.Vector3(0, 0.1, 0)))) { put(ground); break; }
+          }
+        }
+      }
+      // Not across the valley.
+      if (target.distanceTo(eye) > nearby) {
+        const ground = surfaceBelow(eye.clone().addScaledVector(target.clone().sub(eye).normalize(), nearby).add(new THREE.Vector3(0, 0.5, 0)), 40);
+        if (ground) put(ground);
+      }
+      // Not behind a wall.
+      const toward = target.clone().sub(eye);
+      const distance = toward.length();
+      if (distance < 0.5) return object;
+      raycaster.set(eye, toward.clone().normalize());
+      const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+      if (!hit || hit.distance >= distance - 0.15) return object;
+      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : null;
+      if (normal && normal.dot(toward) > 0) normal.negate();
+      if (normal && normal.y >= 0.7) { put(hit.point); return object; }
+      // A wall or a step's face: stand on the floor just in front of it.
+      const ground = surfaceBelow(hit.point.clone().addScaledVector(toward.normalize(), -0.3).add(new THREE.Vector3(0, 0.3, 0)), 40);
+      if (ground) put(ground);
+      return object;
+    });
+  }
 }
