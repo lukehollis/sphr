@@ -5,11 +5,35 @@ import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPrevie
 import { cameraLevelRotation, cameraStartView } from './colmap-cameras.mjs';
 import { sampleSplats } from './splat-reader.mjs';
 
-/** Whether camera centres sit inside the splat's dense body (grown by its radius), i.e. share its axes. */
-function camerasMatch(cameras, box) {
-  const margin = box.radius;
-  const inside = cameras.filter(({ center: [x, y, z] }) => x > box.min.x - margin && x < box.max.x + margin
-    && y > box.min.y - margin && y < box.max.y + margin && z > box.min.z - margin && z < box.max.z + margin);
+/** 5th and 95th percentile of each axis. */
+function spread(positions) {
+  return [0, 1, 2].map(axis => {
+    const values = [];
+    for (let index = axis; index < positions.length; index += 3) values.push(positions[index]);
+    values.sort((a, b) => a - b);
+    return [values[Math.floor(values.length * 0.05)], values[Math.floor(values.length * 0.95)]];
+  });
+}
+
+/**
+ * Whether the splat kept the axes of the reconstruction it was trained from: trainers start from COLMAP's
+ * sparse points, so both clouds cover the same region at the same scale unless the trainer moved them.
+ * Without sparse points, the cameras must at least stand within the splat.
+ */
+function camerasMatch(cameras, points, positions) {
+  const splat = spread(positions);
+  if (points?.length >= 300) {
+    return spread(points).every(([low, high], axis) => {
+      const [splatLow, splatHigh] = splat[axis];
+      const size = Math.max(high - low, 1e-6), splatSize = Math.max(splatHigh - splatLow, 1e-6);
+      return Math.abs((low + high) / 2 - (splatLow + splatHigh) / 2) < 0.25 * Math.max(size, splatSize)
+        && splatSize / size > 0.5 && splatSize / size < 2;
+    });
+  }
+  const inside = cameras.filter(({ center }) => center.every((value, axis) => {
+    const [low, high] = splat[axis], margin = (high - low) * 0.25;
+    return value > low - margin && value < high + margin;
+  }));
   return inside.length >= 0.8 * cameras.length;
 }
 
@@ -20,7 +44,7 @@ function stationView([x, y, z], box) {
   return { position: { x, y, z }, rotation, target: { x, y, z } };
 }
 
-export async function packageSplat(input, id, { rotation, level = false, interior = false, elevation, distance, cameras, stations, floor, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
+export async function packageSplat(input, id, { rotation, level = false, interior = false, elevation, distance, cameras, sparsePoints, stations, floor, kind = 'splat', tool = 'build-splat', inputs = [input], notes = {} } = {}) {
   const extension = path.extname(input).slice(1).toLowerCase();
   freshFolder(id.folder);
   mkdirSync(path.join(id.folder, 'splat'));
@@ -30,7 +54,7 @@ export async function packageSplat(input, id, { rotation, level = false, interio
   let camera, box = null, leveled = null, start = null;
   // The cameras of the reconstruction the splat was trained from (COLMAP) know where up is and where the
   // capture was taken from, but only if the trainer kept COLMAP's axes.
-  if (cameras?.length && sample?.positions.length && !camerasMatch(cameras, bounds(denseCore(sample.positions)))) {
+  if (cameras?.length && sample?.positions.length && !camerasMatch(cameras, sparsePoints, sample.positions)) {
     start = { kind: 'ignored', reason: 'the camera positions do not lie inside the splat' };
     cameras = null;
   }

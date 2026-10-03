@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cameraLevelRotation, cameraStartView, cameraUp, readColmapCameras } from './packages/colmap-cameras.mjs';
+import { cameraLevelRotation, cameraStartView, cameraUp, readColmapCameras, readColmapPoints } from './packages/colmap-cameras.mjs';
 import { rotatePositions, viewDirection } from './packages/common.mjs';
 
 const sub = (a, b) => a.map((value, axis) => value - b[axis]);
@@ -49,6 +49,8 @@ try {
     lines += imageLine(index + 1, `frame-${String(index + 1).padStart(5, '0')}.jpg`, center, sub(subject, center), up);
   }
   writeFileSync(path.join(folder, 'images.txt'), `# header\n${lines}`);
+  writeFileSync(path.join(folder, 'points3D.txt'), '# header\n1 1.5 -0.5 2 200 10 10 0.5 1 0\n2 0.5 -0.4 2.1 10 200 10 0.4 1 1\n');
+  assert.deepEqual(Array.from(readColmapPoints(folder)).map(value => Number(value.toFixed(2))), [1.5, -0.5, 2, 0.5, -0.4, 2.1]);
   const cameras = readColmapCameras(folder);
   assert.equal(cameras.length, 36);
   close(cameras[0].center, [subject[0] + 2, -1.6, subject[2]]);

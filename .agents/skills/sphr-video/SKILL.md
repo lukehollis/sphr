@@ -58,7 +58,7 @@ frames it used:
 ```sh
 mkdir -p "$SPHR_JOB_DIR/work/data/sparse"
 cp -r "$SPHR_JOB_DIR/work/colmap/sparse/0" "$SPHR_JOB_DIR/work/data/sparse/0"   # work/data/images = the frames COLMAP used
-nohup brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --export-path "$SPHR_JOB_DIR/work/splat" \
+nohup brush_app "$SPHR_JOB_DIR/work/data" --total-steps 15000 --max-splats 1500000 --export-path "$SPHR_JOB_DIR/work/splat" \
   --export-name scene.ply --export-every 5000 > "$SPHR_JOB_DIR/work/brush.log" 2>&1 &
 echo $! > "$SPHR_JOB_DIR/work/brush.pid"
 ```
@@ -68,7 +68,9 @@ worker is busy, so never run it in the foreground or under a short `timeout`: a 
 Start it as above and check every minute or two with
 `kill -0 "$(cat "$SPHR_JOB_DIR/work/brush.pid")" 2>/dev/null && echo training || echo finished`.
 `--export-every 5000` rewrites `scene.ply` along the way, so a run that has to be stopped still leaves a
-usable splat; package only after the process has finished.
+usable splat; package only after the process has finished. `--max-splats 1500000` keeps the PLY under about
+400 MB: Brush's own limit is 10 million, and a 108-frame walkthrough grew to 3.7 million splats (870 MB),
+too much for a phone to download.
 
 Measured on the RTX 3090 Ti: 105 photos at 1600 px register in COLMAP (CPU) in about 4 minutes and
 train 15,000 steps in about 8.5 minutes, giving a ~100 MB PLY. Write a progress line before training

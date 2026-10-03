@@ -41,6 +41,32 @@ export function readColmapCameras(model) {
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
+/** Up to `limit` of the model's sparse 3D points (points3D.bin or .txt) as flat xyz, or null without them. */
+export function readColmapPoints(model, limit = 200000) {
+  const binary = path.join(model, 'points3D.bin'), text = path.join(model, 'points3D.txt');
+  const points = [];
+  if (existsSync(binary)) {
+    const data = readFileSync(binary);
+    const count = Number(data.readBigUInt64LE(0));
+    const step = Math.max(1, Math.floor(count / limit));
+    let offset = 8;
+    for (let index = 0; index < count; index++) {
+      if (index % step === 0) points.push(data.readDoubleLE(offset + 8), data.readDoubleLE(offset + 16), data.readDoubleLE(offset + 24));
+      const track = Number(data.readBigUInt64LE(offset + 43));
+      offset += 51 + track * 8;
+    }
+  } else if (existsSync(text)) {
+    for (const line of readFileSync(text, 'utf8').split('\n')) {
+      if (!line.trim() || line.startsWith('#')) continue;
+      const parts = line.trim().split(/\s+/);
+      points.push(Number(parts[1]), Number(parts[2]), Number(parts[3]));
+    }
+  } else {
+    return null;
+  }
+  return Float32Array.from(points);
+}
+
 const add = (a, b) => a.map((value, axis) => value + b[axis]);
 const sub = (a, b) => a.map((value, axis) => value - b[axis]);
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
