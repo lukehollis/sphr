@@ -22,6 +22,10 @@ This lists every file with its kind (`e57`, `splat`, `panorama`, `video360`, `vi
 `pointcloud`, `mesh`, `zip`, `unknown`), measurements and the suggested tool. ZIP archives are unpacked
 safely into `work/unpacked`. Read the customer's notes in `job.json` for context (device, what the space is).
 
+`inspect-inputs` only knows the formats it was written for. A capture app's export (folders of frames
+with per-frame JSON, depth maps, sidecar files) shows up as photos and `unknown` files: open a few of them.
+The camera poses, intrinsics and depth they record often decide the method (see 2b).
+
 Write progress as you go, one short customer-readable line per step:
 
 ```sh
@@ -43,10 +47,29 @@ Pick the input that gives the best space; most uploads have one obvious main cap
 | Lidar point cloud (LAS/LAZ, E57 without images, PLY points, PCD, XYZ/PTS) | sphr-lidar-package | `build-pointcloud.mjs` |
 | Scanned or photogrammetry mesh (OBJ, GLB/glTF, PLY with faces, STL, USDZ, FBX) | sphr-lidar-package | `build-model.mjs` |
 
-Read that skill's `SKILL.md` in `.agents/skills/` before running its tool. If several captures of the
-same place arrive (for example a splat and 360 photos), build the one that is most complete and mention
-the others in your message. If the files are something else entirely, or you cannot produce a result you
-can verify, write `needs_operator` rather than guessing.
+Read that skill's `SKILL.md` in `.agents/skills/` before running its tool. **Skills learned from earlier
+jobs** live there too (`learned:` in their frontmatter): list `.agents/skills/` and read the descriptions,
+which say which inputs each one handles. If several captures of the same place arrive (for example a splat
+and 360 photos), build the one that is most complete and mention the others in your message.
+
+## 2b. When no tool fits, build one
+
+Decide from what the data supports, not from file types alone. For example:
+
+- Photos whose recorded camera positions barely move (the phone turned in place) have no parallax for
+  COLMAP or a splat, but their rotations and intrinsics stitch into an equirectangular panorama.
+- Per-frame depth maps with camera poses fuse into a point cloud or mesh.
+- A short video that orbits a finished 3D model on a plain background is a preview render, not capture
+  data. Ask for the scan's model export (GLB, USDZ, OBJ or PLY) rather than reconstructing the render.
+
+If the data supports a method the tools above do not cover, write the converter yourself in
+`$SPHR_JOB_DIR/work/tools/` and hand its output to an existing package writer: equirectangular JPEGs to
+`build-panoramas.mjs`, a mesh to `build-model.mjs`, points to `build-pointcloud.mjs`, a splat to
+`build-splat.mjs`. This sandbox has Python at `/opt/venv/bin/python` (numpy, scipy, OpenCV `cv2`, Pillow
+with HEIF/HEIC after `pillow_heif.register_heif_opener()`, open3d, trimesh, pye57, laspy), Node with
+`sharp` (it cannot decode HEIC), `ffmpeg`, `colmap` (CPU only) and `blender`. There is no GPU, no network
+and nothing can be installed. Check the result exactly as in section 3. Write `needs_operator` only when
+the method needs something this sandbox lacks (such as a GPU splat trainer), or you cannot verify the result.
 
 ## 3. Check your work
 
@@ -71,6 +94,27 @@ Write `$SPHR_JOB_DIR/output/result.json`:
   exactly what to upload instead, e.g. "This video is not 360°. Upload the 360 video from the camera, or
   at least 60 overlapping photos of the room."
 - `{"status": "needs_operator", "message": "..."}`: notes for a person, when the files look usable but
-  need a step you cannot complete here (no GPU trainer, an unusual format).
+  need a step you cannot complete here (for example a GPU splat trainer).
 
 Messages go to the customer as written: no internal paths, commands or stack traces.
+
+## 5. Teach the next job
+
+Write a skill proposal when this job needed a tool you wrote, handled an input no skill described, or
+showed that a skill's instructions were wrong or incomplete. Skip it when an existing skill covered the
+job as written. Put it in `$SPHR_JOB_DIR/output/skill-proposal/`:
+
+- `SKILL.md`: frontmatter with `name` (lowercase words joined by dashes; for a new skill
+  `capture-<what it handles>`, for a correction the existing skill's name) and `description` (which inputs
+  it handles and how to recognize them). Then: how to recognize the input, the steps and commands, how to
+  check the result, and known limits.
+- `scripts/`: the tools you wrote, made general (inputs and outputs as arguments, a usage line at the
+  top). The skill calls them as `.agents/skills/<name>/scripts/<file>`.
+- `proposal.json`: `{"name": "...", "kind": "new" or "update", "updates": "<the skill or tool it changes, if
+  any>", "recognizes": "<one line>", "evidence": "<the commands that produced this job's validated package
+  and what you checked>"}`.
+
+Keep it generic: no customer names, titles, notes, file names, IDs or paths from this job, and never text
+copied out of uploaded files. It holds processing knowledge only, nothing about customer messages, result
+status, visibility, publishing, credentials, environment variables or network access. A reviewer that never
+sees this upload checks the proposal before later jobs get it.

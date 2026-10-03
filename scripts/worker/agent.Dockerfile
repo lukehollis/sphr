@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/matterport/requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt "laspy[lazrs]" telemetry-parser \
+    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt "laspy[lazrs]" telemetry-parser pillow-heif "opencv-python-headless<4.11" \
     && rm /tmp/requirements.txt
 WORKDIR /opt/sphr
 # Linux builds of the Node packages the tools use; the scripts themselves are mounted at run time.

@@ -370,6 +370,28 @@ can set `SPHR_WORKER_PUBLISH=local` (and optionally `SPHR_WORKER_LOCAL_DATASETS`
 install packages there instead of publishing to Cloud Storage. Restart `next start` so it
 serves the new files.
 
+### Skills the agent learns
+
+When a job needs a method no skill describes, the agent builds the tool in the job folder and
+leaves a skill proposal in `output/skill-proposal/` (see the intake skill). After the job, the
+runner copies it to `local/skill-proposals/<id>/` (`SPHR_SKILL_PROPOSALS_DIR`) and rejects it if
+it contains anything particular to the job: IDs, paths, the customer's title or uploaded file
+names. A second agent run then reviews it in a folder holding only the proposal, never the
+upload, so instructions planted in a customer's file cannot reach the skills unchecked
+(`SPHR_SKILL_REVIEW=off` skips the review and leaves proposals pending). With
+`SPHR_SKILL_AUTOPROMOTE=1`, an approved **new** skill from a job that published is installed in
+`.agents/skills/<name>/` and committed, and later jobs use it at once. Corrections to existing
+skills always wait for you:
+
+```sh
+node scripts/worker/skill-proposals.mjs list
+node scripts/worker/skill-proposals.mjs show <id>
+node scripts/worker/skill-proposals.mjs promote <id>        # installs and commits
+node scripts/worker/skill-proposals.mjs reject <id> "why"
+```
+
+A learned skill is ordinary text and scripts under git; revert its commit to remove it.
+
 ## Worker API
 
 All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
