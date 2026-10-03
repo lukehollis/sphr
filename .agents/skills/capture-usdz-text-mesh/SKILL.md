@@ -6,6 +6,9 @@ learned: 2026-10-03 from processing job 0be686e6442d7be7, reviewed (runner after
 
 # USDZ without Blender USD import
 
+Use this only as a fallback: workers whose image has Blender 4.x (`$BLENDER`, the GPU workers) convert USDZ
+with textures through `build-model.mjs` directly.
+
 Recognize: `build-model.mjs` on a `.usdz` reports `bpy.ops.wm.usd_import` could not be found. A USDZ is a ZIP;
 `inspect-inputs.mjs --extract` unpacks it to a `.usda` (text) plus textures. (A binary `.usdc` needs another route.)
 

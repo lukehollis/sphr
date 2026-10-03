@@ -293,7 +293,7 @@ export class SceneGraphLayer {
 
       const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const clonedMaterials = sourceMaterials.map((material) => node.unlit
-        ? new THREE.MeshBasicMaterial({ map: (material as THREE.MeshStandardMaterial).map, vertexColors: Boolean(mesh.geometry.attributes.color), side: THREE.FrontSide, toneMapped: false, fog: false })
+        ? new THREE.MeshBasicMaterial({ map: (material as THREE.MeshStandardMaterial).map, color: (material as THREE.MeshStandardMaterial).color ?? 0xffffff, vertexColors: Boolean(mesh.geometry.attributes.color), side: THREE.FrontSide, toneMapped: false, fog: false })
         : material.clone());
       const clonedMaterial = Array.isArray(mesh.material) ? clonedMaterials : clonedMaterials[0];
       mesh.material = clonedMaterial;

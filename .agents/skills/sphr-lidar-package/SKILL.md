@@ -24,9 +24,16 @@ Choose by what the scanner exported:
    node scripts/packages/build-model.mjs --input "<file>" --title "<title>" [--up y|z] [--max-faces 1500000] [--lit]
    ```
    Keep an OBJ's `.mtl` and texture images in the same folder (unpacked ZIPs already are). USDZ and FBX need
-   Blender, which the processing image includes. Textured scans render unlit so the captured lighting shows;
-   `--lit` adds lights for plain or vertex-colored meshes. Meshes above 1.5 million faces are simplified
-   without losing colour (textured ones through Blender's decimator, which keeps their UVs).
+   Blender with USD import (4.x); the GPU workers' image has it at `$BLENDER`. If the conversion reports that
+   `usd_import` is missing, use the capture-usdz-text-mesh skill instead. Rigged or animated models (USDZ
+   product models, FBX characters) are frozen in their first-frame pose; say that the animation is not kept.
+   Meshes above 1.5 million faces are simplified without losing colour (textured ones through Blender's
+   decimator, which keeps their UVs).
+
+   `conversion.lighting` decides how the model is lit. `baked` (textures cover the surface and there are no
+   normal or roughness maps, as in photo scans) renders unlit so the captured lighting shows. `shaded`
+   (flat-coloured parts, decals, PBR materials, vertex colours) gets scene lights. `--lit` forces lights on;
+   use it when a `baked` model is a designed object rather than a scan.
 
    The output's `conversion.colors` says where the model's colour comes from: `texture` (an image texture),
    `vertex` (colour stored per vertex, common in phone and AI scan exports), `material` (one flat colour per

@@ -108,10 +108,28 @@ def blender_to_glb(source, target):
     importer = {'.usdz': 'bpy.ops.wm.usd_import', '.usd': 'bpy.ops.wm.usd_import', '.usdc': 'bpy.ops.wm.usd_import', '.usda': 'bpy.ops.wm.usd_import',
                 '.fbx': 'bpy.ops.import_scene.fbx', '.dae': 'bpy.ops.wm.collada_import', '.3ds': 'bpy.ops.import_scene.max3ds',
                 '.blend': None}[source.suffix.lower()]
+    # Rigged parts (USDZ hoses and cables, FBX characters) are frozen into plain meshes in their first-frame
+    # pose: exported as skins they can come out at the armature's scale (100x for centimetre rigs), and the
+    # viewer shows a still model anyway.
     script = ('import bpy, sys\n'
               'bpy.ops.wm.read_factory_settings(use_empty=True)\n'
               + (f'{importer}(filepath={str(source)!r})\n' if importer else f'bpy.ops.wm.open_mainfile(filepath={str(source)!r})\n')
-              + f'bpy.ops.export_scene.gltf(filepath={str(target)!r}, export_format="GLB", export_yup=True)\n')
+              + 'scene = bpy.context.scene\n'
+              'scene.frame_set(scene.frame_start)\n'
+              'depsgraph = bpy.context.evaluated_depsgraph_get()\n'
+              'for obj in [o for o in scene.objects if o.type == "MESH" and any(m.type == "ARMATURE" for m in o.modifiers)]:\n'
+              '    world = obj.matrix_world.copy()\n'
+              '    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph), preserve_all_data_layers=True, depsgraph=depsgraph)\n'
+              '    obj.modifiers.clear()\n'
+              '    if obj.data.shape_keys: obj.shape_key_clear()\n'
+              '    obj.data = mesh\n'
+              '    obj.parent = None\n'
+              '    obj.matrix_world = world\n'
+              'for armature in [o for o in scene.objects if o.type == "ARMATURE"]:\n'
+              '    for child in armature.children:\n'
+              '        world = child.matrix_world.copy(); child.parent = None; child.matrix_world = world\n'
+              '    bpy.data.objects.remove(armature)\n'
+              + f'bpy.ops.export_scene.gltf(filepath={str(target)!r}, export_format="GLB", export_yup=True, export_animations=False)\n')
     result = subprocess.run([blender, '-b', '--factory-startup', '--python-expr', script], capture_output=True, text=True, timeout=1800)
     if result.returncode or not target.exists():
         raise SystemExit(f'Blender could not convert {source.name}:\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}')
@@ -193,6 +211,12 @@ def main():
         world = trimesh.Trimesh(trimesh.transform_points(geometry.vertices, transform), geometry.faces, process=False)
         parts.append((geometry, world, transform))
     total_area = sum(world.area for _, world, _ in parts) or 1
+    # Photo scans carry their lighting in the texture and look right unlit; designed models (flat-coloured parts
+    # with a few decals, or PBR textures with normal and roughness maps) need scene lights.
+    textured_area = sum(world.area for geometry, world, _ in parts if color_source(geometry)[0] == 'texture')
+    pbr_maps = any(getattr(getattr(geometry.visual, 'material', None), name, None) is not None
+                   for geometry, _, _ in parts for name in ('normalTexture', 'metallicRoughnessTexture'))
+    lighting = 'baked' if textured and textured_area >= 0.8 * total_area and not pbr_maps else 'shaded'
     sampled, tinted = [], []
     for geometry, world, transform in parts:
         count = max(100, int(300_000 * world.area / total_area))
@@ -227,7 +251,7 @@ def main():
         stream.write(samples.astype(np.float32).tobytes())
         stream.write(colors.tobytes())
     low, high = scene.bounds
-    print(json.dumps({'faces': int(faces), 'reduced': reduced, 'textured': bool(textured), 'colors': colour, 'up': up,
+    print(json.dumps({'faces': int(faces), 'reduced': reduced, 'textured': bool(textured), 'colors': colour, 'lighting': lighting, 'up': up,
                       'bounds': [[round(float(value), 3) for value in low], [round(float(value), 3) for value in high]],
                       'points': int(len(samples)), 'output': str(args.output)}))
 
