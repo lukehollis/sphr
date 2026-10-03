@@ -200,9 +200,10 @@ follow the builder's rules in `lib/experience/placement.ts` (never at the
 visitor's feet, open air puts it on the ground four meters out, far things grow
 up to five times). Stops aim from where they stand toward the same spot. The
 agent picks spots in photos taken from many places, so seen from the first stop
-that shows it: in a guided tour, an object well off that stop's view (more than
-60 degrees) comes into it, onto the ground a few meters ahead (a hunt keeps its
-objects where they were hidden); an object more than 18 meters away comes along
+that shows it: in a guided tour, an object toward the edge of that stop's view
+(more than 30 degrees to the side, where the tour's text covers the left on wide
+screens, or out of the frame) comes onto the ground a few meters ahead, a little
+right of center (a hunt keeps its objects where they were hidden); an object more than 18 meters away comes along
 the same line of sight onto the surface at 18 meters; and one the capture hides
 (behind a step or a wall) comes forward onto the surface in the way, or the floor
 just in front of it, which keeps every hunt object clickable from its clue. A

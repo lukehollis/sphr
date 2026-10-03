@@ -123,16 +123,20 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
         target = point.clone().add(new THREE.Vector3(0, 0.11, 0));
       };
 
-      // A guided tour shows a stop's objects: one well off its view comes into it.
+      // A guided tour shows a stop's objects: one toward the edges of its view (where the
+      // tour's text covers the left on wide screens) or out of it comes in, a little right of center.
       if (experience.kind === "tour" && stop.view.rotation) {
         const view = cameraDirection(stop.view.rotation);
         const flat = new THREE.Vector3(view.x, 0, view.z);
-        if (THREE.MathUtils.radToDeg(view.angleTo(target.clone().sub(eye))) > 60 && flat.lengthSq() > 0.01) {
+        const toward = target.clone().sub(eye);
+        const sideways = ((THREE.MathUtils.radToDeg(Math.atan2(-toward.x, -toward.z)) - stop.view.rotation.azimuth) % 360 + 540) % 360 - 180;
+        const tilt = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(toward.y / toward.length(), -1, 1))) - stop.view.rotation.polar;
+        if ((Math.abs(sideways) > 30 || Math.abs(tilt) > 28) && flat.lengthSq() > 0.01) {
           flat.normalize();
           const side = new THREE.Vector3(-flat.z, 0, flat.x);
           const index = moved.get(stop.id) ?? 0;
           moved.set(stop.id, index + 1);
-          const offset = ((index % 3) - 1) * 1.2;
+          const offset = [0.8, 2.2, -0.6][index % 3];
           for (const reach of [6, 4, 3]) {
             const ground = surfaceBelow(eye.clone().addScaledVector(flat, reach).addScaledVector(side, offset), 12);
             if (ground && visibleFrom(eye, ground.clone().add(new THREE.Vector3(0, 0.1, 0)))) { put(ground); break; }

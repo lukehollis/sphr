@@ -326,13 +326,17 @@ test('in a guided tour, objects come into the view of the stop that shows them',
   const THREE = await import('three');
   const { placeOnServer } = await import('../lib/server/tour-placement.ts');
   const shape = (id) => ({ id, name: id, source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] });
-  const stops = [{ id: 'one', title: 'One', text: 'Look ahead.', view: { nodeId: 'a', rotation: { azimuth: 0, polar: -10 } }, objects: ['behind', 'ahead'], effects: [] }];
+  const stops = [{ id: 'one', title: 'One', text: 'Look ahead.', view: { nodeId: 'a', rotation: { azimuth: 0, polar: -10 } }, objects: ['behind', 'ahead', 'aside'], effects: [] }];
   const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [{ uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, image: 'https://example.com/a.jpg' }] } } };
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   floor.updateMatrixWorld(true);
-  const anchors = { objects: { behind: { nodeId: 'a', x: 0.25, y: 0.6 }, ahead: { nodeId: 'a', x: 0.75, y: 0.6 } }, effects: {}, stops: {} };
-  const tour = placeOnServer(space, parseExperience({ version: 1, kind: 'tour', objects: [shape('behind'), shape('ahead')], effects: [], stops }), anchors, [floor]);
-  const [behind, ahead] = tour.objects;
+  // x = 0.875 is 45 degrees to the left of straight ahead (x = 0.75), under the tour's text on a wide screen.
+  const anchors = { objects: { behind: { nodeId: 'a', x: 0.25, y: 0.6 }, ahead: { nodeId: 'a', x: 0.75, y: 0.6 }, aside: { nodeId: 'a', x: 0.875, y: 0.6 } }, effects: {}, stops: {} };
+  const tour = placeOnServer(space, parseExperience({ version: 1, kind: 'tour', objects: [shape('behind'), shape('ahead'), shape('aside')], effects: [], stops }), anchors, [floor]);
+  const [behind, ahead, aside] = tour.objects;
+  const sideways = (position) => Math.atan2(position[0], -position[2]) * 180 / Math.PI;
+  assert.ok(Math.abs(sideways(aside.position)) < 30 && aside.position[2] < -3, `what was at the edge of the view comes toward its middle (${sideways(aside.position).toFixed(0)} degrees)`);
+  assert.ok(sideways(behind.position) > 0, 'a little right of center, clear of the text');
   assert.ok(behind.position[2] < -2.5 && Math.abs(behind.position[1] - 0.01) < 1e-3, `what was behind the visitor stands ahead (${behind.position.map((value) => value.toFixed(1))})`);
   assert.ok(Math.abs(Math.atan2(-behind.position[0], -behind.position[2])) < Math.PI / 4, 'inside the view');
   assert.ok(ahead.position[2] < -4 && Math.abs(ahead.position[0]) < 0.01, 'what is already in view stays where it was put');
