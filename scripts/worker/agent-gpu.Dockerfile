@@ -37,14 +37,14 @@ ENV SPHR_GPU=nvidia BLENDER=/opt/blender/blender
 # gsplat ships prebuilt CUDA kernels only for Python 3.10, so nerfstudio gets its own Python under
 # /opt/nerfstudio. The sandbox has no network, so the LPIPS backbone splatfacto loads at startup is fetched here.
 ARG UV_VERSION=0.5.11
-ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python TORCH_HOME=/opt/torch-hub
-RUN /opt/venv/bin/pip install --no-cache-dir "uv==${UV_VERSION}" \
-    && /opt/venv/bin/uv venv --python 3.10 /opt/nerfstudio \
-    && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python torch==2.4.1 torchvision==0.19.1 \
-         --index-url https://download.pytorch.org/whl/cu124 \
-    && /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python "gsplat==1.4.0+pt24cu124" nerfstudio==1.1.5 \
-         --extra-index-url https://docs.gsplat.studio/whl/pt24cu124 \
-    && /opt/nerfstudio/bin/python -c "from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as L; L(normalize=True)" \
+# The CUDA wheels are gigabytes; separate layers keep a later failure from downloading them again.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python TORCH_HOME=/opt/torch-hub UV_HTTP_TIMEOUT=900
+RUN /opt/venv/bin/pip install --no-cache-dir "uv==${UV_VERSION}" && /opt/venv/bin/uv venv --python 3.10 /opt/nerfstudio
+RUN /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python torch==2.4.1 torchvision==0.19.1 \
+      --index-url https://download.pytorch.org/whl/cu124
+RUN /opt/venv/bin/uv pip install --no-cache --python /opt/nerfstudio/bin/python "gsplat==1.4.0+pt24cu124" nerfstudio==1.1.5 \
+      --extra-index-url https://docs.gsplat.studio/whl/pt24cu124
+RUN /opt/nerfstudio/bin/python -c "from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as L; L(normalize=True)" \
     && for tool in ns-train ns-export ns-render ns-eval; do ln -s /opt/nerfstudio/bin/$tool /usr/local/bin/$tool; done \
     && chmod -R a+rX /opt/uv-python /opt/nerfstudio /opt/torch-hub
 USER node
