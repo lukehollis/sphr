@@ -106,6 +106,15 @@ geometry. Never tune settings by an evaluation number alone.
 
 ## 4. Adopt one and package it
 
+First drop the splats no camera could see, which only show up as junk away from the capture path:
+
+```sh
+/opt/venv/bin/python scripts/packages/clean_splat.py --input <adopted.ply> --output splat-final.ply --model data/sparse/0
+```
+
+It leaves everything the cameras saw untouched (held-out renders match the uncleaned splat to within JPEG
+noise). Do not strip large faint splats by hand: together they make up the sky and distant walls.
+
 Package the adopted PLY with the cameras it was trained from, as sphr-video describes
 (`build-splat.mjs --input <ply> --cameras "$SPHR_JOB_DIR/work/data/sparse/0"`), and check that the output's
 `start.kind` is `orbit` or `walkthrough`. `ignored` means the splat's axes moved; for splatfacto that means
