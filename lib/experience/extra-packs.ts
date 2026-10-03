@@ -1,10 +1,10 @@
-import type { Pack } from "./registry";
+import spacery from "@/lib/experience/spacery/pack";
+import type { Pack } from "@/lib/experience/registry";
 
 /**
- * Packs beyond core. A deployment lists its own here, for example
- * `import studio from "./studio"; export default [studio];`.
- * Each pack is a list of effect and shape metadata with lazy loaders.
+ * Packs beyond core. app.spacery.dev adds its own effects and collectibles;
+ * the open source repository keeps this list empty.
  */
-const extraPacks: Pack[] = [];
+const extraPacks: Pack[] = [spacery];
 
 export default extraPacks;
