@@ -1,3 +1,5 @@
+import type { EffectInstance, ExperienceKind, PlacedObject, StopFind } from "@/lib/experience/types";
+
 export type Vector3Like = {
   x: number;
   y: number;
@@ -54,6 +56,11 @@ export type SplatConfig = TransformConfig & {
   lod?: boolean | "quality";
   opacity?: number;
   reveal?: boolean;
+  /**
+   * "sketch" marks a companion splat trained on line drawings of the same photos.
+   * It stays hidden until a sketch effect reveals it.
+   */
+  role?: "color" | "sketch";
 };
 
 export type IiifConfig = TransformConfig & {
@@ -83,6 +90,16 @@ export type MediaFile = {
 };
 
 export type TourPoint = {
+  /** Short stop name, shown in editors and above hunt clues. */
+  title?: string;
+  /** "plain" text is shown as paragraphs, never parsed as HTML. */
+  format?: "plain" | "html";
+  /** Placed objects shown at this stop (see TourData.objects). */
+  objects?: string[];
+  /** Effects running at this stop (see TourData.effects). */
+  effects?: string[];
+  /** Scavenger hunt: the object to find at this step. */
+  find?: StopFind;
   mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
@@ -110,6 +127,9 @@ export type TourPoint = {
 
 export type TourSpace = {
   id?: string | number;
+  /** Objects and effects for this space; the tour-level lists belong to the first space. */
+  objects?: PlacedObject[];
+  effects?: EffectInstance[];
   mpid?: string;
   slug?: string;
   title?: string;
@@ -120,6 +140,14 @@ export type TourSpace = {
 export type TourData = {
   /** Generated scan waypoints can support navigation without offering a guided tour. */
   mode?: "guided" | "explore";
+  /** A guided tour, or a scavenger hunt whose steps ask visitors to find objects. */
+  kind?: ExperienceKind;
+  /** Custom 3D objects placed in the space. */
+  objects?: PlacedObject[];
+  /** Visual effects from installed packs. */
+  effects?: EffectInstance[];
+  /** Shown after the last tour stop, or when every hunt item is found. */
+  finale?: string;
   audio?: Record<string, AudioConfig>;
   autoplay?: boolean;
   defaultShowText?: boolean;
@@ -307,6 +335,10 @@ export type SphrBootstrap = {
 
 export type NormalizedTour = {
   hasGuidedTour: boolean;
+  kind: ExperienceKind;
+  objects: PlacedObject[];
+  effects: EffectInstance[];
+  finale?: string;
   title: string;
   spaces: TourSpace[];
   audio: Record<string, AudioConfig>;
@@ -335,9 +367,19 @@ export type RuntimeState = {
   navigating: boolean;
   activeNodeId?: string;
   navigationError?: string;
+  /** The visitor reached the end of the tour or hunt; the closing card shows. */
+  finished?: boolean;
+  /** Scavenger hunt progress: IDs of found objects, and whether this step's object is found. */
+  hunt?: { found: string[]; stepFound: boolean; hint: boolean };
 };
+
+export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };
 
 export type RuntimeCallbacks = {
   onState?: (state: RuntimeState) => void;
   onLoading?: (loading: LoadingState) => void;
+  /** Editor: an object was selected in the scene (null clears). */
+  onObjectSelect?: (id: string | null) => void;
+  /** Editor: the gizmo moved, turned or scaled an object. */
+  onObjectTransform?: (id: string, transform: ObjectTransform) => void;
 };

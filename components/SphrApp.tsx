@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
-import type { RuntimeState, SphrBootstrap } from "@/lib/types";
+import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from "@/lib/types";
 import { ViewerSession } from "@/lib/viewer/ViewerSession";
 import HudControls from "@/components/HudControls";
 import LoadingScreen from "@/components/LoadingScreen";
-import TourOverlay from "@/components/TourOverlay";
-import { applySceneEdits, editorBootstrap, startViewEditingIssue, type SceneEdits } from '@/lib/scene-edits';
+import TourOverlay, { TourFinale } from "@/components/TourOverlay";
+import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type SceneEdits } from '@/lib/scene-edits';
+import type { Experience } from "@/lib/experience/types";
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -26,11 +27,26 @@ const initialRuntimeState: RuntimeState = {
 };
 
 type Props = { configUrl?: string; preview?: { title: string; image: string };
-  edits?: Pick<SceneEdits, 'title' | 'startView'>;
-  editor?: { onReady: (session: ViewerSession | null, issue: string | null) => void; onState: (state: RuntimeState) => void };
+  edits?: Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null };
+  editor?: {
+    onReady: (session: ViewerSession | null, issue: string | null) => void;
+    onState: (state: RuntimeState) => void;
+    /** "tour" opens the tour builder: objects can be selected and moved. */
+    mode?: "start" | "tour";
+    onObjectSelect?: (id: string | null) => void;
+    onObjectTransform?: RuntimeCallbacks["onObjectTransform"];
+  };
+  /** The tour builder shows visitor controls only while previewing. */
+  chrome?: boolean;
+  /** Bumped by the tour builder after live edits so overlays re-read the tour. */
+  revision?: number;
 };
 
-export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
+function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, state: RuntimeState) {
+  return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
+}
+
+export default function SphrApp({ configUrl, preview, edits, editor, chrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -47,14 +63,17 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
       try {
         const source = await loadBootstrapData(configUrl);
         const edited = edits ? applySceneEdits(source, edits) : source;
-        const issue = editor ? startViewEditingIssue(edited) : null;
-        const data = editor ? editorBootstrap(edited) : edited;
+        const tourEditor = editor?.mode === "tour";
+        const issue = editor && !tourEditor ? startViewEditingIssue(edited) : null;
+        const data = tourEditor ? tourEditorBootstrap(edited) : editor ? editorBootstrap(edited) : edited;
         if (cancelled) return;
         setBootstrap(data);
 
         if (!viewportRef.current) return;
         const runtime = new ViewerSession(viewportRef.current, data, {
           onState: state => { setRuntimeState(state); editor?.onState(state); },
+          onObjectSelect: editor?.onObjectSelect,
+          onObjectTransform: editor?.onObjectTransform,
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
           }
@@ -63,6 +82,7 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
         if (process.env.NODE_ENV !== "production") {
           (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__ = runtime;
         }
+        if (tourEditor) runtime.setEditing(true);
         await runtime.init();
         if (cancelled) return;
         runtime.start(normalizeTour(data).hasGuidedTour);
@@ -97,7 +117,11 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
     };
   }, [configUrl, edits, editor]);
 
-  const tour = useMemo(() => (bootstrap ? normalizeTour(bootstrap) : null), [bootstrap]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tour = useMemo(() => (bootstrap ? normalizeTour(bootstrap) : null), [bootstrap, revision]);
+  const hunt = tour?.kind === "hunt" ? tour : null;
+  const huntSteps = hunt ? hunt.spaces.flatMap((space) => space.tourpoints).filter((point) => point.find) : [];
+  const huntStep = hunt && activePointOf(hunt, runtimeState) ? huntSteps.indexOf(activePointOf(hunt, runtimeState)!) + 1 : 0;
   const activePoint = tour?.spaces[runtimeState.activeSpaceIndex]?.tourpoints[runtimeState.activePointIndex] ?? null;
   const activeSpace = tour?.spaces[runtimeState.activeSpaceIndex] ?? null;
   const viewerSpace = bootstrap?.orderedSpaces?.find(space => String(space.id) === String(activeSpace?.id)) ?? bootstrap?.space;
@@ -117,7 +141,13 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
       />
 
       {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
-      {started && activePoint && (
+      {started && chrome && runtimeState.finished && (tour?.finale || hunt) && <TourFinale
+        text={tour?.finale}
+        hunt={hunt ? { found: runtimeState.hunt?.found.length ?? 0, steps: huntSteps.length } : undefined}
+        onExplore={() => runtimeRef.current?.dismissFinale()}
+        onRestart={() => { runtimeRef.current?.restartHunt(); runtimeRef.current?.dismissFinale(); runtimeRef.current?.start(true); void runtimeRef.current?.goTo(0, 0); }}
+      />}
+      {started && chrome && activePoint && (
         <>
           <HudControls
             title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
@@ -137,6 +167,7 @@ export default function SphrApp({ configUrl, preview, edits, editor }: Props) {
             isLastPoint={isLastPoint}
             onPrevious={() => runtimeRef.current?.previous()}
             onNext={() => runtimeRef.current?.next()}
+            hunt={hunt && activePoint.find ? { step: Math.max(1, huntStep), steps: huntSteps.length, onHint: () => runtimeRef.current?.requestHint() } : undefined}
           />}
         </>
       )}
