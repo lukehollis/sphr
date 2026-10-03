@@ -230,3 +230,60 @@ test('an agent draft keeps going when a model it names is not in the library', (
   assert.match(result.reply, /One object could not be placed/);
   assert.throws(() => parseExperience({ ...tour(), objects: [{ id: 'x', name: 'X', source: { kind: 'model' }, position: [0, 0, 0] }] }), ExperienceError, 'saved tours are still strict');
 });
+
+test('agents search the whole library and name models by ID', async () => {
+  const { searchLibrary, describeModel } = await import('../lib/experience/library-search.ts');
+  const library = [
+    { id: 'amphora-red', name: 'Red-figure amphora', category: 'Ancient Greece', pack: 'Greek pottery', url: 'https://cdn.example/amphora.glb', height: 0.9, tags: ['vase'] },
+    { id: 'athena', name: 'Statue of Athena', category: 'Ancient Greece', url: 'https://cdn.example/athena.glb', height: 2.4, tags: ['statue', 'goddess'] },
+    { id: 'lamp', name: 'Oil lamp', category: 'Ancient Rome', url: 'https://cdn.example/lamp.glb', height: 0.1, tags: ['light'] },
+    { id: 'statue-horse', name: 'Horse statue', category: 'Ancient Rome', url: 'https://cdn.example/horse.glb', height: 2, tags: ['animal'] },
+    { id: 'cat', name: 'Temple cat', category: 'Animals', url: 'https://cdn.example/cat.glb', height: 0.3, animations: ['idle', 'walk', 7] }
+  ];
+  assert.deepEqual(searchLibrary(library, 'statues').map((model) => model.id), ['athena', 'statue-horse'], 'plurals match and names rank first');
+  assert.deepEqual(searchLibrary(library, 'roman horse statue').map((model) => model.id).slice(0, 1), ['statue-horse'], 'models matching every word lead');
+  assert.deepEqual(searchLibrary(library, 'lamp').map((model) => model.id), ['lamp'], 'an exact ID comes first');
+  assert.deepEqual(searchLibrary(library, 'the and please'), [], 'words without meaning find nothing');
+  assert.equal(searchLibrary(library, 'ancient', 2).length, 2);
+  assert.equal(describeModel(library[0]), 'amphora-red: Red-figure amphora (Ancient Greece, Greek pottery), about 0.9 m tall at scale 1, vase');
+  assert.equal(describeModel(library[4]), 'cat: Temple cat (Animals), about 0.3 m tall at scale 1, animated: idle, walk', 'agents see which models move');
+  const raw = resolveLibraryCodes({ objects: [{ id: 'a', source: { kind: 'model', url: 'athena' } }, { id: 'b', source: { kind: 'model', url: 'library:lamp' } },
+    { id: 'c', source: { kind: 'model', url: 'not-a-model' } }] }, new Map(), library);
+  assert.deepEqual(raw.objects.map((object) => object.source.url), ['https://cdn.example/athena.glb', 'https://cdn.example/lamp.glb', 'not-a-model']);
+});
+
+test('agent drafts are placed on the server where their pixels meet the floor', async () => {
+  const { placeOnServer } = await import('../lib/server/tour-placement.ts');
+  const experience = parseExperience({ version: 1, kind: 'tour', objects: [
+    { id: 'near', name: 'Near', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    { id: 'sky', name: 'Sky', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    { id: 'far', name: 'Far', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+  ], effects: [{ id: 'glow', type: 'beacon', target: { kind: 'point', position: [0, 0, 0] }, params: {} }],
+  stops: [{ id: 'one', title: 'One', text: 'Hi', view: { nodeId: 'b' }, objects: ['near'], effects: ['glow'] }] });
+  const space = { space: { id: 'space', title: 'Space', type: 'spaces', space_data: { nodes: [
+    { uuid: 'a', position: { x: 0, y: 1.5, z: 0 }, image: 'https://example.com/a.jpg' }, { uuid: 'b', position: { x: 4, y: 1.5, z: 0 }, image: 'https://example.com/b.jpg' }] } } };
+  const below = { nodeId: 'a', x: 0.25, y: 0.6 };
+  const placed = placeOnServer(space, experience, { objects: { near: below, sky: { nodeId: 'a', x: 0.25, y: 0.2 }, far: { nodeId: 'a', x: 0.25, y: 0.5175 } },
+    effects: { glow: below }, stops: { one: below } });
+  const reach = (position) => Math.hypot(position[0], position[2]);
+  const [near, sky, far] = placed.objects;
+  assert.ok(Math.abs(near.position[1]) < 1e-6 && Math.abs(reach(near.position) - 1.5 / Math.tan(Math.PI * 0.1)) < 0.01, 'on the floor where the ray lands');
+  assert.deepEqual(near.scale, [1, 1, 1]);
+  assert.ok(Math.abs(reach(sky.position) - 4) < 1e-6 && Math.abs(sky.position[1]) < 1e-6, 'pointing up stands it a few meters out');
+  assert.ok(Math.abs(reach(far.position) - 25) < 1e-6 && far.scale[0] === 5, 'never across the valley, and grown to be seen');
+  assert.equal(near.rotation[1], sky.rotation[1], 'turned along the ray');
+  assert.ok(Math.abs(placed.effects[0].target.position[1] - 0.5) < 1e-6, 'point effects float just above the spot');
+  const aim = placed.stops[0].view.rotation;
+  const toward = Math.atan2(-(near.position[0] - 4), -near.position[2]) * 180 / Math.PI;
+  assert.ok(Math.abs(aim.azimuth - toward) < 0.1 && aim.polar < 0, 'a stop elsewhere looks toward the same spot');
+});
+
+test('agents learn the looks, effects and sounds a site has', async () => {
+  const { experienceCatalog } = await import('../lib/experience/catalog.ts');
+  const catalog = experienceCatalog();
+  assert.ok(['lines', 'watercolor', 'blueprint', 'noir'].every((id) => catalog.looks.some((look) => look.id === id)));
+  assert.deepEqual(catalog.transitions, ['cut', 'fade', 'dissolve', 'wipe', 'iris', 'sweep', 'glitch']);
+  assert.ok(!catalog.effects.some((effect) => effect.type === 'sketch'), 'retired effects are left out');
+  assert.match(catalog.looks.find((look) => look.id === 'lines').params.join(' '), /weight 0\.6\.\.3 default 1\.3/);
+  assert.ok(catalog.sounds.some((sound) => sound.id === 'calm' && sound.kind === 'music'));
+});

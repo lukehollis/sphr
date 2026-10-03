@@ -5,7 +5,9 @@ import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
 import { effectEntries, lookEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
+import { paramSummary } from "@/lib/experience/catalog";
 import { LOOK_TRANSITIONS } from "@/lib/experience/types";
+import { describeModel, searchLibrary } from "@/lib/experience/library-search";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience } from "@/lib/experience/types";
 import type { NodeData, SphrBootstrap } from "@/lib/types";
@@ -136,16 +138,20 @@ export function pickLibrary(library: LibraryModel[], prompt: string, draft: Expe
   return { listed, codes, counts: [...seen] };
 }
 
-/** Swap library codes in the agent's draft back to model URLs. */
-export function resolveLibraryCodes(raw: RawDraft, codes: Map<string, string>) {
+/** Swap library codes, or model IDs found with search_models, in the agent's draft back to model URLs. */
+export function resolveLibraryCodes(raw: RawDraft, codes: Map<string, string>, library: LibraryModel[] = []) {
+  const byId = new Map(library.map((model) => [model.id, model.url]));
   for (const object of raw.objects ?? []) {
     const source = object.source as Record<string, unknown> | undefined;
-    if (source?.kind === "model" && typeof source.url === "string" && codes.has(source.url.trim())) source.url = codes.get(source.url.trim());
+    if (source?.kind !== "model" || typeof source.url !== "string") continue;
+    const key = source.url.trim().replace(/^library:/, "");
+    if (codes.has(key)) source.url = codes.get(key);
+    else if (byId.has(key)) source.url = byId.get(key);
   }
   return raw;
 }
 
-export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "") {
+export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "", drawn: string[] = []) {
   const space = bootstrap.space;
   const data = space.space_data;
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
@@ -177,11 +183,14 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
-    `Effects you can use:\n${effectEntries().filter((entry) => !entry.retired).map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : param.type === "sound" ? `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
+    `Effects you can use:\n${effectEntries().filter((entry) => !entry.retired).map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map(paramSummary).join(", ")}.`).join("\n")}`,
     `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
-    `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.` : ""}`).join("\n")}`,
+    drawn.length
+      ? `Drawn versions: a line-drawing model has redrawn this space (${drawn.join(", ")}), so the ${drawn.includes("watercolor") ? "line drawing, blueprint and watercolor looks show" : "line drawing and blueprint looks show"} real drawings of it and transitions reveal between drawing and photograph.`
+      : "Drawn versions: none yet, so the line drawing, blueprint and watercolor looks trace the frame's edges instead, which suits strong architectural edges best.",
+    `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map(paramSummary).join(", ")}.` : ""}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
-    library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
+    library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model, or a model ID from search_models when you have that tool). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
     `Current draft:\n${JSON.stringify(draft)}`
   ].filter(Boolean);
   return { text: lines.join("\n\n"), images, library, codes: picked.codes };
@@ -197,6 +206,8 @@ Placing things. You see photographs of the space. To aim a stop's camera or to p
 Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues describe where to look without naming the exact spot; hints are more direct; found messages reward the visitor with one real detail about the place. Hunt steps should start from a location where the object is reachable but not in the middle of the view.
 
 Sound. A little sound goes a long way: background music or an ambient bed fitting the place (a music effect, always or on chosen stops), and a few sound effects tied to moments. Hunt finds and hints already chime.
+
+Models. Prefer a library model to a plain shape whenever one fits: an amphora, a statue, a lantern, a chest, a column. If you have the search_models tool, search the whole library for what you need (several short searches beat one long one) and use a result's ID as the model's url. When the person gives the address of a model of their own (an https .glb, such as one they made in Blender and uploaded to the tour), use that address as the url. Models are sized in meters at scale 1, so a 0.9 m amphora at scale 1 is life size; scale only to make a point (a giant key, a tiny temple model).
 
 Looks. A look restyles the whole frame, like a filter in a video editor: a line drawing, a blueprint, film noir, night vision and more. Set "style" on the tour for its overall look, or on a stop to change the look there, with a transition: cut, fade, dissolve, wipe, iris (opens from what the stop is about), sweep (opens through the space like a scan) or glitch, and a duration in seconds. A stop without "style" keeps the tour's look; give a stop {"look": "color"} to return to the capture itself. Use looks to mark moments and moods (a line drawing that sweeps into color, a blueprint for how a building was planned, noir for a mystery), not on every stop.
 
@@ -366,10 +377,18 @@ function userContent(context: { text: string; images: AgentImage[] }, history: A
   return content;
 }
 
-async function viaApi(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, check: (raw: RawDraft) => void): Promise<RawDraft> {
+const SEARCH_MODELS = {
+  name: "search_models",
+  description: "Search the whole model library by what you need (for example \"bronze statue\", \"canopic jar\", \"wooden chest\"). Returns model IDs to use as a model's url, with names, kinds and heights.",
+  input_schema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] }
+};
+
+async function viaApi(context: { text: string; images: AgentImage[]; library?: LibraryModel[] }, history: AgentTurn[], prompt: string, check: (raw: RawDraft) => void): Promise<RawDraft> {
   const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: userContent(context, history, prompt) as Anthropic.Beta.BetaContentBlockParam[] }];
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const library = context.library ?? [];
+  let searches = 0;
+  for (let attempt = 0; attempt < 3 + searches; attempt += 1) {
     const stream = client.beta.messages.stream({
       model: TOUR_AGENT_MODEL,
       max_tokens: 32000,
@@ -378,7 +397,7 @@ async function viaApi(context: { text: string; images: AgentImage[] }, history: 
       thinking: { type: "adaptive" },
       output_config: { effort: "medium" },
       system: SYSTEM,
-      tools: [WRITE_TOUR as Anthropic.Beta.BetaTool],
+      tools: [WRITE_TOUR as Anthropic.Beta.BetaTool, ...(library.length ? [SEARCH_MODELS as Anthropic.Beta.BetaTool] : [])],
       tool_choice: { type: "auto" },
       messages
     });
@@ -387,6 +406,16 @@ async function viaApi(context: { text: string; images: AgentImage[] }, history: 
     if (message.stop_reason === "max_tokens") throw new TourAgentError("The draft ran too long. Ask for fewer stops or less text.");
     const call = message.content.find((block): block is Anthropic.Beta.BetaToolUseBlock => block.type === "tool_use" && block.name === "write_tour");
     messages.push({ role: "assistant", content: message.content as Anthropic.Beta.BetaContentBlockParam[] });
+    const lookups = message.content.filter((block): block is Anthropic.Beta.BetaToolUseBlock => block.type === "tool_use" && block.name === "search_models");
+    if (!call && lookups.length && searches < 12) {
+      searches += 1;
+      messages.push({ role: "user", content: lookups.map((lookup) => {
+        const input = lookup.input as { query?: unknown; limit?: unknown };
+        const found = searchLibrary(library, String(input.query ?? ""), typeof input.limit === "number" ? input.limit : 16);
+        return { type: "tool_result" as const, tool_use_id: lookup.id, content: found.length ? found.map(describeModel).join("\n") : "No models match. Try other words, or use a shape." };
+      }) });
+      continue;
+    }
     if (!call) {
       messages.push({ role: "user", content: "Call write_tour with the complete draft." });
       continue;
@@ -488,17 +517,19 @@ export function extractJson(output: string): RawDraft {
 
 export async function composeTour(options: {
   bootstrap: SphrBootstrap; draft: Experience; prompt: string; history: AgentTurn[]; views: ClientView[]; origin: string; kind: "tour" | "hunt"; team?: boolean;
+  /** Drawn versions of the space (from its variants manifest or companion splats), such as contour and watercolor. */
+  drawn?: string[];
 }): Promise<AgentResult & { library: LibraryModel[] }> {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
-  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt);
+  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
-  const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes), options.draft, nodeIds); };
+  const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
     ? await viaApi(context, options.history, prompt, check)
     : process.env.SPHR_TOUR_AGENT_URL?.trim()
       ? await viaService(context, options.history, prompt)
       : await viaCommand(context, options.history, prompt);
-  return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes), options.draft, nodeIds), library: context.library };
+  return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds), library: context.library };
 }

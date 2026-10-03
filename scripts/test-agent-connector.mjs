@@ -6,16 +6,18 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import Stripe from 'stripe';
 import { fakeIdentityProvider, fakeStripe, listen, smtpSink } from './test-support/fake-services.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+assert.ok(!existsSync(path.join(root, 'public/datasets')), 'Run this in a checkout without local capture packages; it creates and removes public/datasets.');
 const state = mkdtempSync(path.join(tmpdir(), 'sphr-agent-connector-'));
 const connectorHome = path.join(state, 'connector-home');
 const captures = path.join(state, 'captures');
@@ -39,6 +41,10 @@ const teamHook = await listen(async (request, response) => {
   response.end();
 });
 const signer = new Stripe('sk_test_signer');
+mkdirSync(path.join(state, 'library'));
+writeFileSync(path.join(state, 'library/index.json'), JSON.stringify({ models: [
+  { id: 'tripod-bronze', name: 'Bronze tripod', category: 'Ancient Greece', url: 'https://models.example/tripod.glb', height: 1.2, tags: ['delphi', 'oracle'] },
+  { id: 'goat', name: 'Sacred goat', category: 'Animals', url: 'https://models.example/goat.glb', height: 0.8, animations: ['Idle', 'Walk'] }] }));
 
 const env = { ...process.env, SPHR_BUILD_DIR: '.next-agent-test', SPHR_PUBLIC_URL: base, SPHR_STATE_DIR: state,
   SPHR_ACCESS_CONTROL: '1', SPHR_ACCOUNTS: '1', SPHR_CATALOG_URL: '', SPHR_ASSET_BASE_URL: '', NEXT_PUBLIC_SPHR_ASSET_BASE_URL: '',
@@ -46,7 +52,8 @@ const env = { ...process.env, SPHR_BUILD_DIR: '.next-agent-test', SPHR_PUBLIC_UR
   SPHR_OAUTH_TEST_BASE: idpServer.base, SPHR_GOOGLE_CLIENT_ID: clients.google.id, SPHR_GOOGLE_CLIENT_SECRET: clients.google.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_WORKER_TOKEN: randomBytes(24).toString('hex'),
-  SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '', SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/hook` };
+  SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '', SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/hook`,
+  SPHR_LIBRARY_FILE: path.join(state, 'library/index.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
 delete env.NODE_ENV;
 for (const name of ['SPHR_APPLE_CLIENT_ID', 'SPHR_LINKEDIN_CLIENT_ID']) delete env[name];
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -63,6 +70,7 @@ async function cleanup() {
   await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
   for (const server of [stripeServer.server, idpServer.server, mail.server, teamHook.server]) server.close();
   rmSync(state, { recursive: true, force: true });
+  rmSync(path.join(root, 'public/datasets'), { recursive: true, force: true });
   rmSync(path.join(root, '.next-agent-test'), { recursive: true, force: true });
   for (const [name, content] of Object.entries(generated)) writeFileSync(path.join(root, name), content);
 }
@@ -151,7 +159,8 @@ try {
   assert.match(init.result.instructions, /Example Spaces hosts 3D captures/);
   connector.notify('notifications/initialized');
   const listed = (await connector.rpc('tools/list', {})).result.tools.map(tool => tool.name);
-  assert.deepEqual(listed, ['link_account', 'check_files', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'space_status', 'set_visibility', 'unlink_account']);
+  assert.deepEqual(listed, ['link_account', 'check_files', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'space_status', 'set_visibility', 'unlink_account',
+    'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'upload_model', 'share_tour']);
   assert.equal((await connector.rpc('nonsense/method', {})).error.code, -32601);
   assert.equal((await connector.rpc('prompts/list', {})).result.prompts[0].name, 'publish_capture');
   let result = await connector.call('space_status');
@@ -261,6 +270,60 @@ try {
   result = await connector.call('upload_files', { space_id: spaceId, paths: [path.join(captures, 'Riverside studio')] });
   assert.ok(result.error && /being processed/.test(result.text));
 
+  // ---- A tour of one of the operator's public spaces, with a model made in Blender ----
+  const court = path.join(root, 'public/datasets/legacy/temple-court');
+  mkdirSync(court, { recursive: true });
+  writeFileSync(path.join(court, 'bootstrap.json'), JSON.stringify({ space: { id: '0b0b0b0b0b01', title: 'Temple court', type: 'spaces',
+    space_data: { nodes: [{ uuid: 'court-1', label: 'Altar', position: { x: 0, y: 1.5, z: 0 }, image: '/datasets/legacy/temple-court/pano.jpg' }] } } }));
+  writeFileSync(path.join(root, 'public/datasets/legacy/index.json'), JSON.stringify({ spaces: [{ sceneId: '0b0b0b0b0b01', titleSlug: 'temple-court',
+    scenePath: '/s/0b0b0b0b0b01/temple-court', slug: 'temple-court', title: 'Temple court', bootstrapUrl: '/datasets/legacy/temple-court/bootstrap.json',
+    thumbnail: '/datasets/legacy/temple-court/preview.jpg', nodeCount: 1, createdAt: '2026-01-01', sourceType: 'panoramas' }] }));
+  new DatabaseSync(path.join(state, 'admin.sqlite')).prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run('0b0b0b0b0b01', 1);
+  result = await connector.call('find_tour_spaces', { query: 'temple' });
+  assert.equal(result.text, '0b0b0b0b0b01: Temple court (Example Spaces space, 1 places to stand)');
+  assert.match((await connector.call('find_tour_spaces', { query: 'volcano' })).text, /No spaces match/);
+  result = await connector.call('create_tour', { scene_id: '0b0b0b0b0b01', kind: 'tour', title: 'The oracle' });
+  assert.ok(!result.error, result.text);
+  const tourId = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
+  assert.match(result.text, /"The oracle" \(tour_id [a-f0-9]{12}\), a guided tour with 0 stops, private/);
+  result = await connector.call('draft_tour', { tour_id: tourId, request: 'A short tour of the altar' });
+  assert.ok(result.error && /No agent is set up/.test(result.text), 'without a tour agent on the site, drafting says so');
+  result = await connector.call('get_tour', { tour_id: tourId });
+  assert.match(result.text, /Revision 0\. Experience JSON/);
+  assert.match(result.text, /^blueprint \(Blueprint\): /m, 'get_tour lists the looks');
+  assert.match(result.text, /transition": one of cut, fade, dissolve, wipe, iris, sweep, glitch/);
+  assert.match(result.text, /^music \(Background music\): .* Params track /m);
+  result = await connector.call('search_models', { query: 'oracle' });
+  assert.equal(result.text, 'Bronze tripod (Ancient Greece), about 1.2 m tall at scale 1: url https://models.example/tripod.glb');
+  assert.match((await connector.call('search_models', { query: 'goat' })).text, /^Sacred goat \(Animals\), about 0\.8 m tall at scale 1, animated: Idle, Walk: url /);
+  // A model exported from Blender as glTF Binary.
+  const gltf = Buffer.from(JSON.stringify({ asset: { version: '2.0', generator: 'Khronos glTF Blender I/O' }, meshes: [{ name: 'Tripod', primitives: [] }] }).padEnd(96, ' '));
+  const model = Buffer.alloc(20 + gltf.length);
+  model.writeUInt32LE(0x46546c67, 0); model.writeUInt32LE(2, 4); model.writeUInt32LE(model.length, 8); model.writeUInt32LE(gltf.length, 12); model.writeUInt32LE(0x4e4f534a, 16);
+  gltf.copy(model, 20);
+  writeFileSync(path.join(captures, 'tripod.glb'), model);
+  writeFileSync(path.join(captures, 'tripod.blend'), 'BLENDER');
+  assert.match((await connector.call('upload_model', { tour_id: tourId, path: path.join(captures, 'tripod.blend') })).text, /Upload a \.glb file/);
+  result = await connector.call('upload_model', { tour_id: tourId, path: path.join(captures, 'tripod.glb') });
+  assert.ok(!result.error, result.text);
+  const tripodUrl = result.text.match(/url (\/api\/tour-files\/\S+\.glb)/)[1];
+  assert.ok(Buffer.from(await (await fetch(base + tripodUrl)).arrayBuffer()).equals(model), 'the uploaded model is served as it was sent');
+  result = await connector.call('save_tour', { tour_id: tourId, experience: { version: 1, kind: 'tour', look: { look: 'lines', transition: 'sweep', duration: 2 },
+    objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: tripodUrl }, position: [0, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    effects: [], stops: [{ id: 'altar', title: 'The altar', text: 'The oracle sat here.', format: 'plain', view: { nodeId: 'court-1', rotation: { azimuth: 0, polar: -5 } },
+      look: { look: 'color', transition: 'iris' }, objects: ['tripod'], effects: [] }] } });
+  assert.ok(!result.error, result.text);
+  assert.match(result.text, /^Saved\. "The oracle" .* with 1 stop on "Temple court"/);
+  result = await connector.call('save_tour', { tour_id: tourId, experience: { version: 1, kind: 'tour', objects: [], effects: [],
+    stops: [{ id: 'nowhere', title: 'Lost', text: 'Nowhere.', view: { nodeId: 'not-a-location' }, objects: [], effects: [] }] } });
+  assert.ok(result.error, 'stops must stand in the space');
+  result = await connector.call('wait_for_tour', { tour_id: tourId });
+  assert.match(result.text, /Stops: 1\. The altar \[look color\]\. Objects: Bronze tripod\. Effects: none\. Look: lines\./);
+  result = await connector.call('share_tour', { tour_id: tourId, public: true });
+  assert.match(result.text, new RegExp(`shared at ${base}/t/${tourId}/the-oracle`));
+  assert.ok((await (await fetch(`${base}/t/${tourId}/the-oracle`)).text()).includes(tripodUrl), 'anyone with the link sees the tour and its model');
+  assert.match((await connector.call('list_tours')).text, /"The oracle" .* shared at/);
+
   // ---- The account page lists the agent; unlinking there or from the agent revokes it ----
   const agents = await (await alice.get('/api/account/agents')).json();
   assert.equal(agents.agents.length, 1);
@@ -307,7 +370,8 @@ try {
   const museSession = { 'Mcp-Session-Id': sessionId };
   assert.equal((await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' }, museSession)).response.status, 202);
   reply = await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, museSession);
-  assert.deepEqual(reply.body.result.tools.map(item => item.name), ['link_account', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'finish_upload', 'space_status', 'set_visibility', 'unlink_account']);
+  assert.deepEqual(reply.body.result.tools.map(item => item.name), ['link_account', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'finish_upload', 'space_status', 'set_visibility', 'unlink_account',
+    'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'share_tour']);
   assert.equal((await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { 'Mcp-Session-Id': 'x'.repeat(32) })).response.status, 404, 'unknown sessions re-initialize');
   assert.equal((await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { Authorization: 'Bearer nope' })).response.status, 401);
   assert.ok((await tool('space_status', {}, museSession)).error, 'nothing works before linking');
@@ -332,6 +396,22 @@ try {
   await webhook({ id: 'evt_bob_paid', type: 'checkout.session.completed', data: { object: { id: bobSession.id } } });
   assert.match((await tool('wait_for_payment', { space_id: harbor }, museSession)).text, /Payment received/);
   assert.match((await tool('space_status', { space_id: harbor }, museSession)).text, new RegExp(`drop files at ${base}/account/spaces/${harbor}`));
+  // Tours from the cloud: the same tools, with models by address.
+  assert.match((await tool('find_tour_spaces', { query: 'court' }, museSession)).text, /^0b0b0b0b0b01: Temple court \(SPHR space, 1 places to stand\)$/);
+  result = await tool('create_tour', { scene_id: '0b0b0b0b0b01', kind: 'hunt', title: 'Offerings' }, museSession);
+  const cloudTour = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
+  assert.match(result.text, /a scavenger hunt with 0 clues/);
+  assert.match((await tool('search_models', { query: 'tripod' }, museSession)).text, /url https:\/\/models\.example\/tripod\.glb/);
+  assert.match((await tool('get_tour', { tour_id: cloudTour }, museSession)).text, /^noir \(Film noir\): /m);
+  result = await tool('save_tour', { tour_id: cloudTour, experience: { version: 1, kind: 'hunt', finale: 'All found.',
+    objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: 'https://models.example/tripod.glb' }, position: [1, 0, -2], rotation: [0, 0, 0], scale: [0.3, 0.3, 0.3] }],
+    effects: [], stops: [{ id: 'clue', title: 'By the altar', text: 'Something bronze hides near the altar.', format: 'plain', view: { nodeId: 'court-1' }, objects: ['tripod'], effects: [],
+      find: { objectId: 'tripod', hint: 'Look left.', found: 'Tripods held offerings.' } }] } }, museSession);
+  assert.ok(!result.error, result.text);
+  assert.match((await tool('wait_for_tour', { tour_id: cloudTour }, museSession)).text, /Stops: 1\. By the altar/);
+  assert.match((await tool('share_tour', { tour_id: cloudTour, title: 'Offerings at the altar' }, museSession)).text, /"Offerings at the altar".*private/);
+  assert.match((await tool('list_tours', {}, museSession)).text, /Offerings at the altar/);
+  assert.ok((await tool('draft_tour', { tour_id: cloudTour, request: 'Add two more clues' }, museSession)).error);
 
   // Without a session, the agent keeps the token itself and sends it as a bearer token.
   result = await tool('link_account', {});
@@ -373,8 +453,8 @@ try {
     && field(embed, 'From') === 'Their agent' && /^2 files, 18 MB$/.test(field(embed, 'Files'))));
   assert.equal(teamMessages.filter(embed => embed.title === 'New subscription').length, 2, 'Alice and Bob each subscribed once');
 
-  console.log('Agent connector: linking, plans, Checkout, background upload, submission and unlinking all passed.');
-  console.log('Hosted endpoint: session and bearer linking, Checkout, resumable uploads, submission and unlinking all passed.');
+  console.log('Agent connector: linking, plans, Checkout, background upload, submission, tours with looks, library search and Blender models, and unlinking all passed.');
+  console.log('Hosted endpoint: session and bearer linking, Checkout, resumable uploads, submission, tours and unlinking all passed.');
 } catch (error) {
   console.error(error);
   console.error(appLog.split('\n').slice(-60).join('\n'));

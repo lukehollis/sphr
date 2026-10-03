@@ -411,6 +411,7 @@ async function runUploader(space) {
 // Tools
 
 const spaceId = { type: 'string', description: 'The space ID (12 hexadecimal characters) from create_space or space_status.' };
+const tourId = { type: 'string', description: 'The tour ID (12 hexadecimal characters) from create_tour or list_tours.' };
 const tools = [
   {
     name: 'link_account',
@@ -474,6 +475,71 @@ const tools = [
     description: `Unlinks this agent from the ${brand.name} account and forgets its token on this computer.`,
     inputSchema: { type: 'object', properties: {} },
     run: unlinkAccount
+  },
+  {
+    name: 'find_tour_spaces',
+    description: `Spaces a guided tour or scavenger hunt can be built on: the person's own finished spaces and ${brand.name}'s public spaces (museums, temples, tombs, gardens). Search by words in the title.`,
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Words from the title, for example "pyramid" or "delphi". Empty lists the first spaces.' } } },
+    run: findTourSpaces
+  },
+  {
+    name: 'list_tours',
+    description: 'The tours and scavenger hunts on the account, with their links and how many stops each has.',
+    inputSchema: { type: 'object', properties: {} },
+    run: listTours
+  },
+  {
+    name: 'create_tour',
+    description: 'Starts a guided tour or a scavenger hunt on a space from find_tour_spaces. It starts private and empty; fill it with draft_tour or save_tour.',
+    inputSchema: { type: 'object', properties: {
+      scene_id: { type: 'string', description: 'The sceneId from find_tour_spaces.' },
+      kind: { type: 'string', enum: ['tour', 'hunt'], description: '"tour" for a guided tour, "hunt" for a scavenger hunt.' },
+      title: { type: 'string', description: 'Optional title; defaults to the space\'s name.' }
+    }, required: ['scene_id'] },
+    run: createTour
+  },
+  {
+    name: 'draft_tour',
+    description: `Asks ${brand.name}'s tour agent, which can see the space's photographs, to write or rework the tour from a request in plain words: stops and their text, hidden objects and clues, library models, effects, sound, music and looks (line drawing, blueprint, film noir and more, with transitions). It places everything and saves. Takes one to five minutes; it returns at once, then call wait_for_tour.`,
+    inputSchema: { type: 'object', properties: { tour_id: tourId, request: { type: 'string', description: 'What to make or change, up to 6000 characters.' } }, required: ['tour_id', 'request'] },
+    run: draftTour
+  },
+  {
+    name: 'wait_for_tour',
+    description: 'Waits up to 50 seconds for a draft from draft_tour to finish, then summarizes the tour. Call it again to keep waiting.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId }, required: ['tour_id'] },
+    run: waitForTour
+  },
+  {
+    name: 'get_tour',
+    description: 'The tour as JSON (stops, objects, effects, looks) with its revision, for editing with save_tour.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId }, required: ['tour_id'] },
+    run: getTour
+  },
+  {
+    name: 'save_tour',
+    description: 'Saves a tour edited by hand: the experience JSON from get_tour with your changes. Objects, effects and stops keep the shapes get_tour shows; models use a url from search_models or upload_model.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId, experience: { type: 'object', description: 'The whole experience: version, kind, stops, objects, effects, optional look and finale.' },
+      title: { type: 'string' } }, required: ['tour_id', 'experience'] },
+    run: saveTour
+  },
+  {
+    name: 'search_models',
+    description: `Searches ${brand.name}'s library of ready-made 3D models (statues, amphorae, furniture, animals, buildings and props from many periods). Returns each model's id, size and url; use the url as an object's source url in save_tour, or name the models in a draft_tour request.`,
+    inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] },
+    run: searchModels
+  },
+  {
+    name: 'upload_model',
+    description: 'Uploads a 3D model from this computer to a tour, for example one you built in Blender (export glTF Binary .glb, meters, Y up, everything embedded, under 25 MB). Returns the url to use as an object\'s source url in save_tour.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId, path: { type: 'string', description: 'Absolute path to the .glb file.' } }, required: ['tour_id', 'path'] },
+    run: uploadModel
+  },
+  {
+    name: 'share_tour',
+    description: 'Makes a tour public (anyone with its link can open it, never listed or indexed) or private, and optionally renames it. Ask the person first.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId, public: { type: 'boolean' }, title: { type: 'string' } }, required: ['tour_id'] },
+    run: shareTour
   }
 ];
 
@@ -704,6 +770,105 @@ async function unlinkAccount() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Tours and scavenger hunts
+
+function describeTour(tour) {
+  const stops = tour.experience?.stops?.length ?? tour.stops ?? 0;
+  const kind = tour.kind === 'hunt' ? 'scavenger hunt' : 'guided tour';
+  return `${JSON.stringify(tour.title)} (tour_id ${tour.id}), a ${kind} with ${stops} ${tour.kind === 'hunt' ? 'clue' : 'stop'}${stops === 1 ? '' : 's'}${tour.space?.title ? ` on ${JSON.stringify(tour.space.title)}` : ''}, ${tour.public ? `shared at ${brand.url}${tour.path}` : 'private (only the owner can open it)'}. Edit it in the browser at ${brand.url}${tour.editor}.`;
+}
+
+async function findTourSpaces({ query = '' } = {}) {
+  const { spaces } = await api(`/api/account/tours/spaces?q=${encodeURIComponent(String(query))}&limit=30`);
+  if (!spaces.length) return `No spaces match ${JSON.stringify(query)}. Try fewer or other words.`;
+  return spaces.map(space => `${space.sceneId}: ${space.title} (${space.whose === 'own' ? 'your space' : `${brand.name} space`}${space.locations ? `, ${space.locations} places to stand` : ''})`).join('\n');
+}
+
+async function listTours() {
+  const { tours } = await api('/api/account/tours');
+  if (!tours.length) return 'There are no tours or scavenger hunts on this account yet. Start one with find_tour_spaces and create_tour.';
+  return tours.map(tour => describeTour({ ...tour, space: tour.space ? { title: tour.space.title } : null })).join('\n');
+}
+
+async function createTour({ scene_id, kind = 'tour', title }) {
+  const { tour } = await api('/api/account/tours', { method: 'POST', body: { sceneId: scene_id, kind, ...(title ? { title } : {}) } });
+  return `Created ${describeTour({ ...tour, public: false, stops: 0 })} Next, draft_tour with what the person wants.`;
+}
+
+async function draftTour({ tour_id, request }) {
+  await api(`/api/account/tours/${encodeURIComponent(tour_id)}/agent`, { method: 'POST', body: { prompt: String(request ?? ''), async: true } });
+  return `${brand.name}'s tour agent is working on it; this takes one to five minutes. Call wait_for_tour with tour_id ${tour_id}.`;
+}
+
+async function waitForTour({ tour_id }) {
+  const deadline = Date.now() + toolWait;
+  for (;;) {
+    const { tour } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}?catalog=0`);
+    const draft = tour.draft;
+    if (draft?.state === 'failed') return `The draft failed: ${draft.error}. Try draft_tour again, perhaps with a simpler request.`;
+    if (draft?.state !== 'drafting') {
+      const stops = tour.experience.stops.map((stop, index) => `${index + 1}. ${stop.title}${stop.look ? ` [look ${stop.look.look}]` : ''}`).join('; ');
+      return `${draft?.reply ? `The agent says: ${draft.reply}\n` : ''}${describeTour(tour)}\nStops: ${stops || 'none yet'}. Objects: ${tour.experience.objects.map(object => object.name).join(', ') || 'none'}. Effects: ${tour.experience.effects.map(effect => effect.type).join(', ') || 'none'}.${tour.experience.look ? ` Look: ${tour.experience.look.look}.` : ''}`;
+    }
+    if (Date.now() > deadline) return `Still drafting (started ${draft.started}). Call wait_for_tour again.`;
+    await sleep(4000);
+  }
+}
+
+/** The looks, effects, sounds and shapes a site offers, for editing a tour by hand. */
+function describeCatalog(catalog) {
+  if (!catalog) return '';
+  const params = list => list.length ? ` Params ${list.join(', ')}.` : '';
+  return [
+    `Looks (a tour's or stop's "look": {"look": id, "transition": one of ${catalog.transitions.join(', ')}, "duration": seconds}; "color" is the capture as it is):`,
+    ...catalog.looks.map(look => `${look.id} (${look.label}): ${look.description}${look.requires ? ' Gaussian splat spaces only.' : ''}${params(look.params)}`),
+    'Effects ({"id", "type", "target": {"kind": "scene"} or {"kind": "object", "id"} or {"kind": "point", "position": [x,y,z]}, "params", "always"}):',
+    ...catalog.effects.map(effect => `${effect.type} (${effect.label}): ${effect.description} Targets ${effect.targets.join(', ')}.${params(effect.params)}`),
+    `Sounds: ${catalog.sounds.map(sound => `${sound.id} (${sound.kind})`).join(', ')}, or an https audio address.`,
+    `Shapes (source {"kind": "shape", "shape", "color"}): ${catalog.shapes.map(shape => shape.shape).join(', ')}.`
+  ].join('\n');
+}
+
+async function getTour({ tour_id }) {
+  const { tour, catalog } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}`);
+  return `${describeTour(tour)}\nRevision ${tour.revision}. Experience JSON:\n${JSON.stringify(tour.experience, null, 1)}\n\n${describeCatalog(catalog)}`;
+}
+
+async function saveTour({ tour_id, experience, title }) {
+  const { tour } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}`);
+  const value = typeof experience === 'string' ? JSON.parse(experience) : experience;
+  const { tour: saved } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}`, { method: 'PUT',
+    body: { revision: tour.revision, experience: value, title: title ?? tour.title, public: tour.public } });
+  return `Saved. ${describeTour({ ...tour, ...saved, experience: saved.experience })}`;
+}
+
+async function searchModels({ query, limit = 16 }) {
+  const { models, total } = await api(`/api/library/search?q=${encodeURIComponent(String(query ?? ''))}&limit=${Number(limit) || 16}`, { auth: false });
+  if (!models.length) return `No models match ${JSON.stringify(query)} among ${total}. Try other words.`;
+  return models.map(model => `${model.name} (${model.category}${model.pack ? `, ${model.pack}` : ''}), about ${Math.round(model.height * 100) / 100} m tall at scale 1${model.animations?.length ? `, animated: ${model.animations.join(', ')}` : ''}: url ${model.url.startsWith('/') ? brand.url + model.url : model.url}`).join('\n');
+}
+
+async function uploadModel({ tour_id, path: file }) {
+  requireSite();
+  const saved = credentials();
+  if (!saved) throw new Problem(`This agent is not linked to a ${brand.name} account yet. Call link_account first.`, 401);
+  const target = path.resolve(String(file ?? ''));
+  if (extension(target) !== 'glb') throw new Problem('Upload a .glb file (glTF Binary). In Blender: File > Export > glTF 2.0, format glTF Binary.');
+  const bytes = readFileSync(target);
+  if (bytes.length > 25 * 1024 * 1024) throw new Problem(`${path.basename(target)} is ${formatBytes(bytes.length)}; models can be up to 25 MB. Decimate it or export with Draco compression.`);
+  const response = await fetch(`${brand.url}/api/account/tours/${encodeURIComponent(tour_id)}/models`, { method: 'POST', body: bytes, signal: AbortSignal.timeout(120000),
+    headers: { 'Content-Type': 'model/gltf-binary', Authorization: `Bearer ${saved.token}`, 'User-Agent': `sphr-connector/${version}` } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Problem(data.error || `${brand.name} answered HTTP ${response.status}.`, response.status);
+  return `Uploaded ${path.basename(target)} (${formatBytes(bytes.length)}). Use url ${data.url} as the object's source url: {"kind":"model","url":"${data.url}"}. Size and turn it with scale and rotation (degrees) in save_tour.`;
+}
+
+async function shareTour({ tour_id, public: shared, title }) {
+  const { tour } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}`, { method: 'PATCH', body: { ...(shared === undefined ? {} : { public: Boolean(shared) }), ...(title ? { title } : {}) } });
+  return describeTour(tour);
+}
+
+// ---------------------------------------------------------------------------------------------
 // MCP over stdio: newline-delimited JSON-RPC 2.0
 
 const instructions = `${brand.name} hosts 3D captures (laser scans and E57 files, Matterport exports, Gaussian splats, 360 photos and video, meshes, photo sets) as virtual spaces with guided tours that are shared with a link. These tools let you publish captures from this computer for the person you are helping.
@@ -715,7 +880,10 @@ The usual order
 4. upload_files with every file of the capture in one call. It runs in the background, survives the chat ending and submits the space for processing when it finishes.
 5. Tell the person the upload is running, roughly how long it will take (space_status), and that ${brand.name} will email them when the space is ready. Processing takes from minutes to a few hours depending on the capture.
 
-One capture is one space. Put notes in upload_files when the person says what the capture is or how the tour should go. Spaces start private; offer set_visibility only when they are ready and the person wants to share.`;
+One capture is one space. Put notes in upload_files when the person says what the capture is or how the tour should go. Spaces start private; offer set_visibility only when they are ready and the person wants to share.
+
+Tours and scavenger hunts
+A tour or hunt is built on a space (the person's own, or one of ${brand.name}'s public spaces) and has its own link. find_tour_spaces, then create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand.name}'s tour agent sees the space's photographs, writes the stops, places library models, effects, sound and looks, and saves. To change details, get_tour, edit the JSON and save_tour, or ask draft_tour again. search_models finds ready-made 3D models. For an object the library does not have, and if you have a Blender MCP connected, build it in Blender (real-world meters, Y up, low poly, materials with base colors), export glTF Binary (.glb) with everything embedded, upload_model, and add it to the tour's objects with save_tour. Looks restyle the whole frame per stop (lines, watercolor, blueprint, noir, thermal, nightvision, neon, pixel and more) with transitions (cut, fade, dissolve, wipe, iris, sweep, glitch). Tours start private; share_tour when the person wants a link to send.`;
 
 const prompts = [{
   name: 'publish_capture',

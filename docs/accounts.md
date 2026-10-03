@@ -104,6 +104,13 @@ and the spaces and narration a longer published tour continues into are left out
 30 requests an hour per account and 400 for everyone; customers see library models whose scope is
 `everyone` only.
 
+Agent tokens can build tours too. `GET /api/account/tours/spaces?q=` lists the spaces a customer can
+build on, `POST /api/account/tours` starts one, `GET`, `PUT` and `PATCH /api/account/tours/<id>` read,
+save, rename and share it, `POST /api/account/tours/<id>/agent` with `async: true` drafts it in the
+background (one draft per tour at a time; `GET` reports `draft.state`), and
+`POST /api/account/tours/<id>/models` adds a `.glb` of the customer's own. Deleting a tour stays with
+the browser session. Browser requests that change a tour must come from the site's own origin.
+
 ## Operator notifications
 
 With `SPHR_DISCORD_WEBHOOK_URL` set to a Discord channel webhook, the operator hears about new

@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { db, EditConflict, isScenePublic } from "./admin-store";
 import { spaceForScene } from "./accounts-store";
-import { accountRequest, accountResponse, currentUser, spaceHosted } from "./accounts";
+import { accountRequest, accountResponse, accountsEnabled, bearerToken, currentUser, requestUser, sameOrigin, spaceHosted } from "./accounts";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { isAdmin } from "./auth";
 import { readAllScenes } from "@/lib/scene-catalog";
 import { parseExperience } from "@/lib/experience/validate";
@@ -88,6 +91,7 @@ export function saveUserTour(id: string, revision: number, update: { experience:
 
 export function deleteUserTour(id: string) {
   store().prepare("DELETE FROM user_tours WHERE id=?").run(id);
+  deleteTourModels(id);
 }
 
 export class TourLimitError extends Error {}
@@ -139,8 +143,10 @@ export async function tourAccess(tour: UserTour): Promise<"allowed" | "login" | 
  * Reads a request from a tour's owner: the body, the tour and the space it is built on, or
  * the error response. With `anySpace`, a tour whose space is gone is still returned.
  */
-export async function ownedTourRequest(request: Request, id: string, maxBytes: number, { anySpace = false } = {}) {
-  const { user, body, error } = await accountRequest(request, maxBytes);
+export async function ownedTourRequest(request: Request, id: string, maxBytes: number,
+  { anySpace = false, body: kind = "json", agents = true }: { anySpace?: boolean; body?: "json" | "none"; agents?: boolean } = {}) {
+  // People's own agents use these routes with their linked token, as with spaces (deleting excepted).
+  const { user, body, error } = kind === "json" ? await accountRequest(request, maxBytes, { agents }) : await tourUser(request);
   if (error) return { error } as const;
   const tour = readUserTour(id);
   if (!tour || tour.userId !== user.id) return { error: accountResponse({ error: "Tour not found." }, 404) } as const;
@@ -149,6 +155,67 @@ export async function ownedTourRequest(request: Request, id: string, maxBytes: n
     return { error: accountResponse({ error: "This tour's space is no longer available to build on." }, 410) } as const;
   }
   return { user, body, tour, scene } as const;
+}
+
+/**
+ * The signed-in customer, or a linked agent's customer, for requests without a JSON
+ * body (reads, and model uploads). Browser requests that change something must come
+ * from this site.
+ */
+export async function tourUser(request: Request) {
+  if (!accountsEnabled()) return { error: accountResponse({ error: "Accounts are unavailable." }, 404) } as const;
+  const agent = bearerToken(request) !== undefined;
+  if (!agent && request.method !== "GET" && !sameOrigin(request)) return { error: accountResponse({ error: "Invalid request." }, 400) } as const;
+  const user = await requestUser(request, true);
+  if (!user) return { error: accountResponse({ error: agent ? "This agent is no longer linked. Link it again." : "Sign in to continue." }, 401) } as const;
+  return { user, body: null, agent } as const;
+}
+
+// Models a customer brings to a tour (for example made in Blender): validated glTF binaries,
+// kept with the application state and served from this site.
+export const maxModelBytes = 25 * 1024 * 1024;
+const maxModelsPerTour = 20;
+const tourFiles = (tourId: string) => path.join(process.env.SPHR_STATE_DIR ?? "", "tour-files", tourId);
+
+export class ModelError extends Error {}
+
+/**
+ * Checks a glTF binary: the GLB header, a JSON chunk, and no external files
+ * (every buffer and image must be inside the GLB or a data URI).
+ */
+export function checkGlb(bytes: Buffer) {
+  if (bytes.length < 20 || bytes.readUInt32LE(0) !== 0x46546c67) throw new ModelError("That is not a GLB file. Export glTF Binary (.glb).");
+  if (bytes.readUInt32LE(4) !== 2) throw new ModelError("Only glTF 2.0 GLB files are supported.");
+  if (bytes.readUInt32LE(8) !== bytes.length) throw new ModelError("The GLB file is incomplete.");
+  const jsonLength = bytes.readUInt32LE(12);
+  if (bytes.readUInt32LE(16) !== 0x4e4f534a || 20 + jsonLength > bytes.length) throw new ModelError("The GLB file has no glTF JSON.");
+  let gltf: { buffers?: { uri?: string }[]; images?: { uri?: string }[]; meshes?: unknown[] };
+  try { gltf = JSON.parse(bytes.subarray(20, 20 + jsonLength).toString("utf8")); } catch { throw new ModelError("The GLB file's glTF JSON is unreadable."); }
+  const external = [...(gltf.buffers ?? []), ...(gltf.images ?? [])].some((item) => typeof item?.uri === "string" && !item.uri.startsWith("data:"));
+  if (external) throw new ModelError("The model refers to files outside the GLB. Export with everything embedded.");
+  if (!gltf.meshes?.length) throw new ModelError("The GLB file has no meshes.");
+}
+
+/** Keeps a model for a tour and returns the address to use as its source url. */
+export function saveTourModel(tourId: string, bytes: Buffer) {
+  checkGlb(bytes);
+  const folder = tourFiles(tourId);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const name = `${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.glb`;
+  const existing = readdirSync(folder).filter((file) => file.endsWith(".glb"));
+  if (!existing.includes(name) && existing.length >= maxModelsPerTour) throw new ModelError(`A tour can hold up to ${maxModelsPerTour} uploaded models.`);
+  writeFileSync(path.join(folder, name), bytes, { mode: 0o600 });
+  return `/api/tour-files/${tourId}/${name}`;
+}
+
+export function tourModelFile(tourId: string, name: string) {
+  if (!/^[a-f0-9]{12}$/.test(tourId) || !/^[a-f0-9]{16}\.glb$/.test(name) || !process.env.SPHR_STATE_DIR) return null;
+  const file = path.join(tourFiles(tourId), name);
+  try { return statSync(file).isFile() ? file : null; } catch { return null; }
+}
+
+export function deleteTourModels(tourId: string) {
+  if (/^[a-f0-9]{12}$/.test(tourId) && process.env.SPHR_STATE_DIR) rmSync(tourFiles(tourId), { recursive: true, force: true });
 }
 
 /** The customer's tours for the account page, newest edits first. */

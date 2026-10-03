@@ -36,6 +36,26 @@ address, and a model library manifest named by `SPHR_LIBRARY_URL` (or
 Relative URLs resolve against the manifest. `"scope": "team"` keeps a model to
 administrators, for assets licensed to your team but not to every editor.
 
+A library of thousands of models does not fit in a prompt, so the agent sees a
+sample matching the request and searches the rest. `GET /api/library/search?q=amphora&limit=24`
+ranks models by name, tags, category and pack (team models only for
+administrators). With the Messages API the agent calls it as a `search_models`
+tool; behind `SPHR_TOUR_AGENT_URL`, set `SPHR_LIBRARY_SEARCH_URL` in the
+service's environment (for example `http://127.0.0.1:3035/api/library/search`)
+and it runs the CLI with `scripts/agent/library-mcp.mjs` as its only MCP server
+and `mcp__library__search_models` as its only tool. Either way the agent names
+models by ID, which the server turns into their addresses.
+
+Customers' tours can also carry models of their own: the builder's *Upload a
+model* button, or `POST /api/account/tours/<id>/models` with a raw glTF Binary
+body. Files must be self-contained `.glb` (version 2, embedded buffers and
+images, at least one mesh) of at most 25 MB, 20 per tour, and are stored under
+`SPHR_STATE_DIR/tour-files/<tour>/` by content hash and served from
+`/api/tour-files/<tour>/<file>.glb`. They are deleted with the tour. A model
+made in Blender should be in meters, stand on its origin and be exported with
+`bpy.ops.export_scene.gltf(filepath=..., export_format="GLB")`; glTF turns
+Blender's Z up into Y up.
+
 ## Data
 
 Saved experiences live in the state database (`scene_tours`) and are applied
@@ -162,6 +182,20 @@ ships no audio files: `chime`, `sparkle`, `found`, `hint`, `pop`, `whoosh`,
 chime by default when a stop has no sound of its own. Everything follows the
 viewer's mute button, and browsers keep it silent until the visitor's first
 touch or key press.
+
+## Agents that build tours
+
+People's own agents build tours through the same routes as the builder with an
+agent token (see `docs/accounts.md`), and both connectors wrap them as tools:
+`find_tour_spaces`, `create_tour`, `draft_tour` and `wait_for_tour`,
+`get_tour` (the experience, its revision, and every look, effect, sound and
+shape the site has), `save_tour`, `search_models`, `upload_model` (local
+connector) and `share_tour`. A draft started by an agent runs in the
+background (`{ "prompt", "async": true }`, then poll `GET` for `draft.state`)
+and is placed on the server (`lib/server/tour-placement.ts`): stops aim along
+the pixel the drafting agent picked, and objects land where that ray meets the
+floor of its location, two to twenty-five meters out, facing back toward it.
+The browser builder places against the capture's mesh instead, which is finer.
 
 ## Checks
 

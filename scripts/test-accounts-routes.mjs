@@ -40,6 +40,11 @@ const teamHook = await listen(async (request, response) => {
   response.end();
 });
 const signer = new Stripe('sk_test_signer');
+// A small model library: two models for everyone, one for the operator's team only.
+writeFileSync(path.join(state, 'library.json'), JSON.stringify({ models: [
+  { id: 'amphora-red', name: 'Red-figure amphora', category: 'Ancient Greece', pack: 'Greek pottery', url: 'https://models.example/amphora.glb', height: 0.9, tags: ['vase', 'pottery'] },
+  { id: 'athena', name: 'Statue of Athena', category: 'Ancient Greece', url: 'https://models.example/athena.glb', height: 2.4, tags: ['statue', 'goddess'] },
+  { id: 'team-chest', name: 'Treasure chest', category: 'Props', url: 'https://models.example/chest.glb', height: 0.6, tags: ['treasure'], scope: 'team' }] }));
 
 const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accounts-test', SPHR_PUBLIC_URL: base, SPHR_STATE_DIR: state,
   SPHR_ACCESS_CONTROL: '1', SPHR_ACCOUNTS: '1', SPHR_CATALOG_URL: '', SPHR_ASSET_BASE_URL: '', NEXT_PUBLIC_SPHR_ASSET_BASE_URL: '',
@@ -51,7 +56,8 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr',
   NEXT_PUBLIC_SPHR_ANALYTICS: '1', SPHR_ANALYTICS_ORIGINS: 'https://home.example',
-  SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '' };
+  SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '',
+  SPHR_LIBRARY_FILE: path.join(state, 'library.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -399,6 +405,87 @@ try {
   response = await alice.post(`/api/account/tours/${hunt.id}/agent`, { prompt: 'Hide three lamps' });
   assert.equal(response.status, 422);
   assert.match((await response.json()).error, /No agent is set up/);
+
+  // ---- People's own agents build tours with their linked token ----
+  const linkCode = await (await fetch(`${base}/api/agent/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: 'Claude on test' }) })).json();
+  assert.equal((await alice.post('/api/account/agents', { code: linkCode.userCode })).status, 200);
+  const { token: agentToken } = await (await fetch(`${base}/api/agent/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: linkCode.code }) })).json();
+  const agentApi = (route, init = {}) => fetch(base + route, { ...init, headers: { Authorization: `Bearer ${agentToken}`,
+    ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}), ...init.headers } });
+  body = await (await agentApi('/api/account/tours/spaces?q=operator')).json();
+  assert.deepEqual(body.spaces, [{ sceneId: '0a0a0a0a0a01', title: 'Operator hall', locations: 1, whose: 'spacery' }], 'agents search the spaces they can build on');
+  body = await (await agentApi('/api/account/tours/spaces')).json();
+  assert.ok(body.spaces.some(space => space.sceneId === reserved && space.whose === 'own') && !body.spaces.some(space => space.sceneId === '0a0a0a0a0a02'));
+  assert.equal((await fetch(`${base}/api/account/tours/spaces`)).status, 401);
+  response = await agentApi('/api/account/tours', { method: 'POST', body: JSON.stringify({ sceneId: '0a0a0a0a0a01', kind: 'tour', title: 'Lamp lighting' }) });
+  assert.equal(response.status, 200);
+  const agentTour = (await response.json()).tour;
+  assert.deepEqual([agentTour.title, agentTour.kind, agentTour.path], ['Lamp lighting', 'tour', `/t/${agentTour.id}/lamp-lighting`]);
+  assert.ok((await (await agentApi('/api/account/tours')).json()).tours.some(tour => tour.id === agentTour.id && tour.space.title === 'Operator hall'));
+  body = await (await agentApi(`/api/account/tours/${agentTour.id}`)).json();
+  assert.deepEqual([body.tour.revision, body.tour.experience.stops.length, body.tour.space.sceneId, body.tour.draft], [0, 0, '0a0a0a0a0a01', null]);
+  assert.ok(body.catalog.looks.some(look => look.id === 'blueprint') && body.catalog.transitions.includes('sweep'), 'agents learn the looks and transitions');
+  assert.ok(body.catalog.effects.some(effect => effect.type === 'music') && !body.catalog.effects.some(effect => effect.type === 'sketch'), 'retired effects are not offered');
+  assert.ok(body.catalog.sounds.some(sound => sound.id === 'calm'));
+  assert.equal((await (await agentApi(`/api/account/tours/${agentTour.id}?catalog=0`)).json()).catalog, undefined);
+  assert.equal((await bob.get(`/api/account/tours/${agentTour.id}`)).status, 404);
+  // The library, searched by name, tags and category; team models stay with the operator.
+  body = await (await fetch(`${base}/api/library/search?q=greek+vase`)).json();
+  assert.deepEqual([body.total, body.models[0].id, body.models[0].url], [2, 'amphora-red', 'https://models.example/amphora.glb']);
+  assert.deepEqual((await (await fetch(`${base}/api/library/search?q=treasure`)).json()).models, [], 'team-only models are hidden from customers');
+  // Models of their own, as self-contained glTF binaries.
+  const glb = (gltf, declared) => {
+    const json = Buffer.from(JSON.stringify(gltf).padEnd(Math.ceil(JSON.stringify(gltf).length / 4) * 4, ' '));
+    const bytes = Buffer.alloc(20 + json.length);
+    bytes.writeUInt32LE(0x46546c67, 0); bytes.writeUInt32LE(2, 4); bytes.writeUInt32LE(declared ?? bytes.length, 8);
+    bytes.writeUInt32LE(json.length, 12); bytes.writeUInt32LE(0x4e4f534a, 16); json.copy(bytes, 20);
+    return bytes;
+  };
+  const tripod = glb({ asset: { version: '2.0' }, meshes: [{ name: 'Tripod', primitives: [] }] });
+  const sendModel = bytes => agentApi(`/api/account/tours/${agentTour.id}/models`, { method: 'POST', body: bytes, headers: { 'Content-Type': 'model/gltf-binary' } });
+  for (const [bytes, error] of [[Buffer.from('not a model'), /not a GLB/], [glb({ asset: { version: '2.0' } }), /no meshes/],
+    [glb({ asset: { version: '2.0' }, meshes: [{}], buffers: [{ uri: 'tripod.bin', byteLength: 4 }] }), /outside the GLB/], [glb({ asset: { version: '2.0' }, meshes: [{}] }, 9999), /incomplete/]]) {
+    response = await sendModel(bytes);
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, error);
+  }
+  assert.equal((await sendModel(Buffer.alloc(25 * 1024 * 1024 + 1))).status, 413);
+  assert.equal((await fetch(`${base}/api/account/tours/${agentTour.id}/models`, { method: 'POST', body: tripod, headers: { Origin: base } })).status, 401);
+  assert.equal((await fetch(`${base}/api/account/tours/${agentTour.id}/models`, { method: 'POST', body: tripod, headers: {
+    Origin: 'https://evil.example', Cookie: [...alice.cookies].map(([name, value]) => `${name}=${value}`).join('; ') } })).status, 400, 'browser uploads are same-origin only');
+  response = await sendModel(tripod);
+  assert.equal(response.status, 200);
+  const modelUrl = (await response.json()).url;
+  assert.match(modelUrl, new RegExp(`^/api/tour-files/${agentTour.id}/[a-f0-9]{16}\\.glb$`));
+  response = await fetch(base + modelUrl);
+  assert.deepEqual([response.status, response.headers.get('content-type'), Buffer.from(await response.arrayBuffer()).equals(tripod)], [200, 'model/gltf-binary', true]);
+  assert.match(response.headers.get('content-security-policy'), /sandbox/);
+  assert.equal((await fetch(`${base}/api/tour-files/${agentTour.id}/0000000000000000.glb`)).status, 404);
+  assert.equal((await fetch(`${base}/api/tour-files/${agentTour.id}/..%2F..%2Fstate.db`)).status, 404);
+  // Saving by hand with a look per stop and the uploaded model, then renaming and sharing.
+  const agentExperience = { version: 1, kind: 'tour', look: { look: 'blueprint', transition: 'fade', duration: 1.5 },
+    objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: modelUrl }, position: [0, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    effects: [{ id: 'score', type: 'music', target: { kind: 'scene' }, params: { track: 'calm' } }],
+    stops: [{ id: 'one', title: 'The tripod', text: 'Where the oracle sat.', format: 'plain', view: { nodeId: node, rotation: { azimuth: 0, polar: -5 } },
+      look: { look: 'lines', transition: 'sweep', duration: 2 }, objects: ['tripod'], effects: ['score'] }] };
+  response = await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PUT', body: JSON.stringify({ revision: 0, title: 'Lamp lighting', public: false, experience: agentExperience }) });
+  assert.equal(response.status, 200, await response.clone().text());
+  body = await (await agentApi(`/api/account/tours/${agentTour.id}?catalog=0`)).json();
+  assert.deepEqual([body.tour.revision, body.tour.experience.look.look, body.tour.experience.stops[0].look.transition, body.tour.experience.objects[0].source.url], [1, 'blueprint', 'sweep', modelUrl]);
+  response = await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PATCH', body: JSON.stringify({ title: 'The oracle', public: true }) });
+  assert.deepEqual(Object.values((await response.json()).tour).slice(1, 4), ['The oracle', 'tour', true]);
+  assert.equal((await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PATCH', body: JSON.stringify({ public: 'yes' }) })).status, 400);
+  tourPage = await (await anonymous.get(`/t/${agentTour.id}/the-oracle`)).text();
+  assert.ok(tourPage.includes('The tripod') && tourPage.includes(modelUrl), 'the shared tour carries the uploaded model');
+  // Without an agent on this server, drafting says so at once; deleting stays with the browser.
+  response = await agentApi(`/api/account/tours/${agentTour.id}/agent`, { method: 'POST', body: JSON.stringify({ prompt: 'Add a hunt for three lamps', async: true }) });
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).error, /No agent is set up/);
+  assert.equal((await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'DELETE', body: '{}' })).status, 401, 'agents cannot delete tours');
+  assert.equal((await alice.request(`/api/account/tours/${agentTour.id}`, { method: 'DELETE', json: {} })).status, 200);
+  assert.equal((await fetch(base + modelUrl)).status, 404, "a deleted tour's models go with it");
+  console.log("Passed: agents' tours with a token (spaces, create, catalog, library search, model uploads, saving looks, sharing, no deleting).");
+
   // A space taken away takes its tours offline, and they can still be deleted.
   database().prepare("UPDATE visibility SET public=0 WHERE scene='0a0a0a0a0a01'").run();
   assert.equal((await anonymous.get(tourLink)).status, 404);

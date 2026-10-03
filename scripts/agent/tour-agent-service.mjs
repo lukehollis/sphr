@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 // A local HTTP front for an agent CLI that is logged in on this machine, so the
 // web app can draft tours without holding the agent's credentials or running it
-// inside its own memory limits. The CLI runs with no tools: images arrive as
-// content blocks on stdin, and only the model's text comes back.
+// inside its own memory limits. The CLI runs with no built-in tools: images arrive
+// as content blocks on stdin, and only the model's text comes back. With
+// SPHR_LIBRARY_SEARCH_URL set it gets one read-only MCP tool, search_models,
+// served by library-mcp.mjs beside this file.
 //
 //   SPHR_TOUR_AGENT_SERVICE_TOKEN=<32+ chars> node scripts/agent/tour-agent-service.mjs
 //
 // Environment: SPHR_TOUR_AGENT_SERVICE_PORT (3037), SPHR_TOUR_AGENT_CLAUDE (claude),
-// SPHR_TOUR_AGENT_SERVICE_MODEL (opus), SPHR_TOUR_AGENT_SERVICE_TIMEOUT_MS (300000).
+// SPHR_TOUR_AGENT_SERVICE_MODEL (opus), SPHR_TOUR_AGENT_SERVICE_TIMEOUT_MS (300000),
+// SPHR_LIBRARY_SEARCH_URL (the site's /api/library/search, for the search_models tool).
 // The app sets SPHR_TOUR_AGENT_URL=http://127.0.0.1:3037 and the same token.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const token = process.env.SPHR_TOUR_AGENT_SERVICE_TOKEN ?? '';
 if (token.length < 32) { console.error('Set SPHR_TOUR_AGENT_SERVICE_TOKEN to at least 32 characters.'); process.exit(1); }
@@ -24,6 +31,15 @@ const authorized = (request) => {
   const supplied = /^Bearer (\S{1,512})$/.exec(request.headers.authorization ?? '')?.[1];
   return Boolean(supplied) && timingSafeEqual(digest(supplied), digest(token));
 };
+
+// The library tool, when configured: one MCP server, and only its one tool allowed.
+const librarySearch = process.env.SPHR_LIBRARY_SEARCH_URL ?? '';
+const libraryServer = path.join(path.dirname(fileURLToPath(import.meta.url)), 'library-mcp.mjs');
+const mcpConfig = librarySearch && existsSync(libraryServer) ? (() => {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'sphr-tour-agent-')), 'mcp.json');
+  writeFileSync(file, JSON.stringify({ mcpServers: { library: { command: process.execPath, args: [libraryServer], env: { SPHR_LIBRARY_SEARCH_URL: librarySearch } } } }), { mode: 0o600 });
+  return file;
+})() : null;
 
 let running = 0;
 const waiting = [];
@@ -38,7 +54,9 @@ function compose({ system, prompt, images }) {
   }
   content.push({ type: 'text', text: String(prompt) });
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--tools', '',
-    '--model', model, '--no-session-persistence', '--strict-mcp-config', ...(system ? ['--system-prompt', String(system)] : [])];
+    '--model', model, '--no-session-persistence', '--strict-mcp-config',
+    ...(mcpConfig ? ['--mcp-config', mcpConfig, '--allowedTools', 'mcp__library__search_models'] : []),
+    ...(system ? ['--system-prompt', String(system)] : [])];
   return new Promise((resolve, reject) => {
     const child = spawn(claude, args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, DISABLE_AUTOUPDATER: '1' } });
     let buffer = '';

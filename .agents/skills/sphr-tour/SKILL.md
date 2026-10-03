@@ -64,6 +64,72 @@ The tour agent (`lib/server/tour-agent.ts`) writes complete drafts from a prompt
 and points at pixels in panorama faces; the builder resolves those into positions
 with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
 
+### Looks, models and sound in an experience
+
+- **Looks** restyle the whole frame. `experience.look` covers the tour and free
+  exploration; `stop.look` changes it at a stop: `{ "look": "lines", "transition":
+  "sweep", "duration": 2, "params": {} }`, or `"color"` for the capture itself.
+  Transitions are `cut`, `fade`, `dissolve`, `wipe`, `iris`, `sweep`, `glitch`.
+  Core looks are `lines`, `watercolor`, `blueprint`, `noir`; the Spacery pack adds
+  ink, toon, thermal, nightvision, oldfilm, neon, halftone, pixel, duotone, xray,
+  miniature, dream, vhs, infrared, pointillism, splatdots (splats only), cutout,
+  terminal, hologram and cinematic. List them with `lookEntries()`.
+  Use a look to mark a moment (a drawing that sweeps into color, blueprint for how
+  a building was planned, noir for a mystery), not on every stop. The old `sketch`
+  effect is retired in favor of the `lines` look with a `sweep` transition.
+- **Drawn versions.** `lines`, `blueprint` and `watercolor` read real drawings of
+  the space when `scripts/lines/linework.py` has made them (panorama faces under
+  `SPHR_LINES_BASE_URL/<sceneId>/index.json`, or a companion splat with
+  `role: "sketch"` or `"watercolor"`); otherwise they trace edges in the shader.
+  Run `python scripts/lines/linework.py panos --scene <id>` on a GPU host, upload
+  the folder, and the looks pick it up with no data change.
+- **Models.** An object's `source` is a pack shape, a library model or any https
+  `.glb`. Search the library (thousands of models, sized in meters at scale 1)
+  with `GET /api/library/search?q=amphora` or the connectors' `search_models`;
+  the result's `url` goes in `{ "kind": "model", "url": ... }`. For an object the
+  library lacks, model it in Blender (see below) and upload it.
+- **Sound.** `sound` effects (enter, loop, found, hint, click; positional when
+  targeted) and one `music` effect listed on the stops it plays through.
+
+### Building tours as an agent
+
+Customers' tours (`user_tours`) take an agent token as well as a session, so an
+agent can build one end to end:
+
+| Step | Local connector or hosted `/mcp` | Route |
+| --- | --- | --- |
+| Pick a space | `find_tour_spaces` | `GET /api/account/tours/spaces?q=` |
+| Start | `create_tour` | `POST /api/account/tours` `{sceneId, kind, title}` |
+| Draft | `draft_tour`, then `wait_for_tour` | `POST /api/account/tours/<id>/agent` `{prompt, async: true}`, poll `GET /api/account/tours/<id>` (`draft.state`) |
+| Edit | `get_tour`, `save_tour` | `GET`, then `PUT` with `revision` |
+| Models | `search_models`, `upload_model` (local only) | `GET /api/library/search`, `POST /api/account/tours/<id>/models` (raw GLB) |
+| Share | `share_tour` | `PATCH` `{public, title}` |
+
+Drafts started by an agent are placed on the server (`lib/server/tour-placement.ts`):
+stops aim along the pixel the drafting agent chose and objects land where that ray
+meets the location's floor. The browser builder places against the capture mesh,
+which is finer, so check placements there or in a screenshot and adjust positions
+in `save_tour` when something floats or hides.
+
+From a shell, the local connector runs the same tools:
+`node connector/server.mjs call draft_tour '{"tour_id":"<id>","request":"..."}'`.
+
+### Custom models with Blender
+
+When a Blender MCP is connected (or Blender runs headless:
+`/Applications/Blender.app/Contents/MacOS/Blender -b -P make.py` on macOS):
+
+1. Model in real-world meters with Z up in Blender (glTF export turns it into Y up),
+   origin at the base so the object stands on the floor, low poly (under about
+   50k triangles), Principled BSDF base colors or small packed textures.
+2. Export glTF Binary with everything embedded:
+   `bpy.ops.export_scene.gltf(filepath="tripod.glb", export_format="GLB", export_apply=True)`.
+   Keep it under 25 MB; uploads reject external buffers and files without meshes.
+3. `upload_model` with the tour ID and the path; it returns the model's address on
+   the site (`/api/tour-files/<tour>/<file>.glb`, up to 20 per tour).
+4. Add an object with that url in `save_tour` (or ask `draft_tour` to place "the
+   model at <url>"), then check it in the viewer.
+
 ## Implementation Rules
 
 - `ViewerSession` owns tour position across `orderedSpaces`. Keep navigation global;

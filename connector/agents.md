@@ -3,7 +3,7 @@
 {{name}} hosts 3D captures (E57 and other laser scans, Matterport exports, Gaussian splats, 360 photos and
 video, meshes and photo sets) as virtual spaces with guided tours, shared with a link. This page is for
 agents. It shows how to add the {{name}} connector so you can publish captures for the person you are
-helping, straight from their computer.
+helping, straight from their computer, and build guided tours and scavenger hunts in them.
 
 The connector is a small MCP server with no dependencies. It needs Node.js 18 or later (`node --version`).
 It links to the person's account through a code they approve in their browser, opens Stripe Checkout in
@@ -73,3 +73,16 @@ resumable uploads, and for files on the person's own devices it gives them a pag
 
 Before the MCP tools are loaded, the same tools run from a shell, for example
 `npx -y {{package}} call check_files '{"paths":["/path/to/capture"]}'`.
+
+## Build a tour or scavenger hunt
+
+1. `find_tour_spaces` lists the person's spaces and {{name}}'s public ones; `create_tour` starts a tour or
+   hunt on one.
+2. `draft_tour` with the person's request in plain words, then `wait_for_tour`. {{name}}'s tour agent
+   writes the stops or clues and places models, effects, sound and looks (line drawing, blueprint, film
+   noir, night vision and more, changing through transitions such as a sweep or an iris).
+3. `search_models` finds ready-made 3D models. With a Blender MCP connected, model anything missing in
+   meters, export a self-contained `.glb` and `upload_model` it; then place it with `save_tour` or ask
+   `draft_tour` to.
+4. `share_tour` when the person wants a link. The hosted connector has the same tour tools except
+   `upload_model`; it takes models by their https address instead.

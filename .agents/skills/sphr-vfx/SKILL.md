@@ -28,6 +28,29 @@ Panorama effects draw over `context.surfaces()` (the capture mesh) with
 Add new effects to a pack with metadata (label, one-sentence description,
 targets, params with ranges) so the builder and the tour agent can offer them.
 
+## Looks (frame styles and transitions)
+
+A look is a full-frame restyle in `lib/three/looks` (`LookPass`). With a look
+active, the frame renders into a HalfFloat target with Spark's `encodeLinear`
+on, and a fragment shader calls the look's `vec3 look(vec2 uv)` body, which can
+use `SAMPLE`, `LUM`, `SATURATE`, `SOBEL`, `EDGES`, `BLUR`, `HASH`, `NOISE`,
+`COVER`, `DRAWN`, `RAY`, `P(param)` and `HAS_VARIANT`. Transitions (`cut`,
+`fade`, `dissolve`, `wipe`, `iris`, `sweep`, `glitch`) blend two looks in the
+same shader. Add a look as a `LookEntry` in a pack's `looks`
+(`lib/experience/core/looks.ts` for open source ones) with a label, a one-sentence
+description, params with ranges, an optional `backdrop` (paper looks need a
+light background behind splats), `variant: "sketch" | "watercolor"` when it
+reads a drawn version, `splats` to shrink or flatten splats while it is on
+(dots, cutouts), and `requires: "splats"` when it only works in splat spaces.
+The builder's Looks tab and the tour agent list every registered look
+automatically.
+
+Drawn versions follow the 3D line drawings method (informative-drawings, as in
+splatline): `scripts/lines/linework.py` redraws every panorama face offline, and
+for splats a companion trained on drawn photos is listed with a `role`.
+`PanoramaLayer.prepareVariant` and `SparkSplatLayer.prepareVariant` load them
+lazily; check `variantReady` before relying on `HAS_VARIANT`.
+
 ## Implementation Rules
 
 - Effects must serve tour comprehension or scene interaction. Avoid decorative-only clutter.

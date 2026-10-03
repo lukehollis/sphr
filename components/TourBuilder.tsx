@@ -445,6 +445,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             <div className="builder-grid">{shapeEntries().map((entry) => <button type="button" key={entry.shape} onClick={() => addObject({ kind: "shape", shape: entry.shape, ...(entry.text ? { text: "Your text here" } : {}) }, entry.label)}><span className="builder-swatch" style={{ background: entry.color }} />{entry.label}</button>)}</div>
             {library.length > 0 && <LibraryPicker library={library} onAdd={(model) => addObject({ kind: "model", url: model.url }, model.name)} />}
             <ModelUrl onAdd={(url) => addObject({ kind: "model", url }, url.split("/").pop()?.replace(/\.(glb|gltf)(\?.*)?$/i, "") || "Model")} />
+            {tour && <ModelUpload api={api} onAdd={(url, name) => addObject({ kind: "model", url }, name)} onError={setError} />}
           </div>}
           {draft.objects.map((object) => <article key={object.id} className={`builder-card${selected === object.id ? " open current" : ""}`}>
             <header><button type="button" className="builder-card-title" onClick={() => {
@@ -619,6 +620,27 @@ function ModelUrl({ onAdd }: { onAdd: (url: string) => void }) {
     <label htmlFor="model-url">Your own model (a glTF or GLB address)</label>
     <div className="builder-row"><input id="model-url" type="url" placeholder="https://example.com/statue.glb" value={url} onChange={(event) => setUrl(event.target.value)} /><button type="submit" disabled={!valid}>Add</button></div>
   </form>;
+}
+
+/** A .glb from this computer (for example exported from Blender), kept with the tour. */
+function ModelUpload({ api, onAdd, onError }: { api: string; onAdd: (url: string, name: string) => void; onError: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  return <label className="builder-upload">Upload a model (.glb, up to 25 MB)
+    <input type="file" accept=".glb,model/gltf-binary" disabled={busy} onChange={async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      setBusy(true); onError("");
+      try {
+        const response = await fetch(`${api}/models`, { method: "POST", headers: { "Content-Type": "model/gltf-binary" }, body: file });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "Unable to upload that model.");
+        onAdd(result.url, file.name.replace(/\.glb$/i, "") || "Model");
+      } catch (failure) { onError((failure as Error).message); }
+      finally { setBusy(false); }
+    }} />
+    {busy && <span className="editor-help">Uploading</span>}
+  </label>;
 }
 
 function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere, onPreview }: {
