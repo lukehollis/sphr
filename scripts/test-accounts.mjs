@@ -168,6 +168,16 @@ test('spaces, uploads and the processing queue', async () => {
   const failed = store.finishJob(redo.id, { ok: false, message: 'The ZIP contained no E57 file.' });
   assert.equal(failed.space.status, 'failed');
   assert.equal(failed.space.sceneId, job.sceneId, 'a failed reprocess keeps the published scene');
+  // Submitting again replaces an attempt still waiting for an operator.
+  const stuck = store.submitCustomerSpace(space.id, null);
+  store.claimJob(stuck.id, 'worker-a');
+  store.holdJob(stuck.id, 'Unfamiliar format.');
+  const retry = store.submitCustomerSpace(space.id, null);
+  assert.equal(store.readJob(stuck.id).status, 'canceled', 'a resubmission replaces the held job');
+  assert.match(store.readJob(stuck.id).message, /^Replaced by a new submission\. Unfamiliar format\./);
+  assert.deepEqual(store.listJobs(['held']).map(item => item.id), [], 'nothing stale waits for an operator');
+  store.claimJob(retry.id, 'worker-a');
+  store.finishJob(retry.id, { ok: false, message: 'Still unfamiliar.' });
 
   // Deleting while a job runs cancels its result.
   const other = store.createCustomerSpace(user.id, 'Gallery', 'draft');

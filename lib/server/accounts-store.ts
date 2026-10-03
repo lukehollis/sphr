@@ -610,6 +610,10 @@ export function submitCustomerSpace(spaceId: string, notes: string | null) {
     if (!uploads.some(upload => upload.status === "complete")) throw new AccountError("Upload at least one file first.");
     if (uploads.some(upload => upload.status === "uploading")) throw new AccountError("Wait for every upload to finish, or remove unfinished files.");
     const id = randomId(8);
+    // A new submission replaces earlier attempts that wait for an operator; releasing one later would
+    // overwrite whatever the new job builds.
+    store().prepare("UPDATE jobs SET status='canceled', message='Replaced by a new submission. ' || COALESCE(message, ''), finished=? WHERE space_id=? AND status='held'")
+      .run(now(), spaceId);
     // The scene ID is fixed before processing so a job can only publish its own space.
     store().prepare("INSERT INTO jobs(id, space_id, scene_id, status, created) VALUES (?, ?, ?, 'queued', ?)").run(id, spaceId, space.sceneId ?? unusedSceneId(), now());
     store().prepare("UPDATE customer_spaces SET status='queued', notes=?, message=NULL, updated=? WHERE id=?").run(notes, now(), spaceId);
