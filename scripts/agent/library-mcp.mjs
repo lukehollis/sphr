@@ -8,7 +8,7 @@ const endpoint = process.env.SPHR_LIBRARY_SEARCH_URL ?? '';
 
 const tool = {
   name: 'search_models',
-  description: 'Search the whole model library by what you need (for example "bronze statue", "canopic jar", "wooden chest"). Returns model IDs to use as a model\'s url, with names, kinds and heights in meters at scale 1. Several short searches work better than one long one.',
+  description: 'Search the whole model library by what you need (for example "bronze statue", "canopic jar", "wooden chest"). Returns model IDs to use as a model\'s url, with names, kinds, heights in meters at scale 1 and the animation clips of characters and animals. Several short searches work better than one long one.',
   inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] }
 };
 
@@ -21,7 +21,7 @@ async function search({ query, limit = 16 }) {
   if (!response.ok) return `The library search failed (HTTP ${response.status}).`;
   const { models = [], total = 0 } = await response.json();
   if (!models.length) return `No models match "${query}" among ${total}. Try other words, or use a shape.`;
-  return models.map((model) => `${model.id}: ${model.name} (${model.category}${model.pack ? `, ${model.pack}` : ''}), about ${Math.round(model.height * 100) / 100} m tall${model.tags?.length ? `, ${model.tags.join(' ')}` : ''}`).join('\n');
+  return models.map((model) => `${model.id}: ${model.name} (${model.category}${model.pack ? `, ${model.pack}` : ''}), about ${Math.round(model.height * 100) / 100} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(' ')}` : ''}${model.animations?.length ? `, animated: ${model.animations.join(', ')}` : ''}`).join('\n');
 }
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);

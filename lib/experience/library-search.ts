@@ -36,7 +36,7 @@ export function searchLibrary(models: LibraryModel[], query: string, limit = 24)
 
 /** The animation clips a model plays (characters and animals), when the library lists them. */
 export function modelAnimations(model: LibraryModel) {
-  const clips = (model as LibraryModel & { animations?: unknown }).animations;
+  const clips: unknown = model.animations;
   return Array.isArray(clips) ? clips.filter((clip): clip is string => typeof clip === "string") : [];
 }
 

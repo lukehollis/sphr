@@ -190,7 +190,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
       : "Drawn versions: none yet, so the line drawing, blueprint and watercolor looks trace the frame's edges instead, which suits strong architectural edges best.",
     `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map(paramSummary).join(", ")}.` : ""}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
-    library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model, or a model ID from search_models when you have that tool). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
+    library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model, or a model ID from search_models when you have that tool). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}${model.animations?.length ? `, animated: ${model.animations.join(", ")}` : ""}`).join("\n")}` : "",
     `Current draft:\n${JSON.stringify(draft)}`
   ].filter(Boolean);
   return { text: lines.join("\n\n"), images, library, codes: picked.codes };
@@ -207,7 +207,7 @@ Writing. Text is plain, warm and specific to what is visible. Two to four senten
 
 Sound. A little sound goes a long way: background music or an ambient bed fitting the place (a music effect, always or on chosen stops), and a few sound effects tied to moments. Hunt finds and hints already chime.
 
-Models. Prefer a library model to a plain shape whenever one fits: an amphora, a statue, a lantern, a chest, a column. If you have the search_models tool, search the whole library for what you need (several short searches beat one long one) and use a result's ID as the model's url. When the person gives the address of a model of their own (an https .glb, such as one they made in Blender and uploaded to the tour), use that address as the url. Models are sized in meters at scale 1, so a 0.9 m amphora at scale 1 is life size; scale only to make a point (a giant key, a tiny temple model).
+Models. Prefer a library model to a plain shape whenever one fits: an amphora, a statue, a lantern, a chest, a column. If you have the search_models tool, search the whole library for what you need (several short searches beat one long one) and use a result's ID as the model's url. When the person gives the address of a model of their own (an https .glb, such as one they made in Blender and uploaded to the tour), use that address as the url. Models are sized in meters at scale 1, so a 0.9 m amphora at scale 1 is life size; scale only to make a point (a giant key, a tiny temple model). Characters and animals listed as animated play their idle clip; set "animation" to one of their listed clip names for another (a walk, a dance), and give animated models idle "none".
 
 Looks. A look restyles the whole frame, like a filter in a video editor: a line drawing, a blueprint, film noir, night vision and more. Set "style" on the tour for its overall look, or on a stop to change the look there, with a transition: cut, fade, dissolve, wipe, iris (opens from what the stop is about), sweep (opens through the space like a scan) or glitch, and a duration in seconds. A stop without "style" keeps the tour's look; give a stop {"look": "color"} to return to the capture itself. Use looks to mark moments and moods (a line drawing that sweeps into color, a blueprint for how a building was planned, noir for a mystery), not on every stop.
 
@@ -262,6 +262,7 @@ const WRITE_TOUR: Anthropic.Tool = {
             rotation: vec3Schema,
             scale: { anyOf: [{ type: "number" }, vec3Schema] },
             idle: { type: "string", enum: ["none", "spin", "bob", "float"] },
+            animation: { type: "string" },
             label: { type: "string" },
             always: { type: "boolean" }
           },

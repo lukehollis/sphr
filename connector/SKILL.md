@@ -41,7 +41,8 @@ temples, tombs, gardens) and gets its own link.
    transition: `cut`, `fade`, `dissolve`, `wipe`, `iris`, `sweep` or `glitch`. Use them for moments
    (a drawing that sweeps into color, a blueprint of how a temple was planned), not on every stop.
 4. `search_models` finds ready-made models (statues, amphorae, temples, furniture, animals). Each is
-   sized in meters at scale 1.
+   sized in meters at scale 1. Animated characters and animals list their clips and play `idle` unless
+   an object sets `"animation"` to another.
 5. For an object the library lacks, if a Blender MCP is connected, build it there in real-world meters,
    standing on its origin, low poly, with base colors, and export glTF Binary (`.glb`) with everything
    embedded (`bpy.ops.export_scene.gltf(filepath=..., export_format="GLB")`). `upload_model` sends it

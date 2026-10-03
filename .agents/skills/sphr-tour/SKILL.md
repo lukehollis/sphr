@@ -86,7 +86,9 @@ with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
 - **Models.** An object's `source` is a pack shape, a library model or any https
   `.glb`. Search the library (thousands of models, sized in meters at scale 1)
   with `GET /api/library/search?q=amphora` or the connectors' `search_models`;
-  the result's `url` goes in `{ "kind": "model", "url": ... }`. For an object the
+  the result's `url` goes in `{ "kind": "model", "url": ... }`. Characters and
+  animals list their clips (`animated: idle, walk`); they play `idle` (or their
+  first clip) unless the object sets `"animation": "<clip>"`. For an object the
   library lacks, model it in Blender (see below) and upload it.
 - **Sound.** `sound` effects (enter, loop, found, hint, click; positional when
   targeted) and one `music` effect listed on the stops it plays through.
@@ -122,6 +124,8 @@ When a Blender MCP is connected (or Blender runs headless:
 1. Model in real-world meters with Z up in Blender (glTF export turns it into Y up),
    origin at the base so the object stands on the floor, low poly (under about
    50k triangles), Principled BSDF base colors or small packed textures.
+   Animate with actions (one per clip, named like `idle` or `walk`); they export
+   as glTF animations and play in the viewer.
 2. Export glTF Binary with everything embedded:
    `bpy.ops.export_scene.gltf(filepath="tripod.glb", export_format="GLB", export_apply=True)`.
    Keep it under 25 MB; uploads reject external buffers and files without meshes.
