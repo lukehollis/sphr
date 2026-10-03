@@ -13,7 +13,23 @@ export type ParamSpec =
   | { key: string; label: string; type: "number"; min: number; max: number; step?: number; default: number }
   | { key: string; label: string; type: "color"; default: string }
   | { key: string; label: string; type: "boolean"; default: boolean }
-  | { key: string; label: string; type: "select"; options: { value: string; label: string }[]; default: string };
+  | { key: string; label: string; type: "select"; options: { value: string; label: string }[]; default: string }
+  /** A sound from the installed packs (by ID) or an audio file address. */
+  | { key: string; label: string; type: "sound"; kinds: SoundKind[]; default: string };
+
+export type SoundKind = "sfx" | "ambient" | "music";
+
+export type SoundMeta = {
+  id: string;
+  label: string;
+  kind: SoundKind;
+  /** One sentence for the editor and the tour agent. */
+  description: string;
+};
+
+/** Renders a sound into a buffer: synthesized, or decoded from a hosted file. */
+export type SoundRenderer = (sampleRate: number) => Promise<AudioBuffer>;
+export type SoundEntry = SoundMeta & { load: () => Promise<{ default: SoundRenderer }> };
 
 export type EffectTargetKind = "scene" | "object" | "point";
 
@@ -90,6 +106,8 @@ export type EffectContext = {
   panorama: PanoramaStyle | null;
   /** First person at a panorama, or the overview (dollhouse). */
   viewMode(): "FPV" | "ORBIT";
+  /** Sound for effects that play audio; created on first use. */
+  audio(): AudioHost;
   reducedMotion: boolean;
 };
 
@@ -116,6 +134,17 @@ export type Pack = {
   label: string;
   effects: EffectEntry[];
   shapes: ShapeEntry[];
+  sounds?: SoundEntry[];
+};
+
+/** Audio shared by every effect: one context, a listener on the camera and a master volume. */
+export type AudioHost = {
+  context: AudioContext;
+  listener: THREE.AudioListener;
+  /** A library sound by ID, or a file address, decoded and cached. */
+  buffer(source: string): Promise<AudioBuffer | null>;
+  /** True once the browser lets audio play (after the visitor's first touch or key). */
+  unlocked(): boolean;
 };
 
 /** Fill in defaults and clamp a params object against an effect's specs. */
@@ -131,6 +160,9 @@ export function resolveParams(meta: Pick<EffectMeta, "params">, input: unknown):
       output[spec.key] = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : spec.default;
     } else if (spec.type === "boolean") {
       output[spec.key] = typeof value === "boolean" ? value : spec.default;
+    } else if (spec.type === "sound") {
+      const ok = typeof value === "string" && (/^[a-z0-9][a-z0-9-]{0,63}$/.test(value) || /^https:\/\/[^\s]{1,2000}$/.test(value) || /^\/(?!\/)[^\s]{1,500}$/.test(value));
+      output[spec.key] = ok ? value as string : spec.default;
     } else {
       output[spec.key] = typeof value === "string" && spec.options.some((option) => option.value === value) ? value : spec.default;
     }

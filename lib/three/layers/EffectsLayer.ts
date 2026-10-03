@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { effectEntry } from "@/lib/experience/packs";
-import { resolveParams, type EffectContext, type EffectHandle, type PointerHit, type SplatHost } from "@/lib/experience/registry";
+import { resolveParams, type AudioHost, type EffectContext, type EffectHandle, type PointerHit, type SplatHost } from "@/lib/experience/registry";
 import type { EffectInstance } from "@/lib/experience/types";
 import type { ObjectLayer } from "./ObjectLayer";
 import type { PanoramaStyle } from "@/lib/three/renderers/PanoramaLayer";
@@ -23,6 +23,7 @@ export type EffectsHost = {
   splats: () => SplatHost | null;
   panorama: () => PanoramaStyle | null;
   viewMode: () => "FPV" | "ORBIT";
+  audio: () => AudioHost;
 };
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -76,6 +77,15 @@ export class EffectsLayer {
       handled = true;
     }
     return handled;
+  }
+
+  /** Whether the tour has its own sound for this cue on an object. */
+  hasSound(objectId: string, cue: "found" | "hint" | "click") {
+    for (const record of this.records.values()) {
+      const target = record.instance.target;
+      if (!record.transient && record.instance.type === "sound" && target.kind === "object" && target.id === objectId && record.instance.params.trigger === cue) return true;
+    }
+    return false;
   }
 
   /** A short-lived effect for a hunt find or hint when the tour defines none. */
@@ -173,6 +183,7 @@ export class EffectsLayer {
       splats: host.splats(),
       panorama: host.panorama(),
       viewMode: () => host.viewMode(),
+      audio: () => host.audio(),
       reducedMotion: reducedMotion()
     };
   }

@@ -180,6 +180,7 @@ export class ViewerSession {
 
   selectObject(id: string | null) { this.active?.three?.selectObject(id); }
   lookAtObject(id: string) { this.active?.three?.lookAtObject(id); }
+  previewSound(source: string) { return this.active?.three?.previewSound(source) ?? Promise.resolve(false); }
   setGizmoMode(mode: GizmoMode) { this.active?.three?.setGizmoMode(mode); }
   resolveAnchor(anchor: PixelAnchor) { return this.active?.three?.resolveAnchor(anchor) ?? null; }
   cameraView() { return this.active?.three?.cameraView() ?? null; }

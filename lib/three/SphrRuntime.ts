@@ -21,6 +21,7 @@ import { NavigationLayer } from "@/lib/three/layers/NavigationLayer";
 import { SceneGraphLayer } from "@/lib/three/layers/SceneGraphLayer";
 import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
 import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
+import { ExperienceAudio } from "@/lib/experience/audio";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { PanoramaLayer, panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
@@ -95,6 +96,7 @@ export class SphrRuntime {
   private lastSurfaceHover = 0;
   private tooltip: HTMLDivElement | null = null;
   private spaceBounds: THREE.Box3 | null = null;
+  private experienceAudio: ExperienceAudio | null = null;
   private currentNode: NodeData | null = null;
   private cubeRenderTarget: THREE.WebGLCubeRenderTarget | null = null;
   private cubeCamera: THREE.CubeCamera | null = null;
@@ -370,6 +372,7 @@ export class SphrRuntime {
   toggleMute() {
     this.state.muted = !this.state.muted;
     this.audio.setMuted(this.state.muted);
+    this.experienceAudio?.setMuted(this.state.muted);
     this.annotations?.setMuted(this.state.muted);
     this.emitState();
   }
@@ -464,6 +467,8 @@ export class SphrRuntime {
     this.gizmo = null;
     this.effects?.dispose();
     this.objects?.dispose();
+    this.experienceAudio?.dispose();
+    this.experienceAudio = null;
     this.tooltip?.remove();
     this.tooltip = null;
     this.textureCache.dispose();
@@ -819,10 +824,25 @@ export class SphrRuntime {
       spaceBounds: (out) => out.copy(this.getSpaceBounds()),
       splats: () => this.splats?.splatHost() ?? null,
       panorama: () => this.panorama?.style ?? null,
-      viewMode: () => this.state.viewMode
+      viewMode: () => this.state.viewMode,
+      audio: () => this.audioHost()
     });
     await Promise.all([this.objects.setObjects(this.tour.objects), this.effects.setEffects(this.tour.effects)]);
     this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0);
+  }
+
+  /** Effect audio is created on first use, following the viewer's mute state. */
+  private audioHost() {
+    if (!this.experienceAudio) {
+      this.experienceAudio = new ExperienceAudio(this.camera);
+      this.experienceAudio.setMuted(this.state.muted);
+    }
+    return this.experienceAudio;
+  }
+
+  /** Editor: hear a sound from the packs or an audio address. */
+  previewSound(source: string) {
+    return this.audioHost().preview(source);
   }
 
   private applyExperienceForPoint(point?: TourPoint) {
@@ -893,6 +913,7 @@ export class SphrRuntime {
       this.huntFound.add(id);
       this.objects?.collect(id);
       if (!this.effects?.cue(id, "found")) void this.effects?.flash("sparkles", id, "found", { mode: "burst", color: "#fff6c2", color2: "#f7c948", radius: 0.9 });
+      if (!this.effects?.hasSound(id, "found")) void this.effects?.flash("sound", id, "found", { sound: "found", trigger: "found", volume: 0.8, range: 20 }, 5);
       this.audio.play("found");
       this.applyExperienceForPoint(point);
       this.emitState();
@@ -910,6 +931,7 @@ export class SphrRuntime {
     if (this.tour.kind !== "hunt" || !id || this.huntFound.has(id)) return;
     this.hintShown = true;
     if (!this.effects?.cue(id, "hint")) void this.effects?.flash("beacon", id, "hint", { height: 3, radius: 0.6, color: "#ffffff" }, 12);
+    if (!this.effects?.hasSound(id, "hint")) void this.effects?.flash("sound", id, "hint", { sound: "hint", trigger: "hint", volume: 0.6, range: 30 }, 4);
     this.applyExperienceForPoint(point);
     this.emitState();
   }

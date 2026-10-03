@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
-import { effectEntries, shapeEntries } from "@/lib/experience/packs";
+import { effectEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience } from "@/lib/experience/types";
 import type { NodeData, SphrBootstrap } from "@/lib/types";
@@ -140,7 +140,8 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
-    `Effects you can use:\n${effectEntries().map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
+    `Effects you can use:\n${effectEntries().map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map((param) => param.type === "number" ? `${param.key} ${param.min}..${param.max} default ${param.default}` : param.type === "select" ? `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}` : param.type === "sound" ? `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}` : `${param.key} ${param.type} default ${param.default}`).join(", ")}.`).join("\n")}`,
+    `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
     library.length ? `Library models you can place (source {"kind":"model","url":...}):\n${library.map((model) => `${model.url} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}`).join("\n")}` : "",
     `Current draft:\n${JSON.stringify(draft)}`
@@ -156,6 +157,8 @@ You always answer by calling the write_tour tool exactly once with the complete 
 Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a client view. Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Keep an existing object's position by leaving its position as it is and place null.
 
 Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues describe where to look without naming the exact spot; hints are more direct; found messages reward the visitor with one real detail about the place. Hunt steps should start from a location where the object is reachable but not in the middle of the view.
+
+Sound. A little sound goes a long way: background music or an ambient bed fitting the place (a music effect, always or on chosen stops), and a few sound effects tied to moments. Hunt finds and hints already chime.
 
 Effects. Use effects to serve the story, not everywhere. A stop lists the effect IDs that run while it is shown; "always" effects run through free exploration too. Use the object target to attach an effect to a placed object. Hunt finds already burst with sparkles, so you do not need to add that. Use colors that suit the space.
 

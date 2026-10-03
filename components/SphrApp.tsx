@@ -153,7 +153,7 @@ export default function SphrApp({ configUrl, preview, edits, editor, chrome = !e
             title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
-            hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim()))}
+            hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim())) || Boolean(tour?.effects.some((effect) => effect.type === "sound" || effect.type === "music"))}
             canToggleView={!viewerSpace?.space_data.noPanos || Boolean(viewerSpace.space_data.clickNavigation || viewerSpace.space_data.splats?.length)}
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}

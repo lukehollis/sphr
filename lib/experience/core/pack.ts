@@ -64,6 +64,37 @@ const core: Pack = {
       load: () => import("@/lib/experience/core/sketch")
     },
     {
+      type: "sound",
+      label: "Sound effect",
+      description: "A sound that plays when a stop opens, loops while it runs, or answers a hunt find, a hint or a click; on an object or a spot it comes from that place and fades with distance.",
+      targets: ["scene", "object", "point"],
+      params: [
+        { key: "sound", label: "Sound", type: "sound", kinds: ["sfx", "ambient"], default: "chime" },
+        { key: "trigger", label: "Plays", type: "select", default: "enter", options: [
+          { value: "enter", label: "When the stop opens" },
+          { value: "loop", label: "On repeat while the stop runs" },
+          { value: "found", label: "When the hunt item is found" },
+          { value: "click", label: "When its object is clicked" },
+          { value: "hint", label: "When a hint is asked for" }
+        ] },
+        { key: "volume", label: "Volume", type: "number", min: 0, max: 1, step: 0.05, default: 0.7 },
+        { key: "range", label: "Heard within (m)", type: "number", min: 1, max: 60, step: 1, default: 6 }
+      ],
+      load: () => import("@/lib/experience/core/sound")
+    },
+    {
+      type: "music",
+      label: "Background music",
+      description: "Music or an ambient bed for the stops that list it, or the whole visit; it fades between stops and keeps playing across stops that share it.",
+      targets: ["scene"],
+      params: [
+        { key: "track", label: "Track", type: "sound", kinds: ["music", "ambient"], default: "calm" },
+        { key: "volume", label: "Volume", type: "number", min: 0, max: 1, step: 0.05, default: 0.35 },
+        { key: "fade", label: "Fade (s)", type: "number", min: 0, max: 10, step: 0.5, default: 2 }
+      ],
+      load: () => import("@/lib/experience/core/music")
+    },
+    {
       type: "dust",
       label: "Floating dust",
       description: "Slow motes of dust drifting in the air, catching the light, around the target or through the whole space.",
@@ -90,6 +121,17 @@ const core: Pack = {
       ],
       load: () => import("@/lib/experience/core/beacon")
     }
+  ],
+  sounds: [
+    { id: "chime", label: "Chime", kind: "sfx", description: "Two bright bell tones.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.chime })) },
+    { id: "sparkle", label: "Sparkle", kind: "sfx", description: "A quick rising shimmer of high notes.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.sparkle })) },
+    { id: "found", label: "Found it", kind: "sfx", description: "A rising three-bell reward with sparkles, for hunt finds.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.found })) },
+    { id: "hint", label: "Hint", kind: "sfx", description: "A soft two-note bell.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.hint })) },
+    { id: "pop", label: "Pop", kind: "sfx", description: "A short bubbly pop.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.pop })) },
+    { id: "whoosh", label: "Whoosh", kind: "sfx", description: "A rush of air, for reveals and scans.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.whoosh })) },
+    { id: "click", label: "Click", kind: "sfx", description: "A tiny interface click.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.click })) },
+    { id: "air", label: "Room tone", kind: "ambient", description: "A quiet breathing room tone.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.air })) },
+    { id: "calm", label: "Calm", kind: "music", description: "Gentle piano-like notes over soft chords.", load: () => import("@/lib/experience/core/sounds").then((module) => ({ default: module.calm })) }
   ],
   shapes: [
     { shape: "marker", label: "Map pin", description: "A map pin that floats over a spot.", color: "#e03c31", size: 0.45, load: () => import("@/lib/experience/core/shapes").then((module) => ({ default: module.marker })) },

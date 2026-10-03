@@ -270,6 +270,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .builder-grid img { flex: none; width: 36px; height: 36px; object-fit: contain; background: #333; }
 .builder-swatch { flex: none; display: inline-block; width: 18px; height: 18px; background: #555; }
 .builder-library { display: grid; gap: 8px; }
+.builder-sound select { flex: 1; }
+.builder-sound .builder-row { flex-wrap: nowrap; align-items: stretch; }
+.builder-sound .builder-row select { margin-top: 6px; }
+.builder-play { flex: none; width: 44px; margin-top: 6px; display: grid; place-items: center; background: #2c2c2c; color: #f5f3ee; }
+.builder-sound input { margin-top: 6px; }
 .builder-library input { margin-top: 0 !important; }
 .builder-url label { font-size: 13px; }
 .builder-url .builder-row input { margin-top: 0; }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Camera, Eye, Move3d, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Eye, Move3d, Play, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
 import SphrApp from "./SphrApp";
 import type { SceneListing } from "@/lib/scene-types";
 import type { SceneEdits } from "@/lib/scene-edits";
@@ -9,7 +9,7 @@ import type { ObjectTransform, RuntimeState } from "@/lib/types";
 import type { ViewerSession } from "@/lib/viewer/ViewerSession";
 import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
-import { effectEntries, effectEntry, shapeEntries, shapeEntry } from "@/lib/experience/packs";
+import { effectEntries, effectEntry, shapeEntries, shapeEntry, soundEntries } from "@/lib/experience/packs";
 import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
 import { newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type PlacedObject, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
@@ -316,8 +316,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           <label htmlFor="agent-prompt">Tell your agent what to make</label>
           <textarea id="agent-prompt" value={prompt} rows={6} maxLength={6000} disabled={thinking || !agentReady}
             placeholder={hunt
-              ? "Hide five small treasures around this space for kids, with clues that rhyme and a hint for each."
-              : "Walk visitors through this space in five stops, starting at the entrance. Sweep a scan of light across everything at the start and let sparkles follow the pointer."}
+              ? "Hide five small treasures around this space for kids, with clues that rhyme, a hint for each and playful music."
+              : "Walk visitors through this space in five stops, starting at the entrance. Sweep a scan of light across everything at the start, play calm music, and let sparkles follow the pointer."}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void askAgent(); } }} />
           {!agentReady && <p className="editor-help">No agent is connected to this site yet. You can still build the tour by hand below.</p>}
@@ -331,7 +331,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
 
         <div className="builder-tabs" role="tablist" aria-label="Tour parts">
           {(["stops", "objects", "effects"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
-            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : `Effects ${draft.effects.length}`}
+            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : `Effects and sound ${draft.effects.length}`}
           </button>)}
         </div>
 
@@ -421,6 +421,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             {effectEntries().map((entry) => <option key={entry.type} value={entry.type} disabled={entry.requires === "splats" && !splatSpace}>{entry.label}{entry.requires === "splats" && !splatSpace ? " (splat spaces)" : ""}</option>)}
           </select></label>
           {draft.effects.map((effect) => <EffectCard key={effect.id} effect={effect} objects={draft.objects} objectName={objectName}
+            onPreview={(source) => void session.current?.previewSound(source)}
             onChange={(patch) => patchEffect(effect.id, patch)} onRemove={() => removeEffect(effect.id)}
             onHere={() => { const spot = session.current?.resolveAnchor({ x: 0.5, y: 0.6 }); if (spot) patchEffect(effect.id, { target: { kind: "point", position: spot.position } }); }} />)}
           {!draft.effects.length && <p className="editor-help">Effects added while a stop is open run at that stop. Effects added with no stops run all the time.</p>}
@@ -476,9 +477,9 @@ function ModelUrl({ onAdd }: { onAdd: (url: string) => void }) {
   </form>;
 }
 
-function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere }: {
+function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere, onPreview }: {
   effect: EffectInstance; objects: PlacedObject[]; objectName: (id: string) => string;
-  onChange: (patch: Partial<EffectInstance>) => void; onRemove: () => void; onHere: () => void;
+  onChange: (patch: Partial<EffectInstance>) => void; onRemove: () => void; onHere: () => void; onPreview: (source: string) => void;
 }) {
   const entry = effectEntry(effect.type);
   const [open, setOpen] = useState(false);
@@ -501,13 +502,37 @@ function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere }:
         {entry.targets.includes("object") && objects.map((object) => <option key={object.id} value={`object:${object.id}`}>{object.name}</option>)}
       </select></label>
       {effect.target.kind === "point" && <button type="button" onClick={onHere}>Move it where I am looking</button>}
-      {entry.params.map((param) => <Param key={param.key} spec={param} value={effect.params[param.key]} onChange={(value) => onChange({ params: { ...effect.params, [param.key]: value } })} />)}
+      {entry.params.map((param) => <Param key={param.key} spec={param} value={effect.params[param.key]} onPreview={onPreview} onChange={(value) => onChange({ params: { ...effect.params, [param.key]: value } })} />)}
       <label className="builder-check"><input type="checkbox" checked={Boolean(effect.always)} onChange={(event) => onChange({ always: event.target.checked })} /> Runs the whole time</label>
     </div>}
   </article>;
 }
 
-function Param({ spec, value, onChange }: { spec: ParamSpec; value: unknown; onChange: (value: number | string | boolean) => void }) {
+/** A sound from the packs, grouped by kind, or the address of an audio file, with a play button. */
+function SoundParam({ spec, value, onChange, onPreview }: { spec: Extract<ParamSpec, { type: "sound" }>; value: string; onChange: (value: string) => void; onPreview: (source: string) => void }) {
+  const sounds = soundEntries().filter((sound) => spec.kinds.includes(sound.kind));
+  const custom = !sounds.some((sound) => sound.id === value);
+  const [address, setAddress] = useState(custom ? value : "");
+  const groups: [string, string][] = [["music", "Music"], ["ambient", "Ambient"], ["sfx", "Sound effects"]];
+  return <div className="builder-sound">
+    <label>{spec.label}<div className="builder-row">
+      <select value={custom ? "custom" : value} onChange={(event) => { if (event.target.value !== "custom") onChange(event.target.value); else setAddress(""); }}>
+        {groups.filter(([kind]) => spec.kinds.includes(kind as never)).map(([kind, name]) => <optgroup key={kind} label={name}>
+          {sounds.filter((sound) => sound.kind === kind).map((sound) => <option key={sound.id} value={sound.id} title={sound.description}>{sound.label}</option>)}
+        </optgroup>)}
+        <option value="custom">Your own audio file</option>
+      </select>
+      <button type="button" aria-label="Play" title="Play" className="builder-play" onClick={() => onPreview(value)}><Play size={16} aria-hidden="true" /></button>
+    </div></label>
+    {custom && <input type="url" placeholder="https://example.com/music.mp3" value={address} onChange={(event) => {
+      setAddress(event.target.value);
+      if (/^https:\/\/\S+$/.test(event.target.value.trim())) onChange(event.target.value.trim());
+    }} />}
+  </div>;
+}
+
+function Param({ spec, value, onChange, onPreview }: { spec: ParamSpec; value: unknown; onChange: (value: number | string | boolean) => void; onPreview: (source: string) => void }) {
+  if (spec.type === "sound") return <SoundParam spec={spec} value={typeof value === "string" ? value : spec.default} onChange={onChange} onPreview={onPreview} />;
   if (spec.type === "number") {
     const number = typeof value === "number" ? value : spec.default;
     return <label className="builder-range">{spec.label}<span>{number}</span>
