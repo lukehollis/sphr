@@ -21,6 +21,8 @@ export type PlacedObject = {
   /** Shown everywhere, free exploration included. Otherwise only at the stops that list it. */
   always?: boolean;
   idle?: ObjectIdle;
+  /** The clip an animated model plays; its idle clip, or its first, when unset. */
+  animation?: string;
   /** Short text shown when the pointer rests on the object. */
   label?: string;
 };

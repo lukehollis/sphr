@@ -1,6 +1,6 @@
 /**
  * A model library is a JSON manifest of ready-to-place glTF models:
- * { "models": [{ "id", "name", "category", "url", "height", "tags", "thumbnail", "pack", "credit", "scope" }] }.
+ * { "models": [{ "id", "name", "category", "url", "height", "tags", "thumbnail", "pack", "credit", "animations", "scope" }] }.
  * "team" models are offered only to administrators, for assets whose license
  * does not allow handing them to every customer.
  */
@@ -16,6 +16,8 @@ export type LibraryModel = {
   pack?: string;
   /** Who made the model, for the builder's tooltip. */
   credit?: string;
+  /** Names of the animation clips an animated model carries. */
+  animations?: string[];
   scope?: "everyone" | "team";
 };
 
@@ -38,6 +40,7 @@ export function parseLibrary(value: unknown, base = ""): LibraryModel[] {
       ...(typeof model.thumbnail === "string" ? { thumbnail: resolve(model.thumbnail) } : {}),
       ...(typeof model.pack === "string" ? { pack: model.pack.slice(0, 80) } : {}),
       ...(typeof model.credit === "string" ? { credit: model.credit.slice(0, 80) } : {}),
+      ...(Array.isArray(model.animations) ? { animations: model.animations.filter((clip): clip is string => typeof clip === "string").slice(0, 24).map((clip) => clip.slice(0, 60)) } : {}),
       scope: model.scope === "team" ? "team" as const : "everyone" as const
     }];
   });

@@ -467,6 +467,13 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                 </select></label>
                 <label className="builder-check"><input type="checkbox" checked={Boolean(object.always)} onChange={(event) => patchObject(object.id, { always: event.target.checked })} /> Always shown</label>
               </div>
+              {(() => {
+                const source = object.source;
+                const clips = source.kind === "model" ? library.find((model) => model.url === source.url)?.animations ?? [] : [];
+                return clips.length > 1 && <label>Animation<select value={object.animation ?? ""} onChange={(event) => patchObject(object.id, { animation: event.target.value || undefined })}>
+                  <option value="">Default</option>{clips.map((clip) => <option key={clip} value={clip}>{clip}</option>)}
+                </select></label>;
+              })()}
               <Transform label="Position (m)" value={object.position} step={0.05} onChange={(position) => patchObject(object.id, { position })} />
               <Transform label="Turn (degrees)" value={object.rotation} step={5} onChange={(rotation) => patchObject(object.id, { rotation })} />
               <Transform label="Size" value={object.scale} step={0.1} onChange={(scale) => patchObject(object.id, { scale: scale.map((value) => Math.max(0.001, value)) as Vec3 })} />

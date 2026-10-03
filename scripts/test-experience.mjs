@@ -287,3 +287,11 @@ test('agents learn the looks, effects and sounds a site has', async () => {
   assert.match(catalog.looks.find((look) => look.id === 'lines').params.join(' '), /weight 0\.6\.\.3 default 1\.3/);
   assert.ok(catalog.sounds.some((sound) => sound.id === 'calm' && sound.kind === 'music'));
 });
+
+test('placed objects keep the animation clip they play', () => {
+  const experience = parseExperience({ version: 1, kind: 'tour', stops: [], effects: [], objects: [
+    { id: 'dog', name: 'Dog', source: { kind: 'model', url: 'https://cdn.example/dog.glb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], animation: '  Wag tail ' },
+    { id: 'cat', name: 'Cat', source: { kind: 'model', url: 'https://cdn.example/cat.glb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], animation: 7 }] });
+  assert.equal(experience.objects[0].animation, 'Wag tail');
+  assert.equal('animation' in experience.objects[1], false);
+});

@@ -100,6 +100,7 @@ function placedObject(value: unknown, index: number, lenient: boolean): PlacedOb
   const idle = input.idle === "spin" || input.idle === "bob" || input.idle === "float" ? input.idle : "none";
   const name = text(input.name, LIMITS.name, `${label} name`).trim() || `Object ${index + 1}`;
   const hover = text(input.label, 300, `${label} label`).trim();
+  const animation = typeof input.animation === "string" ? input.animation.trim().slice(0, 60) : "";
   return {
     id: id(input.id, label),
     name,
@@ -109,6 +110,7 @@ function placedObject(value: unknown, index: number, lenient: boolean): PlacedOb
     scale,
     ...(input.always === true ? { always: true } : {}),
     ...(idle !== "none" ? { idle } : {}),
+    ...(animation ? { animation } : {}),
     ...(hover ? { label: hover } : {})
   };
 }

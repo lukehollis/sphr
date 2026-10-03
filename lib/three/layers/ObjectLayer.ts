@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { shapeEntry } from "@/lib/experience/packs";
 import type { PlacedObject } from "@/lib/experience/types";
 
@@ -17,6 +18,9 @@ type ObjectRecord = {
   wanted: boolean;
   collect: number | null;
   phase: number;
+  /** Plays an animated model's clip. */
+  mixer: THREE.AnimationMixer | null;
+  clip: string;
 };
 
 const DEG = THREE.MathUtils.DEG2RAD;
@@ -65,7 +69,7 @@ export class ObjectLayer {
         const motion = new THREE.Group();
         holder.add(motion);
         this.root.add(holder);
-        record = { data, holder, motion, content: null, sourceKey: "", shown: 0, wanted: false, collect: null, phase: Math.random() * Math.PI * 2 };
+        record = { data, holder, motion, content: null, sourceKey: "", shown: 0, wanted: false, collect: null, phase: Math.random() * Math.PI * 2, mixer: null, clip: "" };
         this.records.set(data.id, record);
       }
       record.data = data;
@@ -74,6 +78,8 @@ export class ObjectLayer {
       if (key !== record.sourceKey) {
         record.sourceKey = key;
         loads.push(this.build(record, key));
+      } else if ((data.animation ?? "") !== record.clip) {
+        this.play(record);
       }
     }
     await Promise.all(loads);
@@ -161,6 +167,7 @@ export class ObjectLayer {
       record.motion.position.y = lift + (idle === "bob" ? Math.sin(phase * 2) * 0.05 : idle === "float" ? 0.08 + Math.sin(phase * 1.2) * 0.08 : 0);
       record.motion.rotation.y = spin + (idle === "spin" ? time * 1.2 : idle === "float" ? Math.sin(phase * 0.6) * 0.3 : 0);
       record.motion.scale.setScalar(Math.max(0.0001, scale));
+      if (record.holder.visible) record.mixer?.update(delta);
     }
   }
 
@@ -194,6 +201,7 @@ export class ObjectLayer {
     prepareForOcclusion(content);
     record.content = content;
     record.motion.add(content);
+    this.play(record);
     this.onLoaded();
   }
 
@@ -209,7 +217,10 @@ export class ObjectLayer {
       let request = this.models.get(source.url);
       if (!request) { request = this.loader.loadAsync(source.url); this.models.set(source.url, request); }
       const gltf = await request;
-      return gltf.scene.clone(true);
+      // Skinned characters and animals need their skeletons cloned with them.
+      const content = cloneSkinned(gltf.scene);
+      content.userData.clips = gltf.animations;
+      return content;
     }
     const texture = await this.textures.loadAsync(source.url);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -222,7 +233,25 @@ export class ObjectLayer {
     );
   }
 
+  /** Start the object's chosen clip: the one it names, else one called idle, else the first. */
+  private play(record: ObjectRecord) {
+    record.mixer?.stopAllAction();
+    record.mixer = null;
+    record.clip = record.data.animation ?? "";
+    const clips = (record.content?.userData.clips ?? []) as THREE.AnimationClip[];
+    if (!record.content || !clips.length) return;
+    const clip = clips.find((item) => item.name === record.data.animation)
+      ?? clips.find((item) => /idle/i.test(item.name)) ?? clips[0];
+    record.mixer = new THREE.AnimationMixer(record.content);
+    const action = record.mixer.clipAction(clip);
+    action.play();
+    // Several copies of one model should not move in step.
+    action.time = record.phase / (Math.PI * 2) * clip.duration;
+  }
+
   private disposeContent(record: ObjectRecord) {
+    record.mixer?.stopAllAction();
+    record.mixer = null;
     if (!record.content) return;
     record.motion.remove(record.content);
     // Models are shared clones: only dispose geometry that this object owns.
