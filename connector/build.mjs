@@ -63,18 +63,28 @@ try {
     ['upload_files', 'Uploads a capture in the background and submits it for processing'],
     ['space_status', 'Shows upload and processing progress'],
     ['set_visibility', 'Makes a ready space public or private'],
-    ['unlink_account', 'Unlinks this agent']
+    ['unlink_account', 'Unlinks this agent'],
+    ['find_tour_spaces', 'Finds your spaces and public spaces to build a guided tour or scavenger hunt on'],
+    ['list_tours', 'Lists your tours and scavenger hunts with their links'],
+    ['create_tour', 'Starts a guided tour or scavenger hunt on a space'],
+    ['draft_tour', `Asks ${brand.name}'s tour agent to write the tour, with models, effects, sound and looks`],
+    ['wait_for_tour', 'Waits for a draft and summarizes the tour'],
+    ['get_tour', 'Shows a tour with every look, effect and sound it can use'],
+    ['save_tour', 'Saves a tour edited by hand'],
+    ['search_models', 'Searches the library of ready-made 3D models'],
+    ['upload_model', 'Adds a .glb model from this computer, for example one made in Blender, to a tour'],
+    ['share_tour', 'Shares a tour by link, or makes it private again']
   ].map(([name, description]) => ({ name, description }));
   const manifest = {
     manifest_version: '0.3', name: brand.slug, display_name: brand.name, version,
-    description: `Publish 3D captures from this computer as ${brand.name} spaces`,
-    long_description: `${brand.name} hosts 3D captures as virtual spaces with guided tours, shared with a link. Ask Claude to publish an E57 or other laser scan, a Matterport export, a Gaussian splat, 360 photos or video, or a mesh. Claude checks the files, links your account through a code you approve in your browser, opens Stripe Checkout when hosting needs payment and uploads in the background, resuming after interruptions. ${brand.name} emails you when the space is ready.`,
+    description: `Publish 3D captures from this computer as ${brand.name} spaces, and build tours and scavenger hunts in them`,
+    long_description: `${brand.name} hosts 3D captures as virtual spaces with guided tours, shared with a link. Ask Claude to publish an E57 or other laser scan, a Matterport export, a Gaussian splat, 360 photos or video, or a mesh. Claude checks the files, links your account through a code you approve in your browser, opens Stripe Checkout when hosting needs payment and uploads in the background, resuming after interruptions. ${brand.name} emails you when the space is ready. Claude can also build guided tours and scavenger hunts in your spaces or ${brand.name}'s public ones, with 3D models from the library or your own (made in Blender, for example), effects, sound and looks such as a line drawing or a blueprint.`,
     author: { name: brand.name, url: site }, homepage: site, support: site, license: 'MIT',
     ...(icon ? { icon: 'icon.png' } : {}),
     server: { type: 'node', entry_point: 'server.mjs', mcp_config: { command: 'node', args: ['${__dirname}/server.mjs'], env: {} } },
     tools, prompts: [{ name: 'publish_capture', description: `Publish a 3D capture from this computer as a ${brand.name} space`, arguments: ['path'],
       text: `Publish my 3D capture at \${arguments.path} as a ${brand.name} space.` }],
-    keywords: ['3d', 'e57', 'lidar', 'gaussian splat', '360', 'virtual tour', 'upload'],
+    keywords: ['3d', 'e57', 'lidar', 'gaussian splat', '360', 'virtual tour', 'upload', 'scavenger hunt', 'guided tour'],
     privacy_policies: [`${brand.url}/privacy`],
     compatibility: { platforms: ['darwin', 'win32', 'linux'], runtimes: { node: '>=18.0.0' } }
   };
