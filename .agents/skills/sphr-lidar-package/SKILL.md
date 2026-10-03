@@ -25,7 +25,14 @@ Choose by what the scanner exported:
    ```
    Keep an OBJ's `.mtl` and texture images in the same folder (unpacked ZIPs already are). USDZ and FBX need
    Blender, which the processing image includes. Textured scans render unlit so the captured lighting shows;
-   `--lit` adds lights for plain or vertex-colored meshes. Meshes above 1.5 million faces are simplified.
+   `--lit` adds lights for plain or vertex-colored meshes. Meshes above 1.5 million faces are simplified
+   without losing colour (textured ones through Blender's decimator, which keeps their UVs).
+
+   The output's `conversion.colors` says where the model's colour comes from: `texture` (an image texture),
+   `vertex` (colour stored per vertex, common in phone and AI scan exports), `material` (one flat colour per
+   part) or `none`. Describe colour to the customer from that field, not from how the preview looks: the
+   preview is a sparse point rendering, so a `vertex` or `texture` model is in full colour even when the
+   preview looks speckled. Only `none` means the file itself carries no colour.
 
 Several exports of one scan (for example Polycam's GLB, OBJ and point cloud): prefer the textured mesh for
 small spaces and objects, the point cloud for large sites. Check `preview.jpg` either way.
