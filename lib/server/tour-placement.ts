@@ -139,10 +139,13 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
           }
         }
       }
-      // Not across the valley.
+      // Not across the valley: the first ground along the same line within reach.
       if (target.distanceTo(eye) > nearby) {
-        const ground = surfaceBelow(eye.clone().addScaledVector(target.clone().sub(eye).normalize(), nearby).add(new THREE.Vector3(0, 0.5, 0)), 40);
-        if (ground) put(ground);
+        const line = target.clone().sub(eye).normalize();
+        for (const reach of [nearby, 14, 10, 7]) {
+          const ground = surfaceBelow(eye.clone().addScaledVector(line, reach).add(new THREE.Vector3(0, 0.5, 0)), 40);
+          if (ground && visibleFrom(eye, ground.clone().add(new THREE.Vector3(0, 0.1, 0)))) { put(ground); break; }
+        }
       }
       // Not behind a wall.
       const toward = target.clone().sub(eye);
