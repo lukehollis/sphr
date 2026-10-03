@@ -7,10 +7,12 @@
 // about x,y,z), which replaces the automatic leveling. --cameras points at the COLMAP model the splat was
 // trained from: the capture is then leveled by the cameras' up direction and opens from a capture position,
 // orbiting what the cameras looked at, or standing at the start of a walkthrough.
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fail, identity, parseArgs, parseRotation } from './common.mjs';
 import { readColmapCameras } from './colmap-cameras.mjs';
+import { convertLegacySplat, legacySplatHeader } from './legacy-splat.mjs';
 import { packageSplat } from './splat-package.mjs';
 
 const options = parseArgs(process.argv.slice(2));
@@ -19,7 +21,16 @@ if (typeof input !== 'string' || !existsSync(input)) fail('Pass --input with a s
 if (!/\.(ply|spz|splat|ksplat|sog|rad)$/i.test(input)) fail(`Unsupported splat format: ${path.extname(input)}`);
 if (options.cameras !== undefined && (typeof options.cameras !== 'string' || !existsSync(options.cameras))) fail('--cameras takes a COLMAP model folder (with images.bin).');
 const cameras = options.cameras ? readColmapCameras(options.cameras) : undefined;
-const result = await packageSplat(input, identity(options), { rotation: options.rotation === undefined ? undefined : parseRotation(options.rotation), cameras,
+// Old GaussianSplats3D scenes saved a compressed .splat that Spark cannot read; it becomes standard rows.
+const work = mkdtempSync(path.join(tmpdir(), 'sphr-splat-'));
+process.on('exit', () => rmSync(work, { recursive: true, force: true }));
+let source = input, converted = null;
+if (/\.splat$/i.test(input) && legacySplatHeader(input)) {
+  source = path.join(work, 'scene.splat');
+  converted = { from: 'GaussianSplats3D SplatBuffer', ...convertLegacySplat(input, source) };
+}
+const result = await packageSplat(source, identity(options), { inputs: [input], ...(converted ? { notes: { converted } } : {}),
+  rotation: options.rotation === undefined ? undefined : parseRotation(options.rotation), cameras,
   level: !options['no-level'], interior: Boolean(options.interior),
   elevation: options.elevation !== undefined ? Number(options.elevation) : undefined, distance: options.distance !== undefined ? Number(options.distance) : undefined });
-console.log(JSON.stringify(result, null, 2));
+console.log(JSON.stringify(converted ? { ...result, converted } : result, null, 2));

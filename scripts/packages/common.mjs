@@ -260,6 +260,21 @@ export function denseCore(positions, keepFraction = 0.6) {
   return kept.length >= 300 ? Float32Array.from(kept) : positions;
 }
 
+/**
+ * Where a splat's subject is. Trainers resolve what the cameras saw most into many small, opaque splats and
+ * leave floaters and the far background as large ones, so the smallest quarter outlines the subject.
+ * Point clouds converted to splats have one size for every point and fall back to the dense core.
+ */
+export function subjectCore(positions, extents) {
+  if (!extents?.length) return denseCore(positions);
+  const cut = Float32Array.from(extents).sort()[Math.floor(extents.length * 0.25)];
+  const kept = [];
+  for (let index = 0; index < extents.length; index++) {
+    if (extents[index] <= cut) kept.push(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+  }
+  return kept.length >= 300 ? denseCore(Float32Array.from(kept)) : denseCore(positions);
+}
+
 /** Euler angles (radians, XYZ order as the viewer applies them) of the shortest rotation taking `up` to +Y. */
 export function eulerTurningToUp([ux, uy, uz]) {
   let axis = [-uz, 0, ux]; // up × Y

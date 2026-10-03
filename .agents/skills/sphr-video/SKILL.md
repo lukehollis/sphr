@@ -45,6 +45,9 @@ COLMAP here is built without CUDA: its default GPU SIFT crashes with a stack tra
 captures are often HEIC; convert frames to JPEG first with Pillow and `pillow_heif`.
 
 Check `work/colmap/sparse/0` exists and most frames registered (`colmap model_analyzer --path work/colmap/sparse/0`).
+When the walk loses track (fast turns, blank walls), COLMAP starts over and writes several models
+(`sparse/0`, `sparse/1`, …) in the order it built them, not by size. Run `model_analyzer` on each and train
+on the one with the most registered images; tell the customer if a large part of the video was left out.
 
 ## 3. Train and package
 

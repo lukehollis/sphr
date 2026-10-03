@@ -1,7 +1,7 @@
 // Packages a splat file (from a trainer, or converted from a point cloud) as an SPHR space.
 import { copyFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, titlePreview, writePackage } from './common.mjs';
+import { bounds, denseCore, freshFolder, levelRotation, orbitCamera, pointPreview, rotatePositions, startPoint, subjectCore, titlePreview, writePackage } from './common.mjs';
 import { cameraLevelRotation, cameraStartView } from './colmap-cameras.mjs';
 import { sampleSplats } from './splat-reader.mjs';
 
@@ -33,8 +33,8 @@ export async function packageSplat(input, id, { rotation, level = false, interio
   rotation ??= leveled?.rotation ?? [0, 0, 0];
   if (sample?.positions.length) {
     rotatePositions(sample.positions, rotation);
-    // Frame the dense body of the capture, not stray floaters or far background.
-    box = bounds(denseCore(sample.positions));
+    // Frame the subject (small, well-resolved splats in the dense body), not floaters or far background.
+    box = bounds(subjectCore(sample.positions, sample.extents));
     if (cameras?.length && !interior && elevation === undefined && distance === undefined) {
       const view = cameraStartView(cameras, rotation);
       camera = view.camera;
