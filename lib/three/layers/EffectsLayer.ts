@@ -3,6 +3,7 @@ import { effectEntry } from "@/lib/experience/packs";
 import { resolveParams, type EffectContext, type EffectHandle, type PointerHit, type SplatHost } from "@/lib/experience/registry";
 import type { EffectInstance } from "@/lib/experience/types";
 import type { ObjectLayer } from "./ObjectLayer";
+import type { PanoramaStyle } from "@/lib/three/renderers/PanoramaLayer";
 
 type EffectRecord = {
   instance: EffectInstance;
@@ -20,6 +21,8 @@ export type EffectsHost = {
   surfaces: () => THREE.Mesh[];
   spaceBounds: (out: THREE.Box3) => THREE.Box3;
   splats: () => SplatHost | null;
+  panorama: () => PanoramaStyle | null;
+  viewMode: () => "FPV" | "ORBIT";
 };
 
 const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -168,6 +171,8 @@ export class EffectsLayer {
       spaceBounds: (out) => host.spaceBounds(out),
       surfaces: () => host.surfaces(),
       splats: host.splats(),
+      panorama: host.panorama(),
+      viewMode: () => host.viewMode(),
       reducedMotion: reducedMotion()
     };
   }

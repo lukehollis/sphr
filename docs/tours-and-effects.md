@@ -69,9 +69,15 @@ belong to the first space of a multi-space tour.
 
 Effects and shapes come in packs (`lib/experience/registry.ts`). A pack lists
 plain metadata, which the builder, the validator and the agent read, and loads
-its Three.js code lazily only when a space uses it. Core ships four effects
-(`sparkles`, `scan`, `dust`, `beacon`) and four shapes (`marker`, `orb`, `box`,
-`sign`). Register more in `lib/experience/extra-packs.ts`.
+its Three.js code lazily only when a space uses it. Core ships five effects
+(`sparkles`, `scan`, `sketch`, `dust`, `beacon`) and four shapes (`marker`, `orb`,
+`box`, `sign`). `sketch` draws the space in pencil and ink, then a radial scan
+paints the color back in (or turns color into a drawing). Splats are restyled on
+the GPU; panoramas are drawn from the photograph's own edges. A space can also
+carry a companion splat trained on line drawings of its photos
+(`{ "url": "...", "role": "sketch" }` in `space_data.splats`, in the manner of
+[3D line drawings](https://amritkwatra.com/experiments/3d-line-drawings)); the
+sketch effect then reveals between the two splats instead. Register more in `lib/experience/extra-packs.ts`.
 
 An effect factory receives a context with the scene, camera, its target object
 or point, the space's bounds and capture meshes, and, in splat spaces, a host

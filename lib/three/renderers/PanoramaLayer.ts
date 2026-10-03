@@ -61,7 +61,84 @@ export function panoramaPixelDirection(node: NodeData, x: number, y: number, fac
   return point.applyQuaternion(group.quaternion).normalize();
 }
 
+/**
+ * Uniforms shared by every panorama material, so effects can restyle the
+ * photographs: a pencil sketch from the photo's own edges, revealed or hidden
+ * in a widening circle around a direction.
+ */
+export type PanoramaStyle = {
+  uSketch: { value: number };
+  uInk: { value: THREE.Color };
+  uPaper: { value: THREE.Color };
+  uRevealDirection: { value: THREE.Vector3 };
+  uSketchAngle: { value: number };
+  uColorAngle: { value: number };
+  uAngleWidth: { value: number };
+  uInvert: { value: number };
+};
+
+const STYLE_VERTEX = /* glsl */ `
+  #include <project_vertex>
+  vPanoDirection = (modelMatrix * vec4(transformed, 1.0)).xyz - cameraPosition;
+`;
+
+const STYLE_FRAGMENT = /* glsl */ `
+  #include <map_fragment>
+  if (uSketch > 0.001) {
+    vec2 texel = uTexel;
+    float tl = dot(texture2D(map, vMapUv + vec2(-texel.x, texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float tc = dot(texture2D(map, vMapUv + vec2(0.0, texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float tr = dot(texture2D(map, vMapUv + vec2(texel.x, texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float ml = dot(texture2D(map, vMapUv + vec2(-texel.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+    float mr = dot(texture2D(map, vMapUv + vec2(texel.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+    float bl = dot(texture2D(map, vMapUv + vec2(-texel.x, -texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float bc = dot(texture2D(map, vMapUv + vec2(0.0, -texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float br = dot(texture2D(map, vMapUv + vec2(texel.x, -texel.y)).rgb, vec3(0.299, 0.587, 0.114));
+    float gx = -tl - 2.0 * ml - bl + tr + 2.0 * mr + br;
+    float gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br;
+    float edge = smoothstep(0.12, 0.42, length(vec2(gx, gy)));
+    float luminance = dot(sampledDiffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+    float shade = 1.0 - smoothstep(0.03, 0.32, luminance);
+    float diagonal = step(0.74, fract((gl_FragCoord.x - gl_FragCoord.y) / 6.0));
+    float crossing = step(0.78, fract((gl_FragCoord.x + gl_FragCoord.y) / 7.0));
+    float ink = clamp(edge + diagonal * smoothstep(0.35, 0.7, shade) * 0.5 + crossing * smoothstep(0.75, 0.95, shade) * 0.55, 0.0, 1.0);
+    vec3 drawing = mix(uPaper, uInk, ink);
+    float angle = acos(clamp(dot(normalize(vPanoDirection), uRevealDirection), -1.0, 1.0));
+    float grain = (fract(sin(dot(floor(vMapUv * 90.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * uAngleWidth;
+    float colored = 1.0 - smoothstep(uColorAngle - uAngleWidth, uColorAngle, angle + grain);
+    colored = mix(colored, 1.0 - colored, uInvert);
+    float drawn = 1.0 - smoothstep(uSketchAngle - uAngleWidth, uSketchAngle, angle + grain);
+    vec3 page = mix(uPaper, drawing, drawn);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(page, diffuseColor.rgb, colored), uSketch);
+  }
+`;
+
+function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, texture: THREE.Texture | null) {
+  const image = texture?.image as { width?: number; height?: number } | undefined;
+  const texel = new THREE.Vector2(1 / Math.max(256, image?.width ?? 1024), 1 / Math.max(256, image?.height ?? 1024));
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, style, { uTexel: { value: texel } });
+    shader.vertexShader = "varying vec3 vPanoDirection;\n" + shader.vertexShader.replace("#include <project_vertex>", STYLE_VERTEX);
+    shader.fragmentShader = `uniform float uSketch; uniform vec3 uInk; uniform vec3 uPaper; uniform vec3 uRevealDirection;
+      uniform float uSketchAngle; uniform float uColorAngle; uniform float uAngleWidth; uniform float uInvert; uniform vec2 uTexel;
+      varying vec3 vPanoDirection;\n` + shader.fragmentShader.replace("#include <map_fragment>", STYLE_FRAGMENT);
+  };
+  material.customProgramCacheKey = () => "sphr-panorama-style-v1";
+  return material;
+}
+
 export class PanoramaLayer {
+  readonly style: PanoramaStyle = {
+    uSketch: { value: 0 },
+    uInk: { value: new THREE.Color("#2b2a27") },
+    uPaper: { value: new THREE.Color("#f2efe6") },
+    uRevealDirection: { value: new THREE.Vector3(0, 0, -1) },
+    uSketchAngle: { value: 4 },
+    uColorAngle: { value: 0 },
+    uAngleWidth: { value: 0.12 },
+    uInvert: { value: 0 }
+  };
+
   private active: PanoObject | null = null;
   private outgoing: PanoObject | null = null;
   private transitionCapture: PanoObject | null = null;
@@ -200,7 +277,7 @@ export class PanoramaLayer {
 
     if (node.image && !(node.faces?.length || node.cubeFaces?.length || node.textureTemplate)) {
       const texture = this.textureCache.getReady(urls[0]);
-      const material = new THREE.MeshBasicMaterial({
+      const material = stylable(new THREE.MeshBasicMaterial({
         map: texture,
         side: THREE.BackSide,
         transparent: true,
@@ -209,7 +286,7 @@ export class PanoramaLayer {
         fog: false,
         toneMapped: false,
         depthTest: false
-      });
+      }), this.style, texture);
       const sphere = new THREE.Mesh(new THREE.SphereGeometry(100, 64, 40), material);
       sphere.renderOrder = -10;
       sphere.rotation.copy(eulerFromLike(node.rotation));
@@ -220,7 +297,7 @@ export class PanoramaLayer {
     const materials: THREE.Material[] = [];
     for (let face = 0; face < 6; face += 1) {
       const texture = this.textureCache.getReady(urls[face]);
-      const material = new THREE.MeshBasicMaterial({
+      const material = stylable(new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
         opacity,
@@ -228,7 +305,7 @@ export class PanoramaLayer {
         fog: false,
         toneMapped: false,
         depthTest: false
-      });
+      }), this.style, texture);
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), material);
       mesh.rotation.set(...FACE_ROTATIONS[face]);
       mesh.position.set(...FACE_POSITIONS[face]);
