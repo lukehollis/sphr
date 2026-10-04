@@ -213,7 +213,6 @@ export class NavigationLayer {
     const group = new THREE.Group();
     group.name = `nav-${node.uuid}`;
 
-    // A dark rim keeps the white ring legible on sand, snow and bright sky.
     const puckMaterial = (color: number, opacity: number, hover: number) => {
       const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
       material.userData.puck = { opacity, hover, tint: color === 0xffffff };
@@ -227,20 +226,12 @@ export class NavigationLayer {
       group.add(cameraPoint);
       return group;
     }
-    const layers: [THREE.BufferGeometry, number, number, number, number][] = [
-      [new THREE.RingGeometry(radius * 0.66, radius * 1.14, 48), 0x000000, 0.3, 0.4, 0.002],
-      [new THREE.CircleGeometry(radius * 0.74, 48), 0xffffff, 0.16, 0.38, 0.004],
-      [new THREE.RingGeometry(radius * 0.74, radius, 48), 0xffffff, 0.92, 1, 0.006],
-      [new THREE.CircleGeometry(radius * 0.2, 24), 0xffffff, 0.92, 1, 0.008]
-    ];
-    layers.forEach(([geometry, color, opacity, hover, lift], index) => {
-      const mesh = new THREE.Mesh(geometry, puckMaterial(color, opacity, hover));
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = lift;
-      mesh.renderOrder = index;
-      mesh.userData.node = node;
-      group.add(mesh);
-    });
+    // A single white ring on the floor.
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.74, radius, 48), puckMaterial(0xffffff, 0.92, 1));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.006;
+    ring.userData.node = node;
+    group.add(ring);
 
     // Raycast the entire marker, including the empty space inside its ring.
     // Invisible hit geometry slightly enlarges the target without changing the photo.

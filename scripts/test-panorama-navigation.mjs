@@ -138,7 +138,7 @@ test('distant pucks grow to stay visible while near and overview pucks keep thei
   nav.update(camera, 800);
   assert.equal(scale('far'), 1);
   nav.setHovered('near');
-  const ring = nav.group.getObjectByName('nav-near').children[2].material;
+  const ring = nav.group.getObjectByName('nav-near').children[0].material;
   assert.equal(ring.opacity, 1);
   nav.setHovered(null);
   assert.ok(ring.opacity < 1);
