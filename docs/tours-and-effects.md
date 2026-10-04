@@ -185,9 +185,11 @@ the tour agent is told both.
 
 The sky is drawn on a sphere at the far plane behind everything
 (`lib/three/layers/TourSkyLayer.ts`), faded from one sky to the next. Splats and
-models cover it where the capture is solid; a splat capture's own sky is usually
-splats far out around it, so splats well past the capture's core fade while a
-tour sky shows. 360 photographs let it through where they see sky: their sky
+models cover it where the capture is solid. A splat capture keeps its own sky as
+splats around it, so while a tour sky shows, splats past the radius holding four
+fifths of the capture that sit high above its center and look like sky (blue, or
+bright and gray like cloud) fade, and so does nearly everything past twice that
+radius. 360 photographs let it through where they see sky: their sky
 outlines are made once, offline, by `scripts/skies/masks.py` (UperNet trained on
 ADE20K finds the sky in every cube face, snapped to the photo's edges) and listed
 in the same `<SPHR_LINES_BASE_URL>/<sceneId>/index.json` as the line drawings:
