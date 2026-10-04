@@ -129,8 +129,28 @@ export default function SphrApp({ configUrl, preview, edits, editor, chrome = !e
     runtimeState.activeSpaceIndex === (tour?.spaces.length ?? 1) - 1 &&
     runtimeState.activePointIndex === ((activeSpace?.tourpoints.length ?? 1) - 1);
 
+  // On phones the tour's text spans the bottom of the screen; the picture centres what a stop
+  // looks at in the part above it instead of behind the text.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const showingCopy = Boolean(started && tour?.hasGuidedTour && runtimeState.guided && activePoint);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      const covering = showingCopy ? [...root.querySelectorAll<HTMLElement>(".tour-copy, .tour-nav")].map((element) => element.getBoundingClientRect()).filter((rect) => rect.height > 0) : [];
+      const spans = covering.some((rect) => rect.width >= window.innerWidth * 0.8);
+      const top = Math.min(...covering.map((rect) => rect.top));
+      runtimeRef.current?.setViewInset(spans && Number.isFinite(top) ? Math.max(0, window.innerHeight - top) : 0);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const element of root.querySelectorAll(".tour-overlay, .tour-copy, .tour-nav")) observer.observe(element);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [showingCopy, activePoint, runtimeState.hunt?.hint, runtimeState.hunt?.found.length]);
+
   return (
-    <main className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
+    <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
       <LoadingScreen
         loading={runtimeState.loading}

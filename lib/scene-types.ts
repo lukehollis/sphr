@@ -11,4 +11,6 @@ export type SceneListing = {
   legacy?: { kind: "space" | "tour"; id: string };
   sourceType?: string;
   hasGuidedTour?: boolean;
+  /** The package carries a reduced 3D mesh of the capture (newer conversions). */
+  hasMesh?: boolean;
 };

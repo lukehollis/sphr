@@ -11,6 +11,7 @@ export class ViewerSession {
   private active?: Stage;
   private pending?: Stage;
   private disposed = false;
+  private viewInset = 0;
   private switching = false;
   private state: RuntimeState;
   private preferences: { guided: boolean; muted: boolean; showText: boolean };
@@ -70,6 +71,7 @@ export class ViewerSession {
         onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform)
       });
       if (this.editing) stage.three.setEditing(true);
+      stage.three.setViewInset(this.viewInset);
       await stage.three.init(pointIndex);
       if (this.disposed) return;
       stage.three.start(this.preferences.guided);
@@ -189,6 +191,8 @@ export class ViewerSession {
   aimFrom(nodeId: string, point: [number, number, number]) { return this.active?.three?.aimFrom(nodeId, point) ?? null; }
   captureView() { return this.active?.three?.captureView() ?? null; }
   requestHint() { this.active?.three?.requestHint(); }
+  /** How much of the bottom of the screen the tour's text covers, in pixels. */
+  setViewInset(bottom: number) { this.viewInset = bottom; this.active?.three?.setViewInset(bottom); }
   restartHunt() { this.active?.three?.restartHunt(); }
   goToStop(index: number) { return this.goTo(0, index); }
 

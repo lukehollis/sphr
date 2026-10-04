@@ -350,17 +350,19 @@ try {
   const legacy = path.join(root, 'public/datasets/legacy');
   const operatorScene = (id, slug, title, extra = {}) => ({ sceneId: id, titleSlug: slug, scenePath: `/s/${id}/${slug}`, slug, title,
     bootstrapUrl: `/datasets/legacy/${slug}/bootstrap.json`, thumbnail: `/datasets/legacy/${slug}/preview.jpg`, nodeCount: 1, createdAt: '2026-01-01', sourceType: 'panoramas', ...extra });
-  for (const slug of ['operator-hall', 'private-hall', 'embedded-hall']) cpSync(installed, path.join(legacy, slug), { recursive: true });
-  writeFileSync(path.join(legacy, 'index.json'), JSON.stringify({ spaces: [operatorScene('0a0a0a0a0a01', 'operator-hall', 'Operator hall'),
-    operatorScene('0a0a0a0a0a02', 'private-hall', 'Private hall'), operatorScene('0a0a0a0a0a03', 'embedded-hall', 'Embedded hall', { sourceType: 'matterport', nodeCount: 0 })] }));
-  for (const [scene, value] of [['0a0a0a0a0a01', 1], ['0a0a0a0a0a02', 0], ['0a0a0a0a0a03', 1]]) database().prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run(scene, value);
+  for (const slug of ['operator-hall', 'private-hall', 'embedded-hall', 'operator-hall-tour']) cpSync(installed, path.join(legacy, slug), { recursive: true });
+  // The same capture listed twice, as an older guided tour and as its space, is offered once.
+  writeFileSync(path.join(legacy, 'index.json'), JSON.stringify({ spaces: [operatorScene('0a0a0a0a0a01', 'operator-hall', 'Operator hall', { legacy: { kind: 'space', id: '7' } }),
+    operatorScene('0a0a0a0a0a02', 'private-hall', 'Private hall'), operatorScene('0a0a0a0a0a03', 'embedded-hall', 'Embedded hall', { sourceType: 'matterport', nodeCount: 0 }),
+    operatorScene('0a0a0a0a0a04', 'operator-hall-tour', 'Explore the Operator Hall', { legacy: { kind: 'tour', id: '7' }, hasGuidedTour: true })] }));
+  for (const [scene, value] of [['0a0a0a0a0a01', 1], ['0a0a0a0a0a02', 0], ['0a0a0a0a0a03', 1], ['0a0a0a0a0a04', 1]]) database().prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run(scene, value);
   const node = JSON.parse(readFileSync(path.join(installed, 'bootstrap.json'), 'utf8')).space.space_data.nodes[0].uuid;
   assert.equal((await anonymous.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 401);
   assert.equal((await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 403, 'unconfirmed accounts cannot make tours');
   database().prepare("UPDATE users SET email_verified=1 WHERE email='bob@example.com'").run();
   let tourPage = (await (await alice.get('/account/tours/new')).text()).replaceAll('<!-- -->', '');
   for (const title of ['Operator hall', 'Riverside studio, 2nd floor']) assert.ok(tourPage.includes(title), `${title} is offered`);
-  for (const title of ['Private hall', 'Embedded hall']) assert.ok(!tourPage.includes(title), `${title} is not offered`);
+  for (const title of ['Private hall', 'Embedded hall', 'Explore the Operator Hall']) assert.ok(!tourPage.includes(title), `${title} is not offered`);
   assert.ok(!(await (await bob.get('/account/tours/new')).text()).includes('Riverside studio'), "another customer's space is never offered, even a public one");
   assert.equal((await alice.post('/api/account/tours', { sceneId: '0a0a0a0a0a02' })).status, 404, 'private operator spaces are not offered');
   assert.equal((await alice.post('/api/account/tours', { sceneId: '0a0a0a0a0a03' })).status, 404, 'Matterport embeds cannot hold a tour');

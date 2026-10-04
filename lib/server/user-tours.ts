@@ -230,7 +230,30 @@ export async function describeTours(userId: string) {
 }
 export type TourView = Awaited<ReturnType<typeof describeTours>>[number];
 
-export type PickerSpace = { sceneId: string; title: string; thumbnail: string; nodeCount: number; guided: boolean; createdAt: string; sourceType?: string };
+export type PickerSpace = { sceneId: string; title: string; thumbnail: string; nodeCount: number; guided: boolean; createdAt: string; sourceType?: string;
+  hasMesh?: boolean; legacyKind?: "space" | "tour" };
+
+/** Words that do not tell captures apart in a title. */
+const titleFiller = new Set("the a an of or and at in to go inside explore learn about tour walking".split(" "));
+const captureKey = (space: PickerSpace) => `${space.nodeCount}:${space.title.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((word) => word && !titleFiller.has(word)).slice(0, 2).join(" ")}`;
+
+/**
+ * The same capture can be listed more than once: an older guided tour and its space, or a
+ * space and its newer conversion with a 3D mesh. People see it once, the version with a mesh
+ * (objects are placed against it) or else the space rather than the tour. The others still
+ * work by their links and IDs.
+ */
+function onePerCapture(spaces: PickerSpace[]) {
+  const rank = (space: PickerSpace) => (space.hasMesh ? 4 : 0) + (space.legacyKind === "space" ? 2 : 0) + (space.guided ? 0 : 1);
+  const best = new Map<string, PickerSpace>();
+  for (const space of spaces) {
+    const key = captureKey(space);
+    const current = best.get(key);
+    if (!current || rank(space) > rank(current)) best.set(key, space);
+  }
+  const kept = new Set(best.values());
+  return spaces.filter((space) => kept.has(space));
+}
 
 /** The spaces a customer can build on: their own finished spaces, and the operator's public ones. */
 export async function buildableSpaces(userId: string) {
@@ -239,10 +262,10 @@ export async function buildableSpaces(userId: string) {
   for (const scene of await readAllScenes()) {
     if (!canBuildOn(userId, scene)) continue;
     const item = { sceneId: scene.sceneId, title: scene.title, thumbnail: scene.thumbnail, nodeCount: scene.nodeCount, sourceType: scene.sourceType,
-      guided: scene.hasGuidedTour ?? scene.legacy?.kind === "tour", createdAt: scene.createdAt };
+      guided: scene.hasGuidedTour ?? scene.legacy?.kind === "tour", createdAt: scene.createdAt, hasMesh: scene.hasMesh, legacyKind: scene.legacy?.kind };
     (isOperatorScene(scene.sceneId) ? spacery : own).push(item);
   }
   own.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   spacery.sort((a, b) => a.title.localeCompare(b.title));
-  return { own, spacery };
+  return { own, spacery: onePerCapture(spacery) };
 }

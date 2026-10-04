@@ -19,6 +19,8 @@ export type AgentWay = {
 export type AgentClient = { id: string; name: string; ways: AgentWay[]; ask: string };
 
 const askLocal = "Publish the scan in my Downloads folder on Spacery.";
+/** Something to ask once a space is up, for every agent. */
+export const tourAsk = "Make a scavenger hunt for my kids in one of my Spacery spaces.";
 
 export const agentClients: AgentClient[] = [
   {

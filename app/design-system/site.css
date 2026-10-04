@@ -429,3 +429,4 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 .connect-ask { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: var(--space-3) 0 0; padding-top: var(--space-3);
   border-top: 1px dashed var(--site-faint); color: var(--text-body); font-size: var(--size-caption); line-height: var(--leading-body); }
 .connect-ask span { color: var(--site-muted); font-weight: var(--weight-bold); }
+.connect-ask + .connect-ask { margin-top: var(--space-1); padding-top: 0; border-top: 0; }

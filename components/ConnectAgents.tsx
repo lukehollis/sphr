@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { SectionHeader } from "./site/Chrome";
-import { agentClients, type AgentWay } from "@/lib/agents";
+import { agentClients, tourAsk, type AgentWay } from "@/lib/agents";
 
 function CopyLine({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -49,7 +49,7 @@ export default function ConnectAgents() {
   return (
     <section className="connect" aria-labelledby="connect-title">
       <SectionHeader title={<span id="connect-title">Connect an agent</span>} code="0.1" />
-      <p className="connect-lead">Let your own AI agent add spaces and publish captures straight to this account. Pick your agent, add Spacery once, then ask it to publish.</p>
+      <p className="connect-lead">Let your own AI agent publish captures straight to this account and build tours and scavenger hunts in them. Pick your agent, add Spacery once, then ask.</p>
       <div className="connect-tabs" role="tablist" aria-label="Your agent">
         {agentClients.map(client => (
           <button key={client.id} type="button" role="tab" aria-selected={client.id === selected} className="connect-tab"
@@ -59,6 +59,7 @@ export default function ConnectAgents() {
       <div className="connect-panel" role="tabpanel">
         <div className="connect-ways">{current.ways.map(way => <Way key={way.label} way={way} />)}</div>
         <p className="connect-ask"><span>Then ask</span>{`“${current.ask}”`}</p>
+        <p className="connect-ask"><span>Or ask</span>{`“${tourAsk}”`}</p>
       </div>
     </section>
   );

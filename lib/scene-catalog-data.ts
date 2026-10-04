@@ -43,7 +43,8 @@ export function parseSceneCatalog(content: string, assetBase = ""): SceneListing
       thumbnail: asset(entry.thumbnail, "thumbnail"), nodeCount: Number(entry.nodeCount) || 0,
       createdAt: entry.createdAt || "", ...(entry.legacy ? { legacy: entry.legacy } : {}),
       ...(entry.sourceType ? { sourceType: entry.sourceType } : {}),
-      ...(entry.hasGuidedTour !== undefined ? { hasGuidedTour: entry.hasGuidedTour } : {})
+      ...(entry.hasGuidedTour !== undefined ? { hasGuidedTour: entry.hasGuidedTour } : {}),
+      ...(Number((entry as { mesh?: { triangles?: number } }).mesh?.triangles) > 0 ? { hasMesh: true } : {})
     };
   });
 }

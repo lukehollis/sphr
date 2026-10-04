@@ -535,6 +535,27 @@ export class SphrRuntime {
     };
   }
 
+  private viewInset = 0;
+
+  /**
+   * Keeps what the camera looks at in the middle of the part of the screen nothing covers:
+   * on phones the tour's text covers the bottom, so the picture shifts up by half of it.
+   */
+  setViewInset(bottom: number) {
+    if (Math.abs(bottom - this.viewInset) < 2) return;
+    this.viewInset = Math.max(0, bottom);
+    this.applyViewOffset();
+  }
+
+  private applyViewOffset() {
+    const rect = this.canvas.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width || window.innerWidth));
+    const height = Math.max(1, Math.floor(rect.height || window.innerHeight));
+    const shift = Math.min(this.viewInset, height * 0.7) / 2;
+    if (shift >= 1) this.camera.setViewOffset(width, height, 0, shift, width, height);
+    else if (this.camera.view) this.camera.clearViewOffset();
+  }
+
   private setupRendererSize() {
     const resize = () => {
       const rect = this.canvas.getBoundingClientRect();
@@ -542,6 +563,7 @@ export class SphrRuntime {
       const height = Math.max(1, Math.floor(rect.height || window.innerHeight));
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
+      this.applyViewOffset();
       this.renderer.setSize(width, height, false);
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     };

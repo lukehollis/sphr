@@ -91,6 +91,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   }, [standalone]);
 
   const dirty = JSON.stringify(draft) !== baseline || meta.title !== savedMeta.title || meta.public !== savedMeta.public;
+  // A "Saved" note is out of date as soon as something changes again.
+  useEffect(() => { if (dirty) setMessage((current) => current.startsWith("Saved") ? "" : current); }, [dirty]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { if (leaving.current) return; event.preventDefault(); event.returnValue = ""; };
@@ -351,7 +353,9 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             <button type="button" role="radio" aria-checked={!meta.public} onClick={() => setMeta((current) => ({ ...current, public: false }))}>Only you</button>
             <button type="button" role="radio" aria-checked={meta.public} onClick={() => setMeta((current) => ({ ...current, public: true }))}>Anyone with the link</button>
           </div>
-          {savedMeta.public && <button type="button" className="builder-quiet" onClick={() => void copyLink()}>Copy the link</button>}
+          {meta.public !== savedMeta.public
+            ? <p className="editor-help">{meta.public ? "Save to let anyone with the link open it." : "Save to make it private again."}</p>
+            : savedMeta.public && <button type="button" className="builder-quiet" onClick={() => void copyLink()}>Copy the link</button>}
         </div>}
 
         <form className="builder-agent" onSubmit={(event) => { event.preventDefault(); void askAgent(); }}>
@@ -598,7 +602,7 @@ function LibraryPicker({ library, onAdd }: { library: LibraryModel[]; onAdd: (mo
           {shown.length < models.length && <button type="button" className="builder-quiet" onClick={() => setOpen([...open, category])}>All {models.length}</button>}</div>
       </div>;
     })}
-    {!matches.length && <p className="editor-help">No models match.</p>}
+    {!matches.length && <p className="editor-help">No models match. Try another word, use a shape, or upload your own model below.</p>}
   </div>;
 }
 
