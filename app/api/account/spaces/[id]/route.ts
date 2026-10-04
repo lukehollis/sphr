@@ -1,4 +1,4 @@
-import { setScenePublic } from "@/lib/server/admin-store";
+import { setSceneBuilders, setScenePublic } from "@/lib/server/admin-store";
 import { cleanText, deleteCustomerSpace, listUploads, readCustomerSpace, renameCustomerSpace, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, ownedSpace } from "@/lib/server/accounts";
 import { billingEnabled, syncQuantity } from "@/lib/server/billing";
@@ -23,7 +23,10 @@ export async function GET(request: Request, { params }: Params) {
   return owned ? accountResponse({ space: await describeSpace(owned.space) }) : accountResponse({ error: "Space not found." }, 404);
 }
 
-/** Renames a space or changes who can open it. A linked agent may do this; deleting stays with the browser. */
+/**
+ * Renames a space, changes who can open it, or lets others build tours on it. A linked agent
+ * may do this; deleting stays with the browser.
+ */
 export async function PATCH(request: Request, { params }: Params) {
   const { space, body, error } = await owned(request, params, true);
   if (error) return error;
@@ -36,6 +39,11 @@ export async function PATCH(request: Request, { params }: Params) {
     if (typeof body.public !== "boolean") return accountResponse({ error: "Choose public or private." }, 400);
     if (!space.sceneId) return accountResponse({ error: "This space is not ready yet." }, 409);
     setScenePublic(space.sceneId, body.public);
+  }
+  if (body?.builders !== undefined) {
+    if (typeof body.builders !== "boolean") return accountResponse({ error: "Choose whether others can build on this space." }, 400);
+    if (!space.sceneId) return accountResponse({ error: "This space is not ready yet." }, 409);
+    setSceneBuilders(space.sceneId, body.builders);
   }
   return accountResponse({ ok: true, space: await describeSpace(readCustomerSpace(space.id)!) });
 }

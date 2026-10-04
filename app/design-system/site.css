@@ -132,6 +132,9 @@
 .site-input:disabled { opacity: .5; }
 textarea.site-input { resize: vertical; line-height: var(--leading-body); }
 .site-hint { margin: 0; color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-body); }
+.site-check { display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-heading); font-size: var(--size-caption); cursor: pointer; }
+.site-check input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--ink); }
+.site-check:has(input:disabled) { color: var(--site-muted); cursor: default; }
 .site-inline-form { display: flex; align-items: flex-end; gap: 12px; max-width: 720px; margin-bottom: 12px; }
 .site-inline-form .site-field { flex: 1; }
 
@@ -216,6 +219,7 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 .site-card-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: 12px; }
 .site-card-controls .site-segmented { flex: 0 0 auto; margin: 0; }
 .site-card-controls .site-segmented button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.site-card-check { margin-top: 8px; font-size: 12px; }
 .site-card-body p { margin: 0; color: var(--site-muted); font-size: var(--size-caption); font-variant-numeric: tabular-nums; }
 
 /* Drawings and empty states */

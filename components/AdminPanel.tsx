@@ -6,7 +6,8 @@ import AuthShell from "./site/AuthShell";
 import SiteHeader from "./site/SiteHeader";
 import { SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
 
-type ManagedScene = SceneListing & { public: boolean };
+/** `builders` is whether others may build tours on the space, when the site has accounts. */
+type ManagedScene = SceneListing & { public: boolean; builders?: boolean };
 
 async function request(url: string, body?: object, method = "POST") {
   const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -51,6 +52,15 @@ export default function AdminPanel({ scenes: initial, brand }: { scenes: Managed
       await request(`/api/admin/scenes/${scene.sceneId}`, { public: value }, "PATCH");
       setScenes(items => items.map(item => item.sceneId === scene.sceneId ? { ...item, public: value } : item));
       setMessage(`${scene.title} is now ${value ? "public" : "private"}.`);
+    } catch (failure) { setError((failure as Error).message); }
+    finally { setBusy(null); }
+  }
+  async function building(scene: ManagedScene, value: boolean) {
+    setBusy(scene.sceneId); setError(""); setMessage("");
+    try {
+      await request(`/api/admin/scenes/${scene.sceneId}`, { builders: value }, "PATCH");
+      setScenes(items => items.map(item => item.sceneId === scene.sceneId ? { ...item, builders: value } : item));
+      setMessage(value ? `People can build tours on ${scene.title} while it is public.` : `Only you can build tours on ${scene.title} now.`);
     } catch (failure) { setError((failure as Error).message); }
     finally { setBusy(null); }
   }
@@ -109,6 +119,10 @@ export default function AdminPanel({ scenes: initial, brand }: { scenes: Managed
             </div>
             <a className="site-link" href={`/admin/scenes/${scene.sceneId}`}>Edit space</a>
           </div>
+          {scene.builders !== undefined && <label className="site-check site-card-check">
+            <input type="checkbox" checked={scene.builders} disabled={Boolean(busy)} onChange={event => void building(scene, event.target.checked)} />
+            Others can build tours on it
+          </label>}
         </article>)}</div> : <p className="site-note">No spaces found.</p>}
       </section>
 

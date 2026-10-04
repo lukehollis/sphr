@@ -24,6 +24,7 @@ export function db() {
     CREATE TABLE IF NOT EXISTS admin (id INTEGER PRIMARY KEY CHECK(id=1), username TEXT NOT NULL, password TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS visibility (scene TEXT PRIMARY KEY, public INTEGER NOT NULL CHECK(public IN (0,1)));
+    CREATE TABLE IF NOT EXISTS builders (scene TEXT PRIMARY KEY, open INTEGER NOT NULL CHECK(open IN (0,1)));
     CREATE TABLE IF NOT EXISTS login_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, resets INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, scene TEXT NOT NULL, public INTEGER NOT NULL, changed TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS scene_edits (scene TEXT PRIMARY KEY, title TEXT, start_view TEXT, thumbnail BLOB, thumbnail_version TEXT, revision INTEGER NOT NULL, changed TEXT NOT NULL);
@@ -175,6 +176,18 @@ export function allowAttempt(entries: readonly (readonly [key: string, limit: nu
 export function isScenePublic(scene: string) {
   if (!accessControlled()) return true;
   return (db().prepare("SELECT public FROM visibility WHERE scene=?").get(scene) as { public: number } | undefined)?.public === 1;
+}
+
+/** Whether a space's owner lets other people build tours on it, or nothing when they never chose. */
+export function sceneBuildersChoice(scene: string): boolean | undefined {
+  if (!process.env.SPHR_STATE_DIR) return undefined;
+  const row = db().prepare("SELECT open FROM builders WHERE scene=?").get(scene) as { open: number } | undefined;
+  return row ? row.open === 1 : undefined;
+}
+
+export function setSceneBuilders(scene: string, open: boolean) {
+  if (!/^[a-f0-9]{12}$/.test(scene) || typeof open !== "boolean") throw new Error("Invalid building setting.");
+  db().prepare("INSERT INTO builders VALUES (?, ?) ON CONFLICT(scene) DO UPDATE SET open=excluded.open").run(scene, Number(open));
 }
 
 export function setScenePublic(scene: string, value: boolean) {

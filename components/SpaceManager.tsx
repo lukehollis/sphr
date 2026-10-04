@@ -160,6 +160,15 @@ export default function SpaceManager({ space: initial, account, brand }: { space
                 {value === "public" ? "Public" : "Private"}</button>)}
             </div>
             <p className="site-hint">{space.scene.public ? "Anyone with the link can open it." : "Only you can open it while it is private."}</p>
+            <label className="site-check">
+              <input type="checkbox" checked={space.scene.builders} disabled={busy || !space.hosted}
+                onChange={event => void patch({ builders: event.target.checked }, event.target.checked
+                  ? space.scene!.public ? "Anyone who opens this space can now build on it." : "Others can build on this space once it is public."
+                  : "Only you can build on this space now. Tours others made on it are offline until you allow building again.")} />
+              Allow others to build on this space
+            </label>
+            <p className="site-hint">{space.scene.builders && !space.scene.public ? "This starts once the space is public. "
+              : ""}People who open it can make their own guided tours and scavenger hunts on it, with their own effects, models and sound. Your space itself never changes.</p>
             <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/edit`}>Edit title and start view</a>
             <a className="site-button site-button-secondary site-button-block" href={`/account/tours/new?scene=${space.scene.sceneId}`}>Make a tour or scavenger hunt</a>
           </div>}

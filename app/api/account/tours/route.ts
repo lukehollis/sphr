@@ -1,7 +1,8 @@
 import { allowAttempt } from "@/lib/server/admin-store";
 import { accountRequest, accountResponse, attemptKey } from "@/lib/server/accounts";
 import { readAllScenes } from "@/lib/scene-catalog";
-import { canBuildOn, createUserTour, describeTours, isOperatorScene, TourLimitError, tourPath, tourUser } from "@/lib/server/user-tours";
+import { canBuildOn, createUserTour, describeTours, TourLimitError, tourPath, tourUser } from "@/lib/server/user-tours";
+import { spaceForScene } from "@/lib/server/accounts-store";
 import { recordEvent } from "@/lib/server/analytics";
 import { notifyTeam } from "@/lib/server/team-notify";
 
@@ -25,9 +26,11 @@ export async function POST(request: Request) {
     // The space's name is a fine first title; the builder shows what kind of tour it is.
     const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : scene.title.slice(0, 200);
     const tour = createUserTour(user.id, scene.sceneId, title, kind);
-    const space = isOperatorScene(scene.sceneId) ? "Spacery" : "Their own";
-    void recordEvent("tour_created", { userId: user.id, props: { kind, space: space === "Spacery" ? "spacery" : "own" } });
-    void notifyTeam({ title: kind === "hunt" ? "Scavenger hunt started" : "Tour started", fields: [["Space", scene.title], ["Whose space", space], ["Account", user.email]] });
+    const owner = spaceForScene(scene.sceneId)?.userId;
+    const space = owner === undefined ? "spacery" : owner === user.id ? "own" : "shared";
+    void recordEvent("tour_created", { userId: user.id, props: { kind, space } });
+    void notifyTeam({ title: kind === "hunt" ? "Scavenger hunt started" : "Tour started",
+      fields: [["Space", scene.title], ["Whose space", { spacery: "Spacery", own: "Their own", shared: "Someone else's" }[space]], ["Account", user.email]] });
     return accountResponse({ ok: true, tour: { id: tour.id, title: tour.title, kind: tour.kind, editor: `/account/tours/${tour.id}`, path: tourPath(tour) } });
   } catch (failure) {
     if (failure instanceof TourLimitError) return accountResponse({ error: failure.message }, 400);

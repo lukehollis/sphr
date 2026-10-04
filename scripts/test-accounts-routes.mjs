@@ -374,6 +374,25 @@ try {
   assert.ok(ownTour?.id, 'customers build on their own spaces too');
   assert.equal((await alice.get(hunt.editor)).status, 200);
   assert.equal((await bob.get(hunt.editor)).status, 404);
+  // Others build on a customer's space only once its owner allows it, and only from its link.
+  assert.ok(!(await (await anonymous.get(publicPath)).text()).includes('tours/new?scene='), 'a space kept to its owner offers no building');
+  assert.equal((await alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json: { builders: 'yes' } })).status, 400);
+  assert.equal((await bob.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json: { builders: true } })).status, 404, 'only the owner decides');
+  body = await (await alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json: { builders: true } })).json();
+  assert.equal(body.space.scene.builders, true);
+  assert.ok((await (await anonymous.get(publicPath)).text()).includes(`/account/tours/new?scene=${reserved}`), 'visitors are offered building on it');
+  assert.ok(!(await (await bob.get('/account/tours/new')).text()).includes('Riverside studio'), 'it is still never listed for others');
+  assert.ok((await (await bob.get(`/account/tours/new?scene=${reserved}`)).text()).includes('Riverside studio'), 'its link chooses it');
+  const guestTour = (await (await bob.post('/api/account/tours', { sceneId: reserved, kind: 'hunt' })).json()).tour;
+  assert.ok(guestTour?.id, 'another customer builds on it');
+  assert.equal((await bob.get(guestTour.editor)).status, 200);
+  assert.equal((await alice.get(guestTour.editor)).status, 404, "the space's owner never edits other people's tours");
+  body = await (await alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json: { builders: false } })).json();
+  assert.equal(body.space.scene.builders, false);
+  assert.equal((await bob.get(guestTour.editor)).status, 404, 'closing the space takes tours built on it offline');
+  assert.equal((await (await bob.get('/api/account/tours')).json()).tours.find(tour => tour.id === guestTour.id).available, false);
+  assert.equal((await bob.post('/api/account/tours', { sceneId: reserved })).status, 404);
+  assert.equal((await alice.get(ownTour.editor)).status, 200, 'the owner always builds on their own space');
   // Saving: stops stand on the space's own locations, revisions guard concurrent edits.
   const huntBody = (revision, extra = {}) => ({ revision, title: 'Find the lamps', public: false, ...extra, experience: { version: 1, kind: 'hunt', finale: 'All found.',
     objects: [{ id: 'lamp', name: 'Brass lamp', source: { kind: 'shape', shape: 'orb' }, position: [0, 1, -2], rotation: [0, 0, 0], scale: [1, 1, 1] }],
@@ -703,6 +722,14 @@ try {
     'Where each account is now', 'Live', 'What recent people did']) assert.ok(report.includes(text), text);
   console.log('Passed: first-touch analytics, sibling-site events, crawler filtering, the funnel report, repeat confirmation links and the agent address page.');
 
+  // The operator's public spaces are open to builders until the operator closes one.
+  assert.equal((await operator.request('/api/admin/scenes/0a0a0a0a0a01', { method: 'PATCH', json: { builders: false } })).status, 200);
+  assert.ok(!(await (await anonymous.get('/s/0a0a0a0a0a01/operator-hall')).text()).includes('tours/new?scene='));
+  assert.equal((await grace.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 404, 'a closed operator space takes no new tours');
+  body = await (await operator.request('/api/admin/scenes/0a0a0a0a0a01', { method: 'PATCH', json: { builders: true } })).json();
+  assert.deepEqual([body.public, body.builders], [true, true]);
+  assert.ok((await (await anonymous.get('/s/0a0a0a0a0a01/operator-hall')).text()).includes('tours/new?scene=0a0a0a0a0a01'));
+
   // ---- The operator hears about each change once ----
   await new Promise(resolve => setTimeout(resolve, 1500));
   const told = teamMessages.map(message => ({ title: message.embeds[0].title,
@@ -716,6 +743,7 @@ try {
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');
+  assert.equal(about('Scavenger hunt started', 'Account', 'bob@example.com')[0]?.fields['Whose space'], "Someone else's");
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));

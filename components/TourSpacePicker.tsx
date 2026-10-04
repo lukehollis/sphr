@@ -29,12 +29,12 @@ function SpaceChoice({ space, busy, onChoose }: { space: PickerSpace; busy: stri
 
 /** Choose what to make and the space to build it on: one of the customer's own, or one of Spacery's. */
 export default function TourSpacePicker({ brand, account, own, spacery, chosen, kind: initialKind }:
-  { brand: string; account: AccountView; own: PickerSpace[]; spacery: PickerSpace[]; chosen: string | null; kind: Kind }) {
+  { brand: string; account: AccountView; own: PickerSpace[]; spacery: PickerSpace[]; chosen: PickerSpace | null; kind: Kind }) {
   const [kind, setKind] = useState<Kind>(initialKind);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const chosenSpace = chosen ? [...own, ...spacery].find(space => space.sceneId === chosen) : undefined;
+  const chosenSpace = chosen;
   const filtered = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
     return spacery.filter(space => terms.every(term => space.title.toLocaleLowerCase().includes(term)));

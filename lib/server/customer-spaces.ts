@@ -1,5 +1,5 @@
 import { readSceneEdits } from "./admin-store";
-import { isScenePublic } from "./admin-store";
+import { isScenePublic, sceneBuildersChoice } from "./admin-store";
 import { latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
@@ -16,7 +16,8 @@ export async function describeSpace(space: CustomerSpace) {
   return {
     id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, output: space.output, message: space.message,
     created: space.created, updated: space.updated, hosted: spaceHosted(space),
-    scene: listing ? { sceneId: listing.sceneId, path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(listing.sceneId) } : null,
+    scene: listing ? { sceneId: listing.sceneId, path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(listing.sceneId),
+      builders: sceneBuildersChoice(listing.sceneId) ?? false } : null,
     job: job ? { status: job.status, created: job.created, started: job.started, finished: job.finished,
       progress: job.status === "running" || job.status === "held" ? job.progress : null } : null,
     uploads: listUploads(space.id).map(upload => ({ id: upload.id, name: upload.name, size: upload.size, status: upload.status }))

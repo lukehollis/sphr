@@ -3,7 +3,8 @@ import TourSpacePicker from "@/components/TourSpacePicker";
 import { readUser } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { describeAccount } from "@/lib/server/customer-spaces";
-import { buildableSpaces } from "@/lib/server/user-tours";
+import { buildableSpaces, canBuildOn, pickerSpace } from "@/lib/server/user-tours";
+import { readAllScenes } from "@/lib/scene-catalog";
 import { siteBrand } from "@/lib/server/brand";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,10 @@ export default async function NewTourPage({ searchParams }: { searchParams: Prom
   const user = await currentUser();
   if (!user) redirect(`/account/login?next=${encodeURIComponent(`/account/tours/new${typeof scene === "string" && /^[a-f0-9]{12}$/.test(scene) ? `?scene=${scene}` : ""}`)}`);
   const spaces = await buildableSpaces(user.id);
-  const chosen = typeof scene === "string" ? [...spaces.own, ...spaces.spacery].find(item => item.sceneId === scene) : undefined;
+  // Someone else's space open to builders is never listed, so it comes from its link.
+  const listed = typeof scene === "string" ? [...spaces.own, ...spaces.spacery].find(item => item.sceneId === scene) : undefined;
+  const linked = !listed && typeof scene === "string" ? (await readAllScenes()).find(item => item.sceneId === scene) : undefined;
+  const chosen = listed ?? (linked && canBuildOn(user.id, linked) ? pickerSpace(linked) : null);
   return <TourSpacePicker brand={siteBrand()} account={describeAccount(readUser(user.id)!)} own={spaces.own} spacery={spaces.spacery}
-    chosen={chosen?.sceneId ?? null} kind={kind === "hunt" ? "hunt" : "tour"} />;
+    chosen={chosen} kind={kind === "hunt" ? "hunt" : "tour"} />;
 }

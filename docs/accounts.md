@@ -88,10 +88,15 @@ server with local stand-ins for Stripe, Google and email.
 ## Customers' tours and scavenger hunts
 
 A signed-in customer with a confirmed email can build guided tours and scavenger hunts on any of
-their own finished, hosted spaces and on any of the operator's public spaces (Matterport embeds
+their own finished, hosted spaces and on any public space open to builders (Matterport embeds
 excepted), from *Make a tour or hunt* on *Your spaces*, from a space's page, or from *Build on this
-space* in the corner of the viewer on the operator's public spaces and on tours built on them (it
-opens the picker with that space chosen, signing the visitor in first). Each tour is its own
+space* in the corner of the viewer on those spaces and on tours built on them (it opens the picker
+with that space chosen, signing the visitor in first). The operator's public spaces are open to
+builders unless the operator unticks *Others can build tours on it* on the admin card. A
+customer's space is open only once its owner ticks *Allow others to build on this space* on the
+space's page, and only while it is public and hosted; such spaces are reached from their links and
+never listed in the picker, and closing one takes the tours others built on it offline (the
+`builders` table in the state database holds each choice). Each tour is its own
 record (`user_tours` in the state database) pointing at a space; the space itself never changes,
 and a tour does not count as a space for billing. Tours start private and get their own link,
 `/t/<id>/<title>`, which the customer can share with anyone; tour pages are never indexed. A
