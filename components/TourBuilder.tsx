@@ -10,7 +10,7 @@ import type { ViewerSession } from "@/lib/viewer/ViewerSession";
 import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
 import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, skyEntries, skyEntry, soundEntries } from "@/lib/experience/packs";
-import { resolveParams, skyTurnToward, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
+import { resolveParams, skyTurnToward, waitsForCue, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
 import { EARTH_RANGE, LOOK_TRANSITIONS, newId, SKY_RANGES, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type StopSky, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import { placeObjectAt } from "@/lib/experience/placement";
@@ -518,7 +518,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             {effectEntries().filter((entry) => !entry.retired).map((entry) => <option key={entry.type} value={entry.type} disabled={entry.requires === "splats" && !splatSpace}>{entry.label}{entry.requires === "splats" && !splatSpace ? " (splat spaces)" : ""}</option>)}
           </select></label>
           {draft.effects.map((effect) => <EffectCard key={effect.id} effect={effect} objects={draft.objects} objectName={objectName}
-            onPreview={(source) => void session.current?.previewSound(source)}
+            onPreview={(source) => void session.current?.previewSound(source)} onPlay={() => session.current?.previewEffect(effect.id)}
             onChange={(patch) => patchEffect(effect.id, patch)} onRemove={() => removeEffect(effect.id)}
             onHere={() => { const spot = session.current?.resolveAnchor({ x: 0.5, y: 0.6 }); if (spot) patchEffect(effect.id, { target: { kind: "point", position: spot.position } }); }} />)}
           {!draft.effects.length && <p className="editor-help">Effects added while a stop is open run at that stop. Effects added with no stops run all the time.</p>}
@@ -815,9 +815,9 @@ function ModelUpload({ api, onAdd, onError }: { api: string; onAdd: (url: string
   </label>;
 }
 
-function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere, onPreview }: {
+function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere, onPreview, onPlay }: {
   effect: EffectInstance; objects: PlacedObject[]; objectName: (id: string) => string;
-  onChange: (patch: Partial<EffectInstance>) => void; onRemove: () => void; onHere: () => void; onPreview: (source: string) => void;
+  onChange: (patch: Partial<EffectInstance>) => void; onRemove: () => void; onHere: () => void; onPreview: (source: string) => void; onPlay: () => void;
 }) {
   const entry = effectEntry(effect.type);
   const [open, setOpen] = useState(false);
@@ -841,6 +841,7 @@ function EffectCard({ effect, objects, objectName, onChange, onRemove, onHere, o
       </select></label>
       {effect.target.kind === "point" && <button type="button" onClick={onHere}>Move it where I am looking</button>}
       {entry.params.map((param) => <Param key={param.key} spec={param} value={effect.params[param.key]} onPreview={onPreview} onChange={(value) => onChange({ params: { ...effect.params, [param.key]: value } })} />)}
+      {effect.type !== "sound" && waitsForCue(effect.params) && <button type="button" onClick={onPlay}>Play it now</button>}
       <label className="builder-check"><input type="checkbox" checked={Boolean(effect.always)} onChange={(event) => onChange({ always: event.target.checked })} /> Runs the whole time</label>
     </div>}
   </article>;

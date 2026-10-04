@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EffectFactory, PointerHit } from "@/lib/experience/registry";
-import { bool, num, str } from "@/lib/experience/registry";
+import { bool, num, str, waitsForCue } from "@/lib/experience/registry";
 import { pixelRatio } from "./common";
 
 /**
@@ -66,6 +66,8 @@ const create: EffectFactory = (context, instance) => {
   const anchor = new THREE.Vector3();
   let active = false;
   let cooldown = 0;
+  // Seconds until flowers grown for a cue wilt, when the bloom is not running with a stop.
+  let wilt = 0;
   let hover: PointerHit | null = null;
 
   // A small shower of sparks for each new flower.
@@ -172,6 +174,10 @@ const create: EffectFactory = (context, instance) => {
   return {
     update({ delta }) {
       cooldown = Math.max(0, cooldown - delta);
+      if (wilt > 0) {
+        wilt = Math.max(0, wilt - delta);
+        if (wilt === 0 && !active) for (const flower of flowers) if (flower.dying === null) flower.dying = 0;
+      }
       if (active && hover && cooldown === 0 && str(params, "mode", "hover") === "hover" && isGround(hover)) {
         if (grow(hover.point)) cooldown = 0.1;
       }
@@ -203,7 +209,12 @@ const create: EffectFactory = (context, instance) => {
       if (!value) for (const flower of flowers) if (flower.dying === null) flower.dying = 0;
       active = value;
     },
-    play() { if (str(params, "mode", "hover") === "patch") patch(); },
+    play(cue) {
+      // A patch blooms for a cue; flowers that follow the pointer only bloom for one they wait for.
+      if (str(params, "mode", "hover") !== "patch" && waitsForCue(params) !== cue) return false;
+      patch();
+      if (!active) wilt = 8;
+    },
     pointer(hit) { hover = hit; },
     setParams(next) { params = next; },
     dispose() {

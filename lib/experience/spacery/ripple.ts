@@ -33,10 +33,20 @@ const create: EffectFactory = (context, instance) => {
   mesh.renderOrder = 46;
   context.scene.add(mesh);
   const anchor = new THREE.Vector3();
+  // Where rings for a cue spread from while the ripple is not running, kept as a found object flies off.
+  const spot = new THREE.Vector3();
   const box = new THREE.Box3();
   let active = false;
+  let pinned = false;
   let pulse = 0;
   let floorY: number | null = null;
+  const ground = (out: THREE.Vector3) => {
+    context.anchor(out);
+    if (context.object()) { context.bounds(box); out.y = box.min.y; return out; }
+    if (floorY === null) floorY = floorBelow(out, context.surfaces(), out.y);
+    out.y = floorY;
+    return out;
+  };
   return {
     update({ time, delta }) {
       pulse = Math.max(0, pulse - delta);
@@ -47,15 +57,16 @@ const create: EffectFactory = (context, instance) => {
       color.set(str(params, "color", "#bfe9ff"));
       material.uniforms.uSpeed.value = num(params, "speed", 1);
       material.uniforms.uRings.value = num(params, "rings", 4);
-      context.anchor(anchor);
-      if (context.object()) { context.bounds(box); anchor.y = box.min.y; }
-      else if (floorY === null) floorY = floorBelow(anchor, context.surfaces(), anchor.y);
-      if (floorY !== null && !context.object()) anchor.y = floorY;
+      if (pinned) anchor.copy(spot);
+      else ground(anchor);
       mesh.position.copy(anchor).y += 0.02;
       mesh.scale.setScalar(num(params, "radius", 2));
     },
-    setActive(value) { active = value; },
-    play() { pulse = 4; },
+    setActive(value) { active = value; if (value) pinned = false; },
+    play() {
+      pulse = 4;
+      if (!active) { ground(spot); pinned = true; }
+    },
     setParams(next) { params = next; floorY = null; },
     dispose() { context.scene.remove(mesh); mesh.geometry.dispose(); material.dispose(); }
   };

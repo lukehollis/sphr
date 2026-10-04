@@ -51,6 +51,8 @@ const create: EffectFactory = (context, instance) => {
   const corner = new THREE.Vector3();
   let active = false;
   let running = false;
+  // Sweeping once for a cue.
+  let cued = false;
   let radius = 0;
   let maxRadius = 30;
   let strength = 0;
@@ -189,12 +191,14 @@ const create: EffectFactory = (context, instance) => {
         overlay.matrixWorld.copy(source.matrixWorld);
       }
       const pulse = str(params, "mode", "reveal") === "pulse";
-      const target = active ? 1 : 0;
+      // A cue sweeps once even when the scan is not running with a stop.
+      const live = active || cued;
+      const target = live ? 1 : 0;
       const before = strength;
       strength += (target - strength) * Math.min(1, delta * 3);
       if (Math.abs(target - strength) < 0.002) strength = target;
       let changed = running || strength !== before;
-      if (active) {
+      if (live) {
         sinceStart += delta;
         if (running) {
           radius += delta * num(params, "speed", 6) * (context.reducedMotion ? 3 : 1);
@@ -202,10 +206,11 @@ const create: EffectFactory = (context, instance) => {
           const done = firstPerson() ? angle > Math.PI + 0.2 : radius > maxRadius + num(params, "width", 0.6);
           if (done) {
             running = false;
+            cued = false;
             radius = maxRadius * 4 + 100;
             changed = true;
           }
-        } else if (pulse && sinceStart > num(params, "every", 6)) start();
+        } else if (pulse && active && sinceStart > num(params, "every", 6)) start();
       }
       // Standing at a panorama the photograph carries the scan; the mesh band serves the overview.
       overlays.visible = strength > 0.002 && (running || pulse) && !firstPerson();
@@ -214,10 +219,10 @@ const create: EffectFactory = (context, instance) => {
     setActive(value) {
       if (value && !active) start();
       active = value;
-      if (!value) running = false;
+      if (!value) { running = false; cued = false; }
       sync();
     },
-    play() { start(); active = true; },
+    play() { start(); cued = true; },
     setParams(next) { params = next; sync(); },
     dispose() {
       if (panorama) { panorama.uScanDim.value = 0; panorama.uScanGlow.value = 0; }

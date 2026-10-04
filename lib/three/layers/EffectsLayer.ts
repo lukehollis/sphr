@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { effectEntry } from "@/lib/experience/packs";
-import { resolveParams, type AudioHost, type EffectContext, type EffectHandle, type PointerHit, type SplatHost } from "@/lib/experience/registry";
+import { answersCue, resolveParams, waitsForCue, type AudioHost, type EffectContext, type EffectCue, type EffectHandle, type PointerHit, type SplatHost } from "@/lib/experience/registry";
 import type { EffectInstance } from "@/lib/experience/types";
 import type { ObjectLayer } from "./ObjectLayer";
 import type { PanoramaStyle } from "@/lib/three/renderers/PanoramaLayer";
@@ -9,6 +9,9 @@ type EffectRecord = {
   instance: EffectInstance;
   handle: EffectHandle | null;
   key: string;
+  /** Listed by the current stop, or always on. */
+  listed: boolean;
+  /** Running: listed, and not holding back for a cue. */
   active: boolean;
   transient?: number;
 };
@@ -53,7 +56,7 @@ export class EffectsLayer {
         continue;
       }
       record?.handle?.dispose();
-      const next: EffectRecord = { instance, handle: null, key, active: false };
+      const next: EffectRecord = { instance, handle: null, key, listed: false, active: false };
       this.records.set(instance.id, next);
       loads.push(this.load(next));
     }
@@ -67,25 +70,45 @@ export class EffectsLayer {
     this.applyActive();
   }
 
-  /** Cue every effect aimed at an object, e.g. "found" when a hunt item is picked up. */
-  cue(objectId: string, cue: "found" | "hint" | "click") {
-    let handled = false;
+  /**
+   * Cue the effects that answer a find, a hint or a click on an object: those aimed at
+   * it (every cue, or only the one their trigger names), and for a find or a hint the
+   * current stop's effects at a spot or over the whole space whose trigger names it.
+   * Returns whether a visual effect showed something, so the viewer shows its own when
+   * none did.
+   */
+  cue(objectId: string, cue: EffectCue) {
+    let shown = false;
     for (const record of this.records.values()) {
-      const target = record.instance.target;
-      if (record.transient || target.kind !== "object" || target.id !== objectId || !record.handle?.play) continue;
-      record.handle.play(cue);
-      handled = true;
+      if (!record.handle?.play || !this.answers(record, objectId, cue)) continue;
+      if (record.handle.play(cue) !== false && record.instance.type !== "sound") shown = true;
     }
-    return handled;
+    return shown;
   }
 
   /** Whether the tour has its own sound for this cue on an object. */
-  hasSound(objectId: string, cue: "found" | "hint" | "click") {
+  hasSound(objectId: string, cue: EffectCue) {
     for (const record of this.records.values()) {
-      const target = record.instance.target;
-      if (!record.transient && record.instance.type === "sound" && target.kind === "object" && target.id === objectId && record.instance.params.trigger === cue) return true;
+      if (record.instance.type === "sound" && record.instance.params.trigger === cue && this.answers(record, objectId, cue)) return true;
     }
     return false;
+  }
+
+  /** Builder: play an effect that holds back for a cue as if its cue came. */
+  preview(id: string) {
+    const record = this.records.get(id);
+    const cue = record ? waitsForCue(record.instance.params) : null;
+    if (!record?.handle?.play || !cue) return false;
+    record.handle.play(cue);
+    return true;
+  }
+
+  private answers(record: EffectRecord, objectId: string, cue: EffectCue) {
+    if (record.transient !== undefined) return false;
+    const { target, params } = record.instance;
+    // One aimed at an object waits for its own object, so it never gives another hiding spot away.
+    if (target.kind === "object") return target.id === objectId && answersCue(params, cue);
+    return cue !== "click" && record.listed && waitsForCue(params) === cue;
   }
 
   /** A short-lived effect for a hunt find or hint when the tour defines none. */
@@ -97,7 +120,7 @@ export class EffectsLayer {
       id: `transient-${this.transientCount}`, type, target: { kind: "object", id: objectId },
       params: resolveParams(entry, params)
     };
-    const record: EffectRecord = { instance, handle: null, key: "", active: true, transient: seconds };
+    const record: EffectRecord = { instance, handle: null, key: "", listed: false, active: true, transient: seconds };
     this.records.set(instance.id, record);
     await this.load(record);
     record.handle?.setActive(true);
@@ -134,7 +157,9 @@ export class EffectsLayer {
   private applyActive() {
     for (const record of this.records.values()) {
       if (record.transient !== undefined) continue;
-      const active = Boolean(record.instance.always) || this.activeIds.has(record.instance.id);
+      record.listed = Boolean(record.instance.always) || this.activeIds.has(record.instance.id);
+      // One holding back for a cue never runs with its stop, so listing it gives nothing away.
+      const active = record.listed && !waitsForCue(record.instance.params);
       if (active !== record.active) {
         record.active = active;
         record.handle?.setActive(active);

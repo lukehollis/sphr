@@ -72,12 +72,12 @@ them directly in `tour_data`:
   ],
   "effects": [
     { "id": "sweep", "type": "scan", "target": { "kind": "scene" }, "params": { "mode": "reveal", "speed": 6 } },
-    { "id": "glint", "type": "sparkles", "target": { "kind": "object", "id": "coin" }, "params": { "mode": "aura" }, "always": true }
+    { "id": "cheer", "type": "sparkles", "target": { "kind": "object", "id": "coin" }, "params": { "mode": "burst", "trigger": "found" } }
   ],
   "spaces": [{ "id": "space-id", "tourpoints": [
     { "id": "clue-1", "title": "By the door", "text": "Something shiny waits where everyone comes in.", "format": "plain",
       "nodeUUID": "scan-003", "rotation": { "azimuth": 40, "polar": -10 },
-      "objects": [], "effects": ["sweep"], "find": { "objectId": "coin", "hint": "Look low.", "found": "That coin is from 1890." } }
+      "objects": [], "effects": ["sweep", "cheer"], "find": { "objectId": "coin", "hint": "Look low.", "found": "That coin is from 1890." } }
   ] }]
 }
 ```
@@ -116,7 +116,7 @@ that adds GPU modifiers to every splat:
 const create: EffectFactory = (context, instance) => ({
   update({ time, delta }) { /* animate */ },
   setActive(active) { /* fade in or out as stops change */ },
-  play(cue) { /* "found", "hint" or "click" */ },
+  play(cue) { /* "found", "hint" or "click"; return false when it shows nothing */ },
   pointer(hit) { /* surface under the pointer, for hover effects */ },
   dispose() {}
 });
@@ -125,6 +125,39 @@ const create: EffectFactory = (context, instance) => ({
 In panorama spaces the capture mesh writes depth while objects are placed, so
 walls hide objects behind them, and surface effects draw over the photograph
 using the mesh's geometry.
+
+## Finds, hints and clicks
+
+Effects aimed at a placed object answer what visitors do to it: finding it in a
+hunt, asking for a hint, or clicking it. Sparkles, the radial scan, the beacon,
+confetti, ground ripples, the halo and blooming flowers take a `trigger` param
+for this. At `stop`, the default, the effect runs while a stop that lists it is
+open (or the whole time when it is `always`) and also answers every find, hint
+and click on its object, as it always has. At `found`, `hint` or `click` it
+holds back until that cue alone. Listing it on a stop then only arms it, so
+confetti that celebrates a find no longer bursts when the clue opens or when the
+visitor asks for a hint, and gives nothing away:
+
+```json
+{ "id": "cheer", "type": "confetti", "target": { "kind": "object", "id": "coin" },
+  "params": { "palette": "gold", "trigger": "found" } }
+```
+
+Held back for a find or a hint at a spot or over the whole space, an effect
+plays for the hunt item of a stop that lists it (an `always` one for every
+item), and so does a `sound` with that trigger. One aimed at an object waits for
+that object alone, so it never shows where another one hides. When one of the
+tour's effects shows something for a find, the viewer leaves out its own burst
+of sparkles, and for a hint its own beacon; an effect that shows nothing for the
+cue (a beacon on a find, sparkles that follow the pointer on a hint) leaves the
+viewer's in place. A found object lifts away as it is collected, so ripples and
+beacons played for a cue stay where it stood. In the builder, **Play it now** on
+a held-back effect plays it as if its cue came.
+
+A pack's effect opts in by adding `CUE_TRIGGER` from `lib/experience/registry.ts`
+to its params; the effects layer does the holding back. Its `play(cue)` can then
+come while the effect is not active, so it shows on its own and ends by itself,
+and returns `false` when the cue shows nothing.
 
 ## Looks
 

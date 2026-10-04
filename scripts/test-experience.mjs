@@ -697,3 +697,124 @@ test('a guided tour can continue to another page after its last stop', () => {
   assert.equal(normalizeTour(base({ url: '/s/x', label: '  ' })).continueTo, undefined);
   assert.equal(normalizeTour(base({ url: '/s/x', label: 'Go' }, 'explore')).continueTo, undefined, 'free exploration has no last stop');
 });
+
+test('effects can hold back for a find, a hint or a click, so a hunt celebrates only the find', async () => {
+  const THREE = await import('three');
+  const { EffectsLayer } = await import('../lib/three/layers/EffectsLayer.ts');
+  const { experienceCatalog } = await import('../lib/experience/catalog.ts');
+  const { effectEntry } = await import('../lib/experience/packs.ts');
+  const { resolveParams } = await import('../lib/experience/registry.ts');
+  const { SYSTEM, buildAgentContext } = await import('../lib/server/tour-agent.ts');
+
+  // Agents see the trigger, and what it does, wherever they read the site's effects.
+  const catalog = experienceCatalog();
+  for (const type of ['confetti', 'sparkles', 'ripple', 'bloom', 'halo', 'beacon', 'scan']) {
+    assert.match(catalog.effects.find((effect) => effect.type === type).params.join(', '), /trigger one of stop\|found\|hint\|click default stop \(stop runs with its stop .+ holds it back until that moment alone\)/, type);
+  }
+  assert.match(catalog.effects.find((effect) => effect.type === 'sound').params.join(', '), /trigger one of enter\|loop\|found\|click\|hint default enter,/, 'sounds keep their own');
+  assert.match(SYSTEM, /aim it at the hunt object with "trigger": "found"/, 'the drafting agent celebrates finds with it');
+  const context = await buildAgentContext({ space: { id: 'space', title: 'Tomb', type: 'model', space_data: { noPanos: true } } }, parseExperience(tour()), [], 'http://localhost');
+  assert.match(context.text, /confetti \(Confetti\): .+ Params .*trigger one of stop\|found\|hint\|click default stop/);
+
+  // Saved tours keep a trigger the effect knows; older ones, and unknown values, play with their stop.
+  const coin = { id: 'coin', name: 'Coin', source: { kind: 'shape', shape: 'coin' }, position: [2, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] };
+  const saved = parseExperience({ version: 1, kind: 'hunt', objects: [coin], effects: [
+    { id: 'party', type: 'confetti', target: { kind: 'object', id: 'coin' }, params: { trigger: 'found' } },
+    { id: 'older', type: 'confetti', target: { kind: 'object', id: 'coin' }, params: { palette: 'gold' } },
+    { id: 'odd', type: 'ripple', target: { kind: 'object', id: 'coin' }, params: { trigger: 'enter' } }],
+  stops: [{ id: 'one', title: 'One', text: 'Find the coin.', view: { nodeId: 'a' }, objects: [], effects: ['party'], find: { objectId: 'coin' } }] });
+  assert.deepEqual(saved.effects.map((effect) => effect.params.trigger), ['found', 'stop', 'stop']);
+
+  // The viewer's effects layer running the packs' own effect code, over a coin that lifts away when collected.
+  const effect = (id, type, target, params = {}) => ({ id, type, target, params: resolveParams(effectEntry(type), params) });
+  const onCoin = { kind: 'object', id: 'coin' };
+  let lift = 0;
+  const objects = { getHolder: () => new THREE.Object3D(), bounds: (id, out) => out.setFromCenterAndSize(new THREE.Vector3(2, 0.2 + lift, -3), new THREE.Vector3(0.3, 0.4, 0.3)) };
+  const layers = [];
+  const viewer = async (effects, listed) => {
+    const scene = new THREE.Scene();
+    const layer = new EffectsLayer({ scene, camera: new THREE.PerspectiveCamera(), renderer: null, objects, surfaces: () => [], spaceBounds: (out) => out.makeEmpty(),
+      splats: () => null, panorama: () => null, viewMode: () => 'FPV', audio: () => { throw new Error('No audio here.'); } });
+    layers.push(layer);
+    await layer.setEffects(effects);
+    layer.activate(listed);
+    return { scene, layer, run: (seconds = 0.3) => { for (let time = 0; time < seconds; time += 0.05) layer.update(time, 0.05); } };
+  };
+  const pieces = (scene) => scene.children.filter((child) => child.isInstancedMesh).reduce((sum, mesh) => sum + mesh.count, 0);
+  const window = globalThis.window;
+  const warn = console.warn;
+  globalThis.window = { devicePixelRatio: 1 };
+  console.warn = () => {};
+  try {
+    // Confetti for the find, listed on its clue's stop: nothing when the stop opens, a hint or a click, a burst on the find.
+    let { scene, layer, run } = await viewer([effect('party', 'confetti', onCoin, { trigger: 'found' })], ['party']);
+    run();
+    assert.equal(pieces(scene), 0, 'its stop opening throws nothing, so it gives nothing away');
+    assert.equal(layer.cue('coin', 'hint'), false, 'a hint passes it by, and the viewer lights the coin up itself');
+    assert.equal(layer.cue('coin', 'click'), false);
+    run();
+    assert.equal(pieces(scene), 0);
+    assert.equal(layer.cue('coin', 'found'), true, 'the find throws it, in place of the viewer\'s own sparkles');
+    run();
+    assert.ok(pieces(scene) > 100, `the find throws the confetti (${pieces(scene)} pieces)`);
+    run(5);
+    assert.equal(pieces(scene), 0, 'and it all lands and fades');
+
+    // Left at the default, it runs with its stop and answers every cue, as before.
+    ({ scene, layer, run } = await viewer([effect('party', 'confetti', onCoin)], ['party']));
+    run();
+    assert.ok(pieces(scene) > 100, 'it bursts when its stop opens');
+    run(5);
+    assert.equal(layer.cue('coin', 'hint'), true);
+    run();
+    assert.ok(pieces(scene) > 100, 'and again for a hint');
+
+    // Held back for a find, at a spot or over the whole space, it plays for the find of a stop that lists it.
+    const spot = { kind: 'point', position: [1, 0, -2] };
+    ({ scene, layer, run } = await viewer([effect('spot', 'confetti', spot, { trigger: 'found' }), effect('elsewhere', 'confetti', spot, { trigger: 'found' })], ['spot']));
+    run();
+    assert.equal(pieces(scene), 0);
+    assert.equal(layer.cue('coin', 'found'), true);
+    run();
+    const thrown = pieces(scene);
+    assert.ok(thrown > 100 && thrown <= 160, `only the listed one throws (${thrown} pieces)`);
+    ({ scene, layer, run } = await viewer([effect('next', 'confetti', { kind: 'object', id: 'cup' }, { trigger: 'found' })], ['next']));
+    layer.cue('coin', 'found');
+    run();
+    assert.equal(pieces(scene), 0, 'one aimed at another hunt object waits for that object, so it never shows where it hides');
+    ({ layer } = await viewer([effect('fanfare', 'sound', { kind: 'scene' }, { sound: 'fanfare', trigger: 'found' })], ['fanfare']));
+    assert.equal(layer.hasSound('coin', 'found'), true, 'a find sound on the stop replaces the viewer\'s chime');
+    assert.equal(layer.hasSound('coin', 'hint'), false);
+    layer.activate([]);
+    assert.equal(layer.hasSound('coin', 'found'), false, 'but only on its stop');
+
+    // What a cue shows decides whether the viewer adds its own: a beacon lights hints, not finds; sparkles that follow the pointer burst on finds.
+    ({ layer } = await viewer([effect('light', 'beacon', onCoin)], []));
+    assert.equal(layer.cue('coin', 'found'), false, 'a hint beacon leaves the find to the viewer\'s sparkles');
+    assert.equal(layer.cue('coin', 'hint'), true);
+    ({ layer } = await viewer([effect('trail', 'sparkles', onCoin, { mode: 'hover' })], ['trail']));
+    assert.equal(layer.cue('coin', 'hint'), false, 'pointer sparkles leave the hint to the viewer\'s beacon');
+    assert.equal(layer.cue('coin', 'found'), true);
+
+    // Ground ripples for the find stay where the coin was while it flies off, and the builder can play one early.
+    ({ scene, layer, run } = await viewer([effect('rings', 'ripple', onCoin, { trigger: 'found' }), effect('later', 'ripple', onCoin, { trigger: 'hint' })], ['rings']));
+    const rings = scene.children.filter((child) => child.material?.uniforms?.uRings);
+    run();
+    assert.ok(rings.every((mesh) => !mesh.visible), 'no rings before the find');
+    assert.equal(layer.cue('coin', 'found'), true);
+    lift = 2;
+    run(1);
+    const shown = rings.filter((mesh) => mesh.visible);
+    assert.equal(shown.length, 1, 'only the find\'s rings spread');
+    assert.ok(Math.abs(shown[0].position.y - 0.02) < 1e-6 && Math.abs(shown[0].position.x - 2) < 1e-6, `on the floor where the coin stood (${shown[0].position.y.toFixed(2)})`);
+    lift = 0;
+    assert.equal(layer.preview('later'), true, 'the builder plays an effect held back for a hint');
+    assert.equal(layer.preview('missing'), false);
+    ({ layer } = await viewer([effect('party', 'confetti', onCoin)], []));
+    assert.equal(layer.preview('party'), false, 'one that plays with its stop has nothing to preview');
+  } finally {
+    for (const layer of layers) layer.dispose();
+    console.warn = warn;
+    if (window === undefined) delete globalThis.window; else globalThis.window = window;
+  }
+});

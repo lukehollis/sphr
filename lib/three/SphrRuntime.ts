@@ -23,6 +23,7 @@ import { SceneGraphLayer } from "@/lib/three/layers/SceneGraphLayer";
 import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
 import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
 import { ExperienceAudio } from "@/lib/experience/audio";
+import { answersCue } from "@/lib/experience/registry";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { TourSkyLayer } from "@/lib/three/layers/TourSkyLayer";
 import { EarthLayer } from "@/lib/three/layers/EarthLayer";
@@ -1025,6 +1026,11 @@ export class SphrRuntime {
     return this.audioHost().preview(source);
   }
 
+  /** Editor: play an effect that holds back for a find, a hint or a click, as if it came. */
+  previewEffect(id: string) {
+    return this.effects?.preview(id) ?? false;
+  }
+
   /** What looks can ask of the space: drawn versions of it, splat styling and linear output. */
   private lookHost(): LookHost {
     const size = new THREE.Vector2();
@@ -1105,7 +1111,7 @@ export class SphrRuntime {
     const point = this.getActivePoint();
     if (this.tour.kind === "hunt" && this.state.guided && point?.find?.objectId === id) return true;
     const data = this.objects?.getData(id);
-    return Boolean(data?.label || data?.link) || this.tour.effects.some((effect) => effect.target.kind === "object" && effect.target.id === id);
+    return Boolean(data?.label || data?.link) || this.tour.effects.some((effect) => effect.target.kind === "object" && effect.target.id === id && answersCue(effect.params, "click"));
   }
 
   /** The visible placed object under the pointer ray, unless a wall hides it. */
@@ -1197,14 +1203,15 @@ export class SphrRuntime {
     this.applyExperienceForPoint(this.getActivePoint());
   }
 
-  selectObject(id: string | null) {
+  /** Select an object for the gizmo; `quiet` only re-attaches the gizmo, telling the editor nothing unless the selection is lost. */
+  selectObject(id: string | null, quiet = false) {
     const holder = id ? this.objects?.getHolder(id) ?? null : null;
     this.selectedObject = holder ? id : null;
     if (this.gizmo) {
       if (holder) this.gizmo.attach(holder);
       else this.gizmo.detach();
     }
-    this.callbacks.onObjectSelect?.(this.selectedObject);
+    if (!quiet || this.selectedObject !== id) this.callbacks.onObjectSelect?.(this.selectedObject);
   }
 
   setGizmoMode(mode: GizmoMode) {
@@ -1246,7 +1253,8 @@ export class SphrRuntime {
     if (this.disposed) return;
     this.sceneGraph?.setOccluding(update.objects.length > 0 || update.effects.length > 0);
     if (this.selectedObject && !update.objects.some((object) => object.id === this.selectedObject)) this.selectObject(null);
-    else if (this.selectedObject) this.selectObject(this.selectedObject);
+    // Edits rebuild objects; keep the gizmo on the selection without sending the editor back to it.
+    else if (this.selectedObject) this.selectObject(this.selectedObject, true);
     this.applyExperienceForPoint(this.getActivePoint());
     this.emitState();
   }

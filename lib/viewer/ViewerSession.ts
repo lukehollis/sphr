@@ -193,6 +193,7 @@ export class ViewerSession {
   selectObject(id: string | null) { this.active?.three?.selectObject(id); }
   lookAtObject(id: string) { this.active?.three?.lookAtObject(id); }
   previewSound(source: string) { return this.active?.three?.previewSound(source) ?? Promise.resolve(false); }
+  previewEffect(id: string) { return this.active?.three?.previewEffect(id) ?? false; }
   lookThumbnails(ids: string[], width?: number) { return this.active?.three?.lookThumbnails(ids, width) ?? {}; }
   /** Whether a tour sky can show through the space in view (360 photos need sky outlines). */
   skySupport() { return this.active?.three?.skySupport() ?? Promise.resolve({ panoramas: false, outlines: false }); }

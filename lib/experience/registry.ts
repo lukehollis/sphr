@@ -9,13 +9,54 @@ import type { PanoramaStyle } from "@/lib/three/renderers/PanoramaLayer";
  * Three.js code lazily in the browser only when a space uses it.
  */
 
-export type ParamSpec =
+export type ParamSpec = (
   | { key: string; label: string; type: "number"; min: number; max: number; step?: number; default: number }
   | { key: string; label: string; type: "color"; default: string }
   | { key: string; label: string; type: "boolean"; default: boolean }
   | { key: string; label: string; type: "select"; options: { value: string; label: string }[]; default: string }
   /** A sound from the installed packs (by ID) or an audio file address. */
-  | { key: string; label: string; type: "sound"; kinds: SoundKind[]; default: string };
+  | { key: string; label: string; type: "sound"; kinds: SoundKind[]; default: string }
+) & {
+  /** A few words for agents on what the choices do, when the values alone do not say. */
+  about?: string;
+};
+
+/** What a visitor does to a placed object that effects can answer. */
+export type EffectCue = "found" | "hint" | "click";
+export const EFFECT_CUES: readonly EffectCue[] = ["found", "hint", "click"];
+
+/**
+ * When a visual effect that answers cues plays. With its stop (the default) it runs
+ * while a stop that lists it is open and also answers a find, a hint or a click on its
+ * object. Set to a cue, it holds back until that cue alone, so listing it on a stop only
+ * arms it: a celebration for a hunt find gives nothing away before the find.
+ */
+export const CUE_TRIGGER: ParamSpec = {
+  key: "trigger", label: "Plays", type: "select", default: "stop",
+  options: [
+    { value: "stop", label: "With its stop" },
+    { value: "found", label: "Only when the hunt item is found" },
+    { value: "hint", label: "Only when a hint is asked for" },
+    { value: "click", label: "Only when its object is clicked" }
+  ],
+  about: "stop runs with its stop and also answers a find, hint or click on its object; found, hint or click holds it back until that moment alone"
+};
+
+/** The cue an effect holds back for (its `trigger`), or null when it plays with its stop. */
+export function waitsForCue(params: EffectParams): EffectCue | null {
+  const trigger = params.trigger;
+  return typeof trigger === "string" && (EFFECT_CUES as readonly string[]).includes(trigger) ? trigger as EffectCue : null;
+}
+
+/**
+ * Whether an effect aimed at an object answers a cue on it: one that plays with its
+ * stop answers every cue, one with a trigger only the cue it names (a sound that plays
+ * when its stop opens or on repeat answers none).
+ */
+export function answersCue(params: EffectParams, cue: EffectCue) {
+  const trigger = params.trigger;
+  return trigger === undefined || trigger === "stop" || trigger === cue;
+}
 
 export type SoundKind = "sfx" | "ambient" | "music";
 
@@ -115,10 +156,14 @@ export type EffectContext = {
 
 export type EffectHandle = {
   update(frame: FrameInfo): void;
-  /** Fade in or out as stops change. */
+  /** Fade in or out as stops change. An effect holding back for a cue is never made active. */
   setActive(active: boolean): void;
-  /** One-shot cues: a hunt item found, a hint asked for, a click on the target. */
-  play?(cue: "found" | "hint" | "click"): void;
+  /**
+   * One-shot cues: a hunt item found, a hint asked for, a click on the target. It may
+   * come while the effect is not active, so it shows on its own and ends by itself.
+   * Return false when this cue shows nothing, so the viewer can show its own.
+   */
+  play?(cue: EffectCue): boolean | void;
   pointer?(hit: PointerHit | null): void;
   setParams?(params: EffectParams): void;
   dispose(): void;

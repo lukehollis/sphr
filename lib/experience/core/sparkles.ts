@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { EffectFactory, EffectHandle, PointerHit } from "@/lib/experience/registry";
-import { num, str } from "@/lib/experience/registry";
+import { num, str, waitsForCue } from "@/lib/experience/registry";
 
 /**
  * Glints in the spirit of the garden demo's flower sparkles: additive points
@@ -94,6 +94,8 @@ const create: EffectFactory = (context, instance) => {
   const mixed = new THREE.Color();
   let active = false;
   let opacity = 0;
+  // Seconds a burst stays lit when the sparkles are not running.
+  let shower = 0;
   let spawnCredit = 0;
   let hover: PointerHit | null = null;
   let hoverMoved = 0;
@@ -135,7 +137,8 @@ const create: EffectFactory = (context, instance) => {
   const handle: EffectHandle = {
     update({ time, delta }) {
       material.uniforms.uTime.value = time;
-      const target = active ? 1 : 0;
+      shower = Math.max(0, shower - delta);
+      const target = active || shower > 0 ? 1 : 0;
       opacity += (target - opacity) * Math.min(1, delta * 4);
       material.uniforms.uOpacity.value = opacity;
       const mode = str(params, "mode", "aura");
@@ -186,10 +189,11 @@ const create: EffectFactory = (context, instance) => {
       if (value && str(params, "mode", "aura") === "burst") burst(Math.round(num(params, "count", 90)));
     },
     play(cue) {
-      if (cue === "found" || cue === "click" || str(params, "mode", "aura") === "burst") {
-        opacity = 1;
-        burst(cue === "found" ? 160 : Math.round(num(params, "count", 90)));
-      }
+      // A find or a click bursts; a hint only when the sparkles burst anyway or wait for it.
+      if (cue === "hint" && str(params, "mode", "aura") !== "burst" && waitsForCue(params) !== "hint") return false;
+      opacity = 1;
+      shower = 1.6;
+      burst(cue === "found" ? 160 : Math.round(num(params, "count", 90)));
     },
     pointer(hit) {
       if (hit && (!hover || hit.point.distanceToSquared(hover.point) > 0.0004)) hoverMoved = 0.25;

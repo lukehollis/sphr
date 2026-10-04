@@ -1,6 +1,6 @@
 import { coreLooks } from "@/lib/experience/core/looks";
 import { coreSkies } from "@/lib/experience/core/skies";
-import type { Pack } from "@/lib/experience/registry";
+import { CUE_TRIGGER, type Pack } from "@/lib/experience/registry";
 
 /**
  * The open source pack: enough to build tours and scavenger hunts and to show
@@ -27,7 +27,8 @@ const core: Pack = {
         { key: "color2", label: "Second color", type: "color", default: "#f3a644" },
         { key: "count", label: "Amount", type: "number", min: 8, max: 400, step: 1, default: 90 },
         { key: "size", label: "Size", type: "number", min: 0.2, max: 4, step: 0.1, default: 1 },
-        { key: "radius", label: "Spread (m)", type: "number", min: 0.1, max: 6, step: 0.1, default: 0.8 }
+        { key: "radius", label: "Spread (m)", type: "number", min: 0.1, max: 6, step: 0.1, default: 0.8 },
+        CUE_TRIGGER
       ],
       load: () => import("@/lib/experience/core/sparkles")
     },
@@ -44,7 +45,8 @@ const core: Pack = {
         { key: "color", label: "Color", type: "color", default: "#7fd6ff" },
         { key: "speed", label: "Speed (m/s)", type: "number", min: 0.5, max: 40, step: 0.5, default: 6 },
         { key: "width", label: "Band width (m)", type: "number", min: 0.05, max: 4, step: 0.05, default: 0.6 },
-        { key: "every", label: "Repeat every (s)", type: "number", min: 1, max: 30, step: 0.5, default: 6 }
+        { key: "every", label: "Repeat every (s)", type: "number", min: 1, max: 30, step: 0.5, default: 6 },
+        CUE_TRIGGER
       ],
       load: () => import("@/lib/experience/core/scan")
     },
@@ -122,7 +124,8 @@ const core: Pack = {
         { key: "color", label: "Color", type: "color", default: "#ffffff" },
         { key: "height", label: "Height (m)", type: "number", min: 0.5, max: 30, step: 0.5, default: 4 },
         { key: "radius", label: "Ring size (m)", type: "number", min: 0.1, max: 5, step: 0.05, default: 0.5 },
-        { key: "pulse", label: "Pulse speed", type: "number", min: 0, max: 4, step: 0.1, default: 1 }
+        { key: "pulse", label: "Pulse speed", type: "number", min: 0, max: 4, step: 0.1, default: 1 },
+        CUE_TRIGGER
       ],
       load: () => import("@/lib/experience/core/beacon")
     }

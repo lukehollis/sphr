@@ -106,6 +106,15 @@ with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
   library lacks, model it in Blender (see below) and upload it.
 - **Sound.** `sound` effects (enter, loop, found, hint, click; positional when
   targeted) and one `music` effect listed on the stops it plays through.
+- **Finds, hints and clicks.** Effects that answer cues (sparkles, scan, beacon,
+  confetti, ripple, halo, bloom) take `trigger`: `stop` (default) runs with its
+  stop and answers every find, hint and click on its object; `found`, `hint` or
+  `click` holds the effect back until that cue alone, so listing it on a stop only
+  arms it. `EffectsLayer` does the holding back; `cue()` reports whether a visual
+  effect showed something, and the viewer adds its own sparkles (find) or beacon
+  (hint) when none did. Held back at a spot or over the whole space, an effect (or
+  a `sound`) plays for the find or hint of a stop that lists it; one aimed at an
+  object only ever answers its own object.
 
 ### Building tours as an agent
 
@@ -134,7 +143,10 @@ other locations and the clue stays open, and a click from anywhere counts. So ai
 clue's stop at the area the clue names, keep every find but the first out of that opening
 view (turned away, up high, down low, or behind a column or corner and seen from a location
 one to three steps away), let the hint say exactly where, and give unfound objects no
-effects that run before the hint. The server keeps a find that only a nearby location sees.
+effects that run before the hint. A celebration of the find (confetti, ground ripples, a
+patch of flowers, a sparkle burst) is aimed at the object with `"trigger": "found"`, which
+holds it back until the find even on its stop's list; at the default trigger it would also
+fire for a hint. The server keeps a find that only a nearby location sees.
 
 From a shell, the local connector runs the same tools:
 `node connector/server.mjs call draft_tour '{"tour_id":"<id>","request":"..."}'`.

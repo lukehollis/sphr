@@ -1,6 +1,6 @@
 import { spaceryLooks } from "@/lib/experience/spacery/looks";
 import { spacerySkies } from "@/lib/experience/spacery/skies";
-import type { EffectEntry, Pack, ShapeEntry, SoundEntry } from "@/lib/experience/registry";
+import { CUE_TRIGGER, type EffectEntry, type Pack, type ShapeEntry, type SoundEntry } from "@/lib/experience/registry";
 
 /** Spacery's own effects and collectibles for app.spacery.dev, beyond the open source core. */
 
@@ -13,7 +13,7 @@ const effects: EffectEntry[] = [
     targets: ["scene", "point", "object"],
     params: [select("mode", "Behavior", "hover", [["hover", "Grow where the pointer hovers"], ["patch", "Bloom around the target"]]), select("flowers", "Flowers", "garden", [["garden", "Garden flowers"], ["simple", "Simple flowers"]]),
       color("color", "Simple flower color", "#ff6b9a"), number("count", "Most at once", 5, 120, 30, 1), number("size", "Size", 0.3, 3, 1, 0.1), number("radius", "Patch size (m)", 0.2, 6, 1, 0.1),
-      { key: "sparkles", label: "Sparkles", type: "boolean", default: true }],
+      { key: "sparkles", label: "Sparkles", type: "boolean", default: true }, CUE_TRIGGER],
     load: () => import("@/lib/experience/spacery/bloom") },
   { type: "fireflies", label: "Fireflies", description: "Warm motes that wander slowly and blink on and off, around the target or wherever the visitor stands.",
     targets: ["scene", "object", "point"],
@@ -27,9 +27,9 @@ const effects: EffectEntry[] = [
     targets: ["scene"],
     params: [color("color", "Color", "#b9c8d6"), number("count", "Amount", 200, 6000, 2500, 50), number("speed", "Speed", 0.3, 3, 1, 0.1), number("wind", "Wind", -3, 3, 0.5, 0.1), number("radius", "Spread (m)", 2, 30, 8, 1)],
     load: () => import("@/lib/experience/spacery/rain") },
-  { type: "confetti", label: "Confetti", description: "Paper confetti thrown up from the target, once when the stop opens or a hunt item is found, or in repeating bursts.",
+  { type: "confetti", label: "Confetti", description: "Paper confetti thrown up from the target, once when the stop opens or in repeating bursts, or only when a hunt item is found.",
     targets: ["object", "point", "scene"], oneShot: true,
-    params: [select("mode", "Behavior", "once", [["once", "Once"], ["loop", "Keep throwing"]]), select("palette", "Colors", "party", [["party", "Party"], ["gold", "Gold"], ["nasa", "NASA"], ["pastel", "Pastel"]]), number("count", "Pieces", 20, 400, 160, 10), number("spread", "Spread", 0.3, 3, 1, 0.1)],
+    params: [select("mode", "Behavior", "once", [["once", "Once"], ["loop", "Keep throwing"]]), select("palette", "Colors", "party", [["party", "Party"], ["gold", "Gold"], ["nasa", "NASA"], ["pastel", "Pastel"]]), number("count", "Pieces", 20, 400, 160, 10), number("spread", "Spread", 0.3, 3, 1, 0.1), CUE_TRIGGER],
     load: () => import("@/lib/experience/spacery/confetti") },
   { type: "glitter", label: "Glitter", description: "Points of light twinkle across the capture like frost or fairy dust, everywhere or within a radius of the target.",
     targets: ["scene", "point", "object"],
@@ -61,7 +61,7 @@ const effects: EffectEntry[] = [
     load: () => import("@/lib/experience/spacery/mood") },
   { type: "ripple", label: "Ground ripples", description: "Rings spreading across the ground from the target, like water or a sound wave.",
     targets: ["object", "point"],
-    params: [color("color", "Color", "#bfe9ff"), number("radius", "Radius (m)", 0.3, 10, 2, 0.1), number("rings", "Rings", 1, 6, 4, 1), number("speed", "Speed", 0.2, 4, 1, 0.1)],
+    params: [color("color", "Color", "#bfe9ff"), number("radius", "Radius (m)", 0.3, 10, 2, 0.1), number("rings", "Rings", 1, 6, 4, 1), number("speed", "Speed", 0.2, 4, 1, 0.1), CUE_TRIGGER],
     load: () => import("@/lib/experience/spacery/ripple") },
   { type: "portal", label: "Portal", description: "A swirling doorway of light standing at the target and turning to face the visitor.",
     targets: ["point", "object"],
@@ -77,7 +77,7 @@ const effects: EffectEntry[] = [
     load: () => import("@/lib/experience/spacery/orbit") },
   { type: "halo", label: "Halo", description: "A soft glow around an object, a rim of light on its surface and a halo behind it, that pulses gently.",
     targets: ["object"],
-    params: [color("color", "Color", "#ffe9a8"), number("strength", "Strength", 0.1, 2, 1, 0.05), number("pulse", "Pulse", 0, 3, 1, 0.1)],
+    params: [color("color", "Color", "#ffe9a8"), number("strength", "Strength", 0.1, 2, 1, 0.05), number("pulse", "Pulse", 0, 3, 1, 0.1), CUE_TRIGGER],
     load: () => import("@/lib/experience/spacery/halo") },
   { type: "fog", label: "Ground fog", description: "Low banks of mist drifting along the floor around the target or the visitor.",
     targets: ["scene", "point", "object"],

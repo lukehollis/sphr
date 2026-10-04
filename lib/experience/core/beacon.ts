@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { EffectFactory, EffectHandle } from "@/lib/experience/registry";
-import { num, str } from "@/lib/experience/registry";
+import { num, str, waitsForCue } from "@/lib/experience/registry";
 
 /** A soft light column with rings rippling out on the ground beneath it. */
 
@@ -79,9 +79,17 @@ const create: EffectFactory = (context, instance) => {
   group.add(column, ring);
   context.scene.add(group);
   const anchor = new THREE.Vector3();
+  // Where a cue lit it while the beacon is not running, kept as a found object flies off.
+  const spot = new THREE.Vector3();
   const box = new THREE.Box3();
   let active = false;
+  let pinned = false;
   let hold = 0;
+  const base = (out: THREE.Vector3) => {
+    context.anchor(out);
+    if (context.object()) { context.bounds(box); out.y = box.min.y; }
+    return out;
+  };
 
   const sync = () => {
     color.set(str(params, "color", "#ffffff"));
@@ -100,12 +108,15 @@ const create: EffectFactory = (context, instance) => {
       shared.uOpacity.value += (target - shared.uOpacity.value) * Math.min(1, delta * 3);
       group.visible = shared.uOpacity.value > 0.01;
       if (!group.visible) return;
-      context.anchor(anchor);
-      if (context.object()) { context.bounds(box); anchor.y = box.min.y; }
-      group.position.copy(anchor);
+      group.position.copy(pinned ? spot : base(anchor));
     },
-    setActive(value) { active = value; },
-    play(cue) { if (cue === "hint" || cue === "click") hold = 8; },
+    setActive(value) { active = value; if (value) pinned = false; },
+    play(cue) {
+      // It lights the way for a hint or a click; a find only when it waits for one.
+      if (cue === "found" && waitsForCue(params) !== "found") return false;
+      hold = 8;
+      if (!active) { base(spot); pinned = true; }
+    },
     setParams(next) { params = next; sync(); },
     dispose() {
       context.scene.remove(group);

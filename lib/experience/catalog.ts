@@ -2,13 +2,14 @@ import { effectEntries, lookEntries, shapeEntries, skyEntries, soundEntries } fr
 import type { ParamSpec } from "@/lib/experience/registry";
 import { LOOK_TRANSITIONS } from "@/lib/experience/types";
 
-/** A param in a few words, for agents: its range, choices or kind, and its default. */
+/** A param in a few words, for agents: its range, choices or kind, its default, and what the choices do when it says. */
 export function paramSummary(param: ParamSpec) {
+  const about = param.about ? ` (${param.about})` : "";
   switch (param.type) {
-    case "number": return `${param.key} ${param.min}..${param.max} default ${param.default}`;
-    case "select": return `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}`;
-    case "sound": return `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}`;
-    default: return `${param.key} ${param.type} default ${param.default}`;
+    case "number": return `${param.key} ${param.min}..${param.max} default ${param.default}${about}`;
+    case "select": return `${param.key} one of ${param.options.map((option) => option.value).join("|")} default ${param.default}${about}`;
+    case "sound": return `${param.key} a ${param.kinds.join(" or ")} sound ID or audio address, default ${param.default}${about}`;
+    default: return `${param.key} ${param.type} default ${param.default}${about}`;
   }
 }
 

@@ -327,11 +327,15 @@ try {
   assert.match(told, /Drawn versions: none yet/);
   assert.match(told, /Sacred goat, Animals, about 0\.8 m tall at scale 1, animated: Idle, Walk/, 'the agent sees which models move');
   assert.match(told, /^lines \(Line drawing\): /m);
+  assert.match(told, /^confetti \(Confetti\): .* Params .*trigger one of stop\|found\|hint\|click default stop \(stop runs with its stop/m, 'the drafting agent sees the trigger');
+  assert.match(told, /aim it at the hunt object with "trigger": "found"/, 'and is told to celebrate finds with it');
   result = await connector.call('get_tour', { tour_id: tourId });
   assert.match(result.text, /Revision 1\. Experience JSON/, 'the draft was saved');
   assert.match(result.text, /^blueprint \(Blueprint\): /m, 'get_tour lists the looks');
   assert.match(result.text, /transition": one of cut, fade, dissolve, wipe, iris, sweep, glitch/);
   assert.match(result.text, /^music \(Background music\): .* Params track /m);
+  assert.match(result.text, /^confetti \(Confetti\): .*only when a hunt item is found\. .* Params .*trigger one of stop\|found\|hint\|click default stop \(stop runs with its stop .+ holds it back until that moment alone\)/m,
+    'get_tour says an effect can hold back for the find');
   result = await connector.call('search_models', { query: 'oracle' });
   assert.equal(result.text, 'Bronze tripod (Ancient Greece), about 1.2 m tall at scale 1: url https://models.example/tripod.glb');
   assert.match((await connector.call('search_models', { query: 'goat' })).text, /^Sacred goat \(Animals\), about 0\.8 m tall at scale 1, animated: Idle, Walk: url /);
@@ -492,12 +496,16 @@ try {
   const cloudTour = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
   assert.match(result.text, /a scavenger hunt with 0 clues/);
   assert.match((await tool('search_models', { query: 'tripod' }, museSession)).text, /url https:\/\/models\.example\/tripod\.glb/);
-  assert.match((await tool('get_tour', { tour_id: cloudTour }, museSession)).text, /^noir \(Film noir\): /m);
+  result = await tool('get_tour', { tour_id: cloudTour }, museSession);
+  assert.match(result.text, /^noir \(Film noir\): /m);
+  assert.match(result.text, /^confetti \(Confetti\): .* Params .*trigger one of stop\|found\|hint\|click default stop \(stop runs with its stop/m, 'the hosted get_tour lists the trigger too');
   result = await tool('save_tour', { tour_id: cloudTour, experience: { version: 1, kind: 'hunt', finale: 'All found.',
     objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: 'https://models.example/tripod.glb' }, position: [1, 0, -2], rotation: [0, 0, 0], scale: [0.3, 0.3, 0.3] }],
-    effects: [], stops: [{ id: 'clue', title: 'By the altar', text: 'Something bronze hides near the altar.', format: 'plain', view: { nodeId: 'court-1' }, objects: ['tripod'], effects: [],
+    effects: [{ id: 'cheer', type: 'confetti', target: { kind: 'object', id: 'tripod' }, params: { palette: 'gold', trigger: 'found' } }],
+    stops: [{ id: 'clue', title: 'By the altar', text: 'Something bronze hides near the altar.', format: 'plain', view: { nodeId: 'court-1' }, objects: ['tripod'], effects: ['cheer'],
       find: { objectId: 'tripod', hint: 'Look left.', found: 'Tripods held offerings.' } }] } }, museSession);
   assert.ok(!result.error, result.text);
+  assert.match((await tool('get_tour', { tour_id: cloudTour }, museSession)).text, /"id":"cheer","type":"confetti","target":\{"kind":"object","id":"tripod"\},"params":\{[^}]*"trigger":"found"/, 'a celebration saved for the find keeps its trigger');
   assert.match((await tool('wait_for_tour', { tour_id: cloudTour }, museSession)).text, /Stops: 1\. By the altar/);
   assert.match((await tool('share_tour', { tour_id: cloudTour, title: 'Offerings at the altar' }, museSession)).text, /"Offerings at the altar".*private/);
   assert.match((await tool('list_tours', {}, museSession)).text, /Offerings at the altar/);
