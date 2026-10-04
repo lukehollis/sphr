@@ -3,13 +3,15 @@
 //   - .insv videos recorded one file per lens (VID_<date>_<time>_00_<n>.insv + VID_..._10_<n>.insv, ONE RS 1-Inch),
 //   - .insv videos that hold both lenses in one file (one 2:1 frame or two video streams, ONE X series),
 //   - .insp stills (both lenses in one image; HDR brackets share a timestamp and the most evenly exposed is used).
-// Each video is stitched with ffmpeg's v360 filter at sample times every few seconds, after cutting the
-// camera stand being lifted and lowered (from the camera's IMU when telemetry-parser is installed).
-// The lens settings are the ones the insta360-render skill measured on the ONE RS 1-Inch: 190 degree
-// lenses stored rolled 180 degrees. A hard seam remains at +-90 degrees from the front; a sky upside down
-// means the camera was mounted inverted (pass --roll 0).
+// Each video is sampled every few seconds, after cutting the camera stand being lifted and lowered (from the
+// camera's IMU when telemetry-parser is installed). Frames and stills are stitched by insta360_stitch.py with
+// the lens calibration the camera records in each file: seams lined up with optical flow, the lenses' colour
+// matched, a few neighbouring video frames merged against noise. Files without that calibration (or whose
+// lenses then disagree) use ffmpeg's v360 filter with the settings measured on the ONE RS 1-Inch: 190 degree
+// lenses stored rolled 180 degrees, a hard seam at +-90 degrees from the front. A sky upside down means the
+// camera was mounted inverted (pass --roll 0, which always uses ffmpeg). --stitch ffmpeg forces the old stitch.
 //   node scripts/packages/build-insta360.mjs --input <files or folders> --title "Title" [--every 2.5] [--max-frames 40]
-//     [--width 5760] [--fov 190] [--roll 180] [--start S] [--end E] [--no-trim]
+//     [--width 5760] [--fov 190] [--roll 180] [--start S] [--end E] [--no-trim] [--stitch calibrated|ffmpeg]
 // LRV_ files are the camera's low-resolution previews and are ignored.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
@@ -29,6 +31,16 @@ if (!inputs.length || !inputs.every(existsSync)) fail('Pass --input with Insta36
 const fov = Number(options.fov ?? 190), roll = Number(options.roll ?? 180), width = Number(options.width ?? 5760);
 const every = Number(options.every ?? 2.5), maxFrames = Number(options['max-frames'] ?? 40);
 const python = process.env.SPHR_MATTERPORT_PYTHON || 'python3';
+const calibratedStitch = (options.stitch ?? 'calibrated') === 'calibrated' && roll === 180 && fov === 190;
+
+/** Calibrated stitch of a lens pair at several times, or of an .insp bracket; null when it does not apply. */
+function calibrated(args) {
+  if (!calibratedStitch) return null;
+  const result = spawnSync(python, [path.join(here, 'insta360_stitch.py'), ...args], { encoding: 'utf8', maxBuffer: 1 << 24 });
+  if (result.status === 0) return result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  if (result.status !== 3) console.error(`calibrated stitch failed, using ffmpeg: ${(result.stderr || '').trim().split('\n').pop()}`);
+  return null;
+}
 
 function walk(target) {
   if (!statSync(target).isDirectory()) return [target];
@@ -114,11 +126,24 @@ rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 try {
   const shots = []; // { order, file }
+  const stitchedStills = new Map();
   for (const clip of clips) {
     const times = [];
     for (let t = clip.start + Math.min(step / 2, (clip.end - clip.start) / 2); t < clip.end; t += step) times.push(Number(t.toFixed(2)));
     if (!times.length) times.push(Number(((clip.start + clip.end) / 2).toFixed(2)));
     clip.frames = 0;
+    const done = clip.files.length === 2
+      ? calibrated(['video', '--a', clip.files[0], '--b', clip.files[1], '--times', times.join(','), '--out-dir', path.join(work, clip.key), '--width', String(width)])
+      : null;
+    if (done) {
+      for (const { t, out } of done) {
+        shots.push({ order: `${clip.time}_${String(Math.round(t * 100)).padStart(7, '0')}`, file: out });
+        clip.frames++;
+      }
+      clip.stitch = 'calibrated';
+      continue;
+    }
+    clip.stitch = 'ffmpeg';
     for (const t of times) {
       const out = path.join(work, `${clip.time}_${clip.key}_${String(Math.round(t * 100)).padStart(6, '0')}.jpg`);
       try {
@@ -140,9 +165,16 @@ try {
       best = scored.sort((x, y) => x.distance - y.distance)[0].file;
     }
     const out = path.join(work, `${time}_still.jpg`);
+    // The calibrated stitch fuses the whole bracket (exposures that line up); ffmpeg uses the best exposure.
+    if (calibrated(['still', '--insp', ...group.sort(), '--out', out, '--width', String(Math.min(width + 384, 6144))])) {
+      shots.push({ order: `${time}_0000000`, file: out });
+      stitchedStills.set(time, 'calibrated');
+      continue;
+    }
     try {
       ffmpeg(['-i', best, '-frames:v', '1', '-vf', v360(Math.min(width + 384, 6144)), '-q:v', '2', out]);
       shots.push({ order: `${time}_0000000`, file: out });
+      stitchedStills.set(time, 'ffmpeg');
     } catch (error) { skipped.push({ file: path.basename(best), reason: `could not be stitched: ${error.message}` }); }
   }
   if (!shots.length) fail(JSON.stringify({ error: 'No Insta360 footage could be stitched.', skipped }, null, 2));
@@ -155,8 +187,8 @@ try {
   console.log(JSON.stringify({
     folder: id.folder, preview: path.join(id.folder, 'preview.jpg'), panoramas: used.length, everySeconds: Number(step.toFixed(2)),
     stitch: { fov, roll, width },
-    videos: clips.map(({ key, files, duration, start, end, method, frames }) => ({ key, files: files.map(f => path.basename(f)), duration: Number(duration.toFixed(2)), kept: [start, end], trim: method, frames })),
-    stills: [...stills.entries()].map(([time, group]) => ({ time, exposures: group.length })),
+    videos: clips.map(({ key, files, duration, start, end, method, frames, stitch }) => ({ key, files: files.map(f => path.basename(f)), duration: Number(duration.toFixed(2)), kept: [start, end], trim: method, frames, stitch })),
+    stills: [...stills.entries()].map(([time, group]) => ({ time, exposures: group.length, stitch: stitchedStills.get(time) })),
     skipped: [...skipped, ...notPanoramas]
   }, null, 2));
 } finally { rmSync(work, { recursive: true, force: true }); }
