@@ -67,12 +67,13 @@ try {
     ['find_tour_spaces', 'Finds your spaces and public spaces to build a guided tour or scavenger hunt on'],
     ['list_tours', 'Lists your tours and scavenger hunts with their links'],
     ['create_tour', 'Starts a guided tour or scavenger hunt on a space'],
-    ['draft_tour', `Asks ${brand.name}'s tour agent to write the tour, with models, effects, sound and looks`],
+    ['draft_tour', `Asks ${brand.name}'s tour agent to write the tour, with models, effects, sound, looks and skies`],
     ['wait_for_tour', 'Waits for a draft and summarizes the tour'],
-    ['get_tour', 'Shows a tour with every look, effect and sound it can use'],
+    ['get_tour', 'Shows a tour with every look, sky, effect and sound it can use'],
     ['save_tour', 'Saves a tour edited by hand'],
     ['search_models', 'Searches the library of ready-made 3D models'],
     ['upload_model', 'Adds a .glb model from this computer, for example one made in Blender, to a tour'],
+    ['upload_sky', 'Adds your own 360 sky image from this computer to a tour'],
     ['share_tour', 'Shares a tour by link, or makes it private again']
   ].map(([name, description]) => ({ name, description }));
   const manifest = {

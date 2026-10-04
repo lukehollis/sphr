@@ -40,6 +40,10 @@ temples, tombs, gardens) and gets its own link.
    {{name}}), with `color` for the capture as it is. A tour or a stop changes look through a
    transition: `cut`, `fade`, `dissolve`, `wipe`, `iris`, `sweep` or `glitch`. Use them for moments
    (a drawing that sweeps into color, a blueprint of how a temple was planned), not on every stop.
+   Skies go behind the space the same way, for the tour or a stop: `"sky": {"sky": "milky-way",
+   "turn": 90}` (sunrises, sunsets, storms, the Milky Way, a full moon, northern lights and more;
+   `get_tour` lists them), `"none"` for the capture's own sky, and the space takes on the sky's light.
+   `upload_sky` adds the person's own 360 sky image (twice as wide as tall).
 4. `search_models` finds ready-made models (statues, amphorae, temples, furniture, animals). Each is
    sized in meters at scale 1. Animated characters and animals list their clips and play `idle` unless
    an object sets `"animation"` to another.
@@ -72,6 +76,7 @@ npx -y {{package}} call create_tour '{"scene_id":"<sceneId>","kind":"hunt","titl
 npx -y {{package}} call draft_tour '{"tour_id":"<id>","request":"A hunt for five artifacts, ending in a line drawing"}'
 npx -y {{package}} call wait_for_tour '{"tour_id":"<id>"}'
 npx -y {{package}} call upload_model '{"tour_id":"<id>","path":"/path/to/model.glb"}'
+npx -y {{package}} call upload_sky '{"tour_id":"<id>","path":"/path/to/sky.jpg"}'
 ```
 
 Agents that run in the cloud and cannot reach this computer can use the hosted connector at {{url}}/mcp.

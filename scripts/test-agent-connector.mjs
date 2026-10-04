@@ -176,7 +176,7 @@ try {
   connector.notify('notifications/initialized');
   const listed = (await connector.rpc('tools/list', {})).result.tools.map(tool => tool.name);
   assert.deepEqual(listed, ['link_account', 'check_files', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'space_status', 'set_visibility', 'unlink_account',
-    'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'upload_model', 'share_tour']);
+    'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'upload_model', 'upload_sky', 'share_tour']);
   assert.equal((await connector.rpc('nonsense/method', {})).error.code, -32601);
   assert.equal((await connector.rpc('prompts/list', {})).result.prompts[0].name, 'publish_capture');
   let result = await connector.call('space_status');
@@ -347,17 +347,28 @@ try {
   assert.ok(!result.error, result.text);
   const tripodUrl = result.text.match(/url (\/api\/tour-files\/\S+\.glb)/)[1];
   assert.ok(Buffer.from(await (await fetch(base + tripodUrl)).arrayBuffer()).equals(model), 'the uploaded model is served as it was sent');
-  result = await connector.call('save_tour', { tour_id: tourId, experience: { version: 1, kind: 'tour', look: { look: 'lines', transition: 'sweep', duration: 2 },
+  // A 360 sky of the person's own (a JPEG header is enough for the server to check its shape).
+  const sky = Buffer.alloc(64);
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).copy(sky, 0);
+  Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, 0x08, 0x00, 0x10, 0x00, 0x03]).copy(sky, 20);
+  writeFileSync(path.join(captures, 'night-sky.jpg'), sky);
+  writeFileSync(path.join(captures, 'night-sky.tif'), 'TIFF');
+  assert.match((await connector.call('upload_sky', { tour_id: tourId, path: path.join(captures, 'night-sky.tif') })).text, /JPEG, PNG or WebP/);
+  result = await connector.call('upload_sky', { tour_id: tourId, path: path.join(captures, 'night-sky.jpg') });
+  assert.ok(!result.error, result.text);
+  const skyUrl = result.text.match(/"url":"(\/api\/tour-files\/[^"]+\.jpg)"/)[1];
+  assert.match((await connector.call('get_tour', { tour_id: tourId })).text, /Skies \(a tour's or stop's "sky"[\s\S]*drawn-night \(Starry night, night\)/);
+  result = await connector.call('save_tour', { tour_id: tourId, experience: { version: 1, kind: 'tour', look: { look: 'lines', transition: 'sweep', duration: 2 }, sky: { sky: 'custom', url: skyUrl },
     objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: tripodUrl }, position: [0, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] }],
     effects: [], stops: [{ id: 'altar', title: 'The altar', text: 'The oracle sat here.', format: 'plain', view: { nodeId: 'court-1', rotation: { azimuth: 0, polar: -5 } },
-      look: { look: 'color', transition: 'iris' }, objects: ['tripod'], effects: [] }] } });
+      look: { look: 'color', transition: 'iris' }, sky: { sky: 'drawn-night' }, objects: ['tripod'], effects: [] }] } });
   assert.ok(!result.error, result.text);
   assert.match(result.text, /^Saved\. "The oracle" .* with 1 stop on "Temple court"/);
   result = await connector.call('save_tour', { tour_id: tourId, experience: { version: 1, kind: 'tour', objects: [], effects: [],
     stops: [{ id: 'nowhere', title: 'Lost', text: 'Nowhere.', view: { nodeId: 'not-a-location' }, objects: [], effects: [] }] } });
   assert.ok(result.error, 'stops must stand in the space');
   result = await connector.call('wait_for_tour', { tour_id: tourId });
-  assert.match(result.text, /Stops: 1\. The altar \[look color\]\. Objects: Bronze tripod\. Effects: none\. Look: lines\./);
+  assert.match(result.text, /Stops: 1\. The altar \[look color, sky drawn-night\]\. Objects: Bronze tripod\. Effects: none\. Look: lines\. Sky: custom\./);
   result = await connector.call('share_tour', { tour_id: tourId, public: true });
   assert.match(result.text, new RegExp(`shared at ${base}/t/${tourId}/the-oracle`));
   assert.ok((await (await fetch(`${base}/t/${tourId}/the-oracle`)).text()).includes(tripodUrl), 'anyone with the link sees the tour and its model');

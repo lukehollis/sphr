@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
-import { effectEntries, lookEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
+import { effectEntries, lookEntries, shapeEntries, skyEntries, soundEntries } from "@/lib/experience/packs";
 import { paramSummary } from "@/lib/experience/catalog";
 import type { SpaceView } from "./space-views";
 import { LOOK_TRANSITIONS } from "@/lib/experience/types";
@@ -176,6 +176,8 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
   images.sort((a, b) => a.label.localeCompare(b.label));
 
   const listed = nodes.length > 300 ? sampleNodes(nodes, preferred, 300) : nodes;
+  const styles = drawn.filter((style) => style !== "sky");
+  const outlines = drawn.includes("sky");
   const library = await libraryModels(team);
   const picked = pickLibrary(library, prompt, draft);
   const lines = [
@@ -187,9 +189,12 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
     `Effects you can use:\n${effectEntries().filter((entry) => !entry.retired).map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map(paramSummary).join(", ")}.`).join("\n")}`,
     `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
-    drawn.length
-      ? `Drawn versions: a line-drawing model has redrawn this space (${drawn.join(", ")}), so the ${drawn.includes("watercolor") ? "line drawing, blueprint and watercolor looks show" : "line drawing and blueprint looks show"} real drawings of it and transitions reveal between drawing and photograph.`
+    styles.length
+      ? `Drawn versions: a line-drawing model has redrawn this space (${styles.join(", ")}), so the ${styles.includes("watercolor") ? "line drawing, blueprint and watercolor looks show" : "line drawing and blueprint looks show"} real drawings of it and transitions reveal between drawing and photograph.`
       : "Drawn versions: none yet, so the line drawing, blueprint and watercolor looks trace the frame's edges instead, which suits strong architectural edges best.",
+    `Skies for "sky" (the ID, "none" for the capture's own sky, or {"sky": "custom", "url": an https equirectangular image}). ${nodes.length
+      ? outlines ? "This space's 360 photos have sky outlines, so a new sky shows wherever they see sky." : "This space's 360 photos have no sky outlines yet, so a new sky only changes their light (a night sky darkens them, a sunset warms them) and cannot show through them; say so if the person asks for a different sky."
+      : "This space has no 360 photos, so a new sky shows everywhere the capture leaves empty, behind the splat or model."}\n${skyEntries().map((entry) => `${entry.id} (${entry.label}, ${entry.kind}${entry.place ? `, ${entry.place}` : ""}): ${entry.description}`).join("\n")}`,
     `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map(paramSummary).join(", ")}.` : ""}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
     library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model, or a model ID from search_models when you have that tool). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category, and search_models finds the rest:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}${model.animations?.length ? `, animated: ${model.animations.join(", ")}` : ""}`).join("\n")}` : "",
@@ -212,6 +217,8 @@ Sound. A little sound goes a long way: background music or an ambient bed fittin
 Models. Prefer a library model to a plain shape whenever one fits: an amphora, a statue, a lantern, a chest, a column. The models listed below are only a sample of the library. When you have the search_models tool (it may be named mcp__library__search_models), search the whole library for each kind of thing you want to place before you choose (several short searches beat one long one, for example "amphora", "bronze statue", "brazier") and use a result's ID as the model's url. When the person gives the address of a model of their own (an https .glb, such as one they made in Blender and uploaded to the tour), use that address as the url. Models are sized in meters at scale 1, so a 0.9 m amphora at scale 1 is life size; scale only to make a point (a giant key, a tiny temple model). Characters and animals listed as animated play their idle clip; set "animation" to one of their listed clip names for another (a walk, a dance), and give animated models idle "none". In a photographic capture prefer realistic models; toy, blocky or cartoon packs (Kenney, Toon, POLYGON Kids and the like) only when the person wants a playful look, and keep to one style within a tour.
 
 Looks. A look restyles the whole frame, like a filter in a video editor: a line drawing, a blueprint, film noir, night vision and more. Set "style" on the tour for its overall look, or on a stop to change the look there, with a transition: cut, fade, dissolve, wipe, iris (opens from what the stop is about), sweep (opens through the space like a scan) or glitch, and a duration in seconds. A stop without "style" keeps the tour's look; give a stop {"look": "color"} to return to the capture itself. Use looks to mark moments and moods (a line drawing that sweeps into color, a blueprint for how a building was planned, noir for a mystery), not on every stop.
+
+Skies. Set "sky" on the tour, or on a stop to change the sky there, to put another sky behind the space: {"sky": ID, "turn": degrees to turn it around the vertical (to put its sun or moon behind what a stop looks at), "brightness": 0.2 to 2.5, "light": 0 to 1 for how much the space takes on the sky's light, "duration": seconds to fade}. The space takes on the sky's light, so a night sky turns a sunny capture into night and a sunset warms it; "light" 0 keeps the capture's own light. Match the sky to the story (stars over a temple at night, a storm for a battle, a sunrise for a beginning) and to the place when it matters; a stop without "sky" keeps the tour's sky, and {"sky": "none"} returns to the capture's own. Change the sky at a few moments, not every stop.
 
 The map. A stop can fly up out of the capture to a view from above over Google's photorealistic 3D map, then the next stop dives back down into its panorama or splat. Give such a stop "earth": {"range": meters from the ground to the camera} (300 to 800 for a single building or courtyard, 1000 to 3000 for a whole valley or city) and a "rotation" whose tilt (polar) looks down between -30 and -70, aimed with azimuth like any stop; its nodeId is the location the view centers on. Use it to open a tour by showing where the site sits in its landscape, to move between distant parts of a site, or to close by pulling back. One or two per tour is plenty. It only shows once the space is on the map: if the draft has no "place" and you know where this site is, give "place": {"lat", "lon"} in decimal degrees for the location the tour starts at, and a person will turn the map to line it up.
 
@@ -237,6 +244,13 @@ const placeSchema = {
 
 const vec3Schema = { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 } as const;
 
+/** A sky behind the space, for the tour or a stop. */
+const skySchema = {
+  type: "object",
+  properties: { sky: { type: "string" }, url: { type: "string" }, turn: { type: "number" }, brightness: { type: "number" }, light: { type: "number" }, duration: { type: "number" } },
+  required: ["sky"]
+};
+
 /** A look for the frame: the agent's name for a stop's or the tour's StopLook. */
 const styleSchema = {
   type: "object",
@@ -254,6 +268,7 @@ const WRITE_TOUR: Anthropic.Tool = {
       kind: { type: "string", enum: ["tour", "hunt"] },
       finale: { type: "string" },
       style: styleSchema,
+      sky: skySchema,
       place: { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] },
       objects: {
         type: "array",
@@ -300,6 +315,7 @@ const WRITE_TOUR: Anthropic.Tool = {
             fov: { type: "number" },
             earth: { anyOf: [{ type: "null" }, { type: "object", properties: { range: { type: "number" } }, required: ["range"] }] },
             style: styleSchema,
+            sky: skySchema,
             objects: { type: "array", items: { type: "string" } },
             effects: { type: "array", items: { type: "string" } },
             find: { type: "object", properties: { objectId: { type: "string" }, hint: { type: "string" }, found: { type: "string" } }, required: ["objectId"] }
@@ -313,7 +329,7 @@ const WRITE_TOUR: Anthropic.Tool = {
 };
 
 export type RawDraft = {
-  reply?: unknown; kind?: unknown; finale?: unknown; style?: unknown; place?: unknown;
+  reply?: unknown; kind?: unknown; finale?: unknown; style?: unknown; sky?: unknown; place?: unknown;
   objects?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>>; stops?: Array<Record<string, unknown>>;
 };
 
@@ -363,14 +379,16 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
         ...(stop.earth === undefined ? before?.view.earth ? { earth: before.view.earth } : {} : stop.earth ? { earth: stop.earth } : {}) },
       objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
       look: stop.style === undefined ? before?.look : stop.style,
+      sky: stop.sky === undefined ? before?.sky : stop.sky,
       files: before?.files, sounds: before?.sounds, models: before?.models, annotations: before?.annotations
     };
   });
   const look = raw.style === undefined ? previous.look : raw.style;
+  const sky = raw.sky === undefined ? previous.sky : raw.sky;
   // A place a person lined up stays; the agent only suggests where an unplaced space is.
   const suggested = raw.place as { lat?: unknown; lon?: unknown } | undefined;
   const place = previous.place ?? (suggested && typeof suggested === "object" ? { lat: suggested.lat, lon: suggested.lon, heading: 0 } : undefined);
-  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, look, place, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
+  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, look, sky, place, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
   const dropped = objects.length - experience.objects.length;
   const said = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
   const reply = dropped > 0 ? `${said} (${dropped === 1 ? "One object" : `${dropped} objects`} could not be placed because the model was not found in the library.)` : said;

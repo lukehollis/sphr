@@ -157,6 +157,59 @@ the drawn photos with the same cameras is listed in `space_data.splats` with
 `role: "sketch"` (or `"watercolor"`), loaded only when a look asks for it.
 Without a drawn version, a look draws the frame's edges itself.
 
+## Skies
+
+A tour can put another sky behind its space, and a stop can change to a
+different one: a sunset, a storm, stars over a temple. The space takes on the
+sky's light, so a night sky turns a sunny capture into night and a sunset warms
+it. In the builder's **Sky** tab, choose one for the whole tour or for the stop
+in view, turn it to put its sun or moon somewhere else, and set how bright it is
+and how much of its light the space takes on. A customer can upload a 360 sky of
+their own (an equirectangular JPEG, PNG or WebP twice as wide as tall, 1024 to
+8192 pixels wide, up to 20 MB; `POST /api/account/tours/<id>/skies`), or give
+the address of one.
+
+```json
+"sky": { "sky": "sunset", "turn": 90, "light": 0.8 },
+"stops": [{ "id": "night", "sky": { "sky": "milky-way", "duration": 4 } }, { "id": "back", "sky": "none" }]
+```
+
+`sky` is an ID from the packs, `none` for the capture's own sky, or
+`{ "sky": "custom", "url": ... }`. `turn` is degrees around the vertical,
+`brightness` (0.2 to 2.5) is the sky's own, `light` (0 to 1) is how much the
+space takes on its light, and `duration` the seconds the change takes (2 by
+default). A stop without `sky` keeps the tour's.
+
+The sky is drawn on a sphere at the far plane behind everything
+(`lib/three/layers/TourSkyLayer.ts`), faded from one sky to the next. Splats and
+models cover it where the capture is solid; a splat capture's own sky is usually
+splats far out around it, so splats well past the capture's core fade while a
+tour sky shows. 360 photographs let it through where they see sky: their sky
+outlines are made once, offline, by `scripts/skies/masks.py` (UperNet trained on
+ADE20K finds the sky in every cube face, snapped to the photo's edges) and listed
+in the same `<SPHR_LINES_BASE_URL>/<sceneId>/index.json` as the line drawings:
+
+```json
+"sky": { "template": ".../<sceneId>/sky/{uuid}/{face}.jpg", "nodes": { "<uuid>": "221110" } }
+```
+
+One digit per cube face: 0 no sky, 1 part sky (a mask file), 2 all sky. Without
+outlines a sky only changes the photographs' light, and the builder says so.
+`python3 scripts/skies/masks.py scan` finds the catalog spaces whose photos see
+the sky, `masks.py scene --scene <id>` outlines one (any space with
+`--bootstrap <url>`), and `scripts/skies/upload.sh masks` publishes it.
+
+Core skies are drawn in the shader from a few colors (`drawn-day`,
+`drawn-sunset`, `drawn-twilight`, `drawn-night`, `drawn-overcast`), so the open
+source pack needs no images. A pack adds photographed skies as `skies` (see
+`SkyMeta` in `registry.ts`: `image`, a small `preview` that loads first, a
+`thumb`, the `light` the space takes on, and where its `sun` is). The Spacery pack
+lists 38, all public domain or CC0: Poly Haven and ambientCG skies from day to
+storm to night, and NASA's Deep Star Maps turned into the sky seen from 38
+degrees north and 30 degrees south. `scripts/skies/build.py` makes them (4096 by
+2048, haze below the horizon, tonemapped nights brought down to night) and
+`scripts/skies/upload.sh library` hosts them in the spacery-static bucket.
+
 ## The map
 
 A stop can fly up out of the capture to a view from above over Google's

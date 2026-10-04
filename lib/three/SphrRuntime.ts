@@ -23,6 +23,7 @@ import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
 import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
 import { ExperienceAudio } from "@/lib/experience/audio";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
+import { TourSkyLayer } from "@/lib/three/layers/TourSkyLayer";
 import { EarthLayer } from "@/lib/three/layers/EarthLayer";
 import { earthNear, earthPose } from "@/lib/three/earth";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
@@ -34,7 +35,7 @@ import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 import type { StartView } from '@/lib/scene-edits';
-import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopLook, StopView, Vec3 } from "@/lib/experience/types";
+import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopLook, StopSky, StopView, Vec3 } from "@/lib/experience/types";
 
 export type GizmoMode = "translate" | "rotate" | "scale";
 /** A pixel in a panorama face (agents) or in the current view (editor), as 0..1 fractions from the top left. */
@@ -42,7 +43,7 @@ export type PixelAnchor = { nodeId?: string; face?: number; x: number; y: number
 /** A camera pose remembered with a captured view, so later placements aim from where it was taken. */
 export type ViewCamera = { position: Vec3; quaternion: [number, number, number, number]; fov: number; aspect: number };
 /** Live edits from the builder. A `standalone` tour's points replace the stops even when there are none. */
-export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; look?: StopLook; place?: EarthPlace; standalone?: boolean };
+export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; look?: StopLook; sky?: StopSky; place?: EarthPlace; standalone?: boolean };
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -88,6 +89,11 @@ export class SphrRuntime {
   private iiif: IiifImageLayer | null = null;
   private nav: NavigationLayer | null = null;
   private skybox: SkyboxLayer | null = null;
+  private tourSky: TourSkyLayer | null = null;
+  private skyStarted = false;
+  private legacySkyHidden = false;
+  private readonly ambientLight = new THREE.AmbientLight(0xf3efe6, 1.7);
+  private readonly sunLight = new THREE.DirectionalLight(0xfff2cf, 3.2);
   private earth: EarthLayer | null = null;
   private lastEarthCredits = 0;
   private sceneGraph: SceneGraphLayer | null = null;
@@ -198,6 +204,7 @@ export class SphrRuntime {
     if (this.bootstrap.space.space_data.skybox) {
       this.skybox = new SkyboxLayer(this.scene, this.manager, this.bootstrap.space.space_data.skybox);
     }
+    this.tourSky = new TourSkyLayer(this.scene, this.renderer.capabilities.maxTextureSize);
 
     const splatConfigs = this.getSplatConfigs();
     if (splatConfigs.length) {
@@ -442,6 +449,7 @@ export class SphrRuntime {
         hasCubeScene: Boolean(this.cubeScene)
       },
       skybox: this.skybox?.getDebugSnapshot() ?? null,
+      tourSky: this.tourSky?.getDebugSnapshot() ?? null,
       experience: {
         kind: this.tour.kind,
         objects: this.tour.objects.length,
@@ -479,6 +487,7 @@ export class SphrRuntime {
     this.navigationReleaseTween = null;
     this.audio.dispose();
     this.skybox?.dispose();
+    this.tourSky?.dispose();
     this.earth?.dispose();
     this.splats?.dispose();
     this.panorama?.dispose();
@@ -509,12 +518,38 @@ export class SphrRuntime {
 
   private setupScene() {
     this.scene.fog = this.getNodes().length ? null : new THREE.FogExp2(0x090b12, 0.008);
-    const ambient = new THREE.AmbientLight(0xf3efe6, 1.7);
-    this.scene.add(ambient);
+    this.scene.add(this.ambientLight);
+    this.sunLight.position.set(4, 8, 5);
+    this.scene.add(this.sunLight);
+  }
 
-    const sun = new THREE.DirectionalLight(0xfff2cf, 3.2);
-    sun.position.set(4, 8, 5);
-    this.scene.add(sun);
+  /** The space, its 360 photos and placed objects take on the tour sky's light. */
+  private applySkyLight() {
+    const sky = this.tourSky;
+    if (!sky) return;
+    const tint = sky.light();
+    const amount = sky.amount;
+    this.panorama?.setSky(amount, tint);
+    this.splats?.setTint(tint);
+    this.splats?.setSkyCut(amount);
+    this.sceneGraph?.setTint(tint);
+    this.ambientLight.color.set(0xf3efe6).multiply(tint);
+    this.sunLight.color.set(0xfff2cf).multiply(tint);
+    const sun = sky.sun();
+    if (sun && sun.y > -0.05) this.sunLight.position.copy(sun).multiplyScalar(10);
+    else this.sunLight.position.set(4, 8, 5);
+    // A space's own authored skybox gives way to the tour's sky.
+    const hide = amount > 0.5;
+    if (this.skybox && hide !== this.legacySkyHidden) {
+      this.legacySkyHidden = hide;
+      if (hide) this.skybox.fadeOut(); else this.skybox.fadeIn();
+    }
+  }
+
+  /** Whether a tour sky can show through this space: its 360 photos need sky outlines. */
+  async skySupport() {
+    if (!this.panorama) return { panoramas: false, outlines: false };
+    return { panoramas: true, outlines: await this.panorama.hasSkyOutlines() };
   }
 
   private setupNavigationTransitionRenderTarget() {
@@ -936,6 +971,10 @@ export class SphrRuntime {
       if (lookKey(look) !== lookKey(this.tour.look)) this.looks?.set(this.tour.look, this.camera, null, { instant: true });
     }
     this.looks?.set(look, this.camera, anchor ? new THREE.Vector3(...anchor) : null);
+    // A stop's sky, else the tour's; the first one is there from the start.
+    const sky = guided ? point?.sky ?? this.tour.sky : this.tour.sky;
+    this.tourSky?.set(sky, { instant: !this.skyStarted });
+    this.skyStarted = true;
     this.state.hunt = hunt ? {
       found: [...this.huntFound],
       stepFound: Boolean(point?.find && this.huntFound.has(point.find.objectId)),
@@ -1087,6 +1126,7 @@ export class SphrRuntime {
     this.tour.effects = update.effects;
     this.tour.finale = update.finale;
     this.tour.look = update.look;
+    this.tour.sky = update.sky;
     this.tour.place = update.place ?? this.bootstrap.space.space_data.geo;
     if (this.state.activePointIndex >= (segment?.tourpoints.length ?? 1)) this.state.activePointIndex = 0;
     // The builder turns and moves the map live while it is in view.
@@ -1333,6 +1373,7 @@ export class SphrRuntime {
       // OrbitControls clamps FPV distance to 0.1m. It must not rewrite an in-flight pose.
       if (!this.cameraTween) this.controls.update();
       this.skybox?.update(this.camera);
+      if (this.tourSky?.update(this.camera, elapsed)) this.applySkyLight();
       this.panorama?.update(this.camera);
       this.nav?.update(this.camera, this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);

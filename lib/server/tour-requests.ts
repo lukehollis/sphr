@@ -9,14 +9,19 @@ import { captureMeshes } from "./capture-mesh";
 import { spaceViews } from "./space-views";
 import { variantsUrl } from "./variants";
 
-/** The drawn versions of a space the looks can use: its line-drawing manifest's styles and companion splats. */
+/**
+ * The drawn versions of a space the looks can use (its line-drawing manifest's styles and
+ * companion splats), and "sky" when its 360 photos have sky outlines for tour skies.
+ */
 async function drawnVersions(scene: SceneListing, splats: { role?: string }[] = []) {
   const styles = new Set(splats.flatMap((splat) => splat.role === "sketch" ? ["contour"] : splat.role === "watercolor" ? ["watercolor"] : []));
   const url = variantsUrl(scene.sceneId);
   if (url) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      if (response.ok) for (const style of Object.keys((await response.json())?.styles ?? {})) styles.add(style);
+      const manifest = response.ok ? await response.json() : null;
+      for (const style of Object.keys(manifest?.styles ?? {})) styles.add(style);
+      if (Object.keys(manifest?.sky?.nodes ?? {}).length) styles.add("sky");
     } catch { /* no drawn version is fine */ }
   }
   return [...styles];

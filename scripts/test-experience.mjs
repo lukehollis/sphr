@@ -283,6 +283,34 @@ test('looks are validated for the tour and each stop, and reach the viewer', () 
   assert.equal(agent.experience.stops[1].look.look, 'color', 'a stop the agent leaves alone keeps its look');
 });
 
+test('skies are validated for the tour and each stop, reach the viewer, and agents can set them', () => {
+  const input = tour();
+  input.sky = { sky: 'drawn-night', turn: 400, brightness: 9, light: 0.5, duration: 2 };
+  input.stops[0].sky = 'https://example.com/sky.jpg';
+  input.stops.push({ id: 'two', title: 'Two', text: 'As captured', view, objects: [], effects: [], sky: 'none' });
+  const parsed = parseExperience(input);
+  assert.deepEqual(parsed.sky, { sky: 'drawn-night', turn: 180, brightness: 2.5, light: 0.5 }, 'values are clamped and defaults left out');
+  assert.deepEqual(parsed.stops[0].sky, { sky: 'custom', url: 'https://example.com/sky.jpg' }, 'an address is a custom sky');
+  assert.deepEqual(parsed.stops[1].sky, { sky: 'none' }, 'a stop can return to the capture\'s own sky');
+  assert.throws(() => parseExperience({ ...tour(), sky: { sky: 'mars' } }), /sky this site does not have/);
+  assert.throws(() => parseExperience({ ...tour(), sky: { sky: 'custom', url: 'http://example.com/sky.jpg' } }), /https/);
+  assert.throws(() => parseExperience({ ...tour(), sky: { sky: 'custom', url: 'javascript:alert(1)' } }), ExperienceError);
+  const lenient = parseExperience({ ...tour(), sky: { sky: 'mars' }, stops: [{ ...tour().stops[0], sky: { sky: 'custom' } }] }, { lenient: true });
+  assert.equal(lenient.sky, undefined, 'unknown skies are dropped from agent drafts');
+  assert.equal(lenient.stops[0].sky, undefined, 'a custom sky without an image is dropped');
+  const applied = applyExperience(bootstrap(), parsed);
+  assert.equal(applied.tour.tour_data.sky.sky, 'drawn-night');
+  assert.equal(applied.tour.tour_data.spaces[0].tourpoints[0].sky.url, 'https://example.com/sky.jpg');
+  assert.equal(normalizeTour(applied).sky.turn, 180);
+  assert.equal(experienceFromBootstrap(applied).stops[1].sky.sky, 'none', 'skies survive a round trip through the bootstrap');
+  const agent = normalizeAgentDraft({ reply: 'ok', kind: 'tour', sky: { sky: 'drawn-sunset', turn: -90 },
+    objects: [], effects: [], stops: [{ id: 'one', title: 'One', text: 'Hi', nodeId: 'a', sky: { sky: 'drawn-twilight', light: 0.4 } }, { id: 'two', title: 'Two', text: 'Hi', nodeId: 'a' }] }, parsed, new Set(['a', 'b']));
+  assert.deepEqual(agent.experience.sky, { sky: 'drawn-sunset', turn: -90 });
+  assert.deepEqual(agent.experience.stops[0].sky, { sky: 'drawn-twilight', light: 0.4 });
+  assert.deepEqual(agent.experience.stops[1].sky, { sky: 'none' }, 'a stop the agent leaves alone keeps its sky');
+  assert.equal(normalizeAgentDraft({ reply: 'ok', kind: 'tour', objects: [], effects: [], stops: [] }, parsed, new Set(['a'])).experience.sky.sky, 'drawn-night', 'the tour keeps its sky when the agent does not mention one');
+});
+
 test('an agent draft keeps going when a model it names is not in the library', () => {
   const result = normalizeAgentDraft({ reply: 'Placed a temple.', kind: 'tour', objects: [
     { id: 'temple', name: 'Temple', source: { kind: 'model' } },
@@ -462,6 +490,7 @@ test('agents learn the looks, effects and sounds a site has', async () => {
   assert.ok(!catalog.effects.some((effect) => effect.type === 'sketch'), 'retired effects are left out');
   assert.match(catalog.looks.find((look) => look.id === 'lines').params.join(' '), /weight 0\.6\.\.3 default 1\.3/);
   assert.ok(catalog.sounds.some((sound) => sound.id === 'calm' && sound.kind === 'music'));
+  assert.ok(['day', 'sunset', 'dusk', 'night', 'cloudy'].every((kind) => catalog.skies.some((sky) => sky.kind === kind)), 'every kind of sky is offered');
 });
 
 test('placed objects keep the animation clip they play', () => {

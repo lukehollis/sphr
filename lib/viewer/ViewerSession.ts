@@ -171,6 +171,7 @@ export class ViewerSession {
       data.effects = update.effects;
       data.finale = update.finale;
       data.look = update.look;
+      data.sky = update.sky;
       data.place = update.place;
       if (update.points.length) data.mode = 'guided';
     }
@@ -186,6 +187,8 @@ export class ViewerSession {
   lookAtObject(id: string) { this.active?.three?.lookAtObject(id); }
   previewSound(source: string) { return this.active?.three?.previewSound(source) ?? Promise.resolve(false); }
   lookThumbnails(ids: string[], width?: number) { return this.active?.three?.lookThumbnails(ids, width) ?? {}; }
+  /** Whether a tour sky can show through the space in view (360 photos need sky outlines). */
+  skySupport() { return this.active?.three?.skySupport() ?? Promise.resolve({ panoramas: false, outlines: false }); }
   setGizmoMode(mode: GizmoMode) { this.active?.three?.setGizmoMode(mode); }
   resolveAnchor(anchor: PixelAnchor) { return this.active?.three?.resolveAnchor(anchor) ?? null; }
   cameraView() { return this.active?.three?.cameraView() ?? null; }

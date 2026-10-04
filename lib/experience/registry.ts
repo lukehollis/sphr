@@ -159,6 +159,45 @@ export type LookMeta = {
 };
 export type LookEntry = LookMeta;
 
+export type SkyKind = "day" | "cloudy" | "storm" | "sunrise" | "sunset" | "dusk" | "night";
+
+/** A sky drawn in the shader from colors alone, for packs that ship no images. */
+export type SkyGradient = {
+  zenith: string;
+  horizon: string;
+  /** The haze below the horizon. */
+  ground: string;
+  /** A sun or moon disc where the sky's `sun` says. */
+  sun?: { color: string; size: number };
+  /** How many stars show, 0 to 1. */
+  stars?: number;
+};
+
+/**
+ * A sky to put behind a space: an equirectangular photograph (`image`, with a
+ * small `preview` that loads first) or a `gradient` drawn in the shader. `light` is
+ * the color the space is multiplied by under it, and `sun` is where its sun or
+ * moon is in the image, for lighting placed objects.
+ */
+export type SkyMeta = {
+  id: string;
+  label: string;
+  kind: SkyKind;
+  /** One sentence for the editor and the tour agent. */
+  description: string;
+  /** Where it was photographed. */
+  place?: string;
+  image?: string;
+  preview?: string;
+  thumb?: string;
+  gradient?: SkyGradient;
+  light: string;
+  sun?: [number, number];
+  credit?: string;
+  source?: string;
+};
+export type SkyEntry = SkyMeta;
+
 export type Pack = {
   id: string;
   label: string;
@@ -166,6 +205,7 @@ export type Pack = {
   shapes: ShapeEntry[];
   sounds?: SoundEntry[];
   looks?: LookEntry[];
+  skies?: SkyEntry[];
 };
 
 /** Audio shared by every effect: one context, a listener on the camera and a master volume. */

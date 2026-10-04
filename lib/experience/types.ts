@@ -93,6 +93,34 @@ export type StopLook = {
   duration?: number;
 };
 
+/**
+ * A sky behind the space: one from the installed packs by ID, `custom` with an
+ * equirectangular image address, or `none` for the capture's own sky. A new sky
+ * shows through the sky in 360 photos (where they have sky outlines) and behind
+ * splats and models, and the space takes on its light: a night sky darkens and
+ * cools it, a sunset warms it.
+ */
+export type StopSky = {
+  sky: string;
+  /** An equirectangular (2:1) image, for `sky: "custom"`. */
+  url?: string;
+  /** Degrees the sky turns around the vertical, to put its sun or moon somewhere else. */
+  turn?: number;
+  /** How bright the sky itself is; 1 is as photographed. */
+  brightness?: number;
+  /** How much the space takes on the sky's light, from 0 (not at all) to 1. */
+  light?: number;
+  /** Seconds the change from the sky before takes. */
+  duration?: number;
+};
+
+export const SKY_RANGES = {
+  turn: { min: -180, max: 180, default: 0 },
+  brightness: { min: 0.2, max: 2.5, default: 1 },
+  light: { min: 0, max: 1, default: 1 },
+  duration: { min: 0, max: 10, default: 2 }
+} as const;
+
 export type ExperienceStop = {
   id: string;
   title: string;
@@ -110,6 +138,8 @@ export type ExperienceStop = {
   annotations?: string[];
   /** This stop's look; without one, the tour's look. */
   look?: StopLook;
+  /** This stop's sky; without one, the tour's sky. */
+  sky?: StopSky;
 };
 
 export type ExperienceKind = "tour" | "hunt";
@@ -125,6 +155,8 @@ export type Experience = {
   effects: EffectInstance[];
   /** The look for free exploration and for stops without their own. */
   look?: StopLook;
+  /** The sky for free exploration and for stops without their own. */
+  sky?: StopSky;
   /** Where the space is on the 3D map, for stops seen from above. */
   place?: EarthPlace;
 };

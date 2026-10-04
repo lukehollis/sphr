@@ -500,7 +500,7 @@ const tools = [
   },
   {
     name: 'draft_tour',
-    description: `Asks ${brand.name}'s tour agent, which can see the space's photographs, to write or rework the tour from a request in plain words: stops and their text, hidden objects and clues, library models, effects, sound, music and looks (line drawing, blueprint, film noir and more, with transitions). It places everything and saves. Takes one to five minutes; it returns at once, then call wait_for_tour.`,
+    description: `Asks ${brand.name}'s tour agent, which can see the space's photographs, to write or rework the tour from a request in plain words: stops and their text, hidden objects and clues, library models, effects, sound, music, looks (line drawing, blueprint, film noir and more, with transitions) and skies (a sunset, a storm, the Milky Way behind the space). It places everything and saves. Takes one to five minutes; it returns at once, then call wait_for_tour.`,
     inputSchema: { type: 'object', properties: { tour_id: tourId, request: { type: 'string', description: 'What to make or change, up to 6000 characters.' } }, required: ['tour_id', 'request'] },
     run: draftTour
   },
@@ -512,7 +512,7 @@ const tools = [
   },
   {
     name: 'get_tour',
-    description: 'The tour as JSON (stops, objects, effects, looks) with its revision, for editing with save_tour.',
+    description: 'The tour as JSON (stops, objects, effects, looks, skies) with its revision, for editing with save_tour.',
     inputSchema: { type: 'object', properties: { tour_id: tourId }, required: ['tour_id'] },
     run: getTour
   },
@@ -534,6 +534,12 @@ const tools = [
     description: 'Uploads a 3D model from this computer to a tour, for example one you built in Blender (export glTF Binary .glb, meters, Y up, everything embedded, under 25 MB). Returns the url to use as an object\'s source url in save_tour.',
     inputSchema: { type: 'object', properties: { tour_id: tourId, path: { type: 'string', description: 'Absolute path to the .glb file.' } }, required: ['tour_id', 'path'] },
     run: uploadModel
+  },
+  {
+    name: 'upload_sky',
+    description: 'Uploads a sky from this computer to a tour: a 360 panorama twice as wide as it is tall (equirectangular JPEG, PNG or WebP, 1024 to 8192 pixels wide, under 20 MB). Returns the sky to set as the tour\'s or a stop\'s "sky" in save_tour.',
+    inputSchema: { type: 'object', properties: { tour_id: tourId, path: { type: 'string', description: 'Absolute path to the image.' } }, required: ['tour_id', 'path'] },
+    run: uploadSky
   },
   {
     name: 'share_tour',
@@ -808,8 +814,9 @@ async function waitForTour({ tour_id }) {
     const draft = tour.draft;
     if (draft?.state === 'failed') return `The draft failed: ${draft.error}. Try draft_tour again, perhaps with a simpler request.`;
     if (draft?.state !== 'drafting') {
-      const stops = tour.experience.stops.map((stop, index) => `${index + 1}. ${stop.title}${stop.look ? ` [look ${stop.look.look}]` : ''}`).join('; ');
-      return `${draft?.reply ? `The agent says: ${draft.reply}\n` : ''}${describeTour(tour)}\nStops: ${stops || 'none yet'}. Objects: ${tour.experience.objects.map(object => object.name).join(', ') || 'none'}. Effects: ${tour.experience.effects.map(effect => effect.type).join(', ') || 'none'}.${tour.experience.look ? ` Look: ${tour.experience.look.look}.` : ''}`;
+      const marks = stop => [stop.look ? `look ${stop.look.look}` : '', stop.sky ? `sky ${stop.sky.sky}` : ''].filter(Boolean).join(', ');
+      const stops = tour.experience.stops.map((stop, index) => `${index + 1}. ${stop.title}${marks(stop) ? ` [${marks(stop)}]` : ''}`).join('; ');
+      return `${draft?.reply ? `The agent says: ${draft.reply}\n` : ''}${describeTour(tour)}\nStops: ${stops || 'none yet'}. Objects: ${tour.experience.objects.map(object => object.name).join(', ') || 'none'}. Effects: ${tour.experience.effects.map(effect => effect.type).join(', ') || 'none'}.${tour.experience.look ? ` Look: ${tour.experience.look.look}.` : ''}${tour.experience.sky ? ` Sky: ${tour.experience.sky.sky}.` : ''}`;
     }
     if (Date.now() > deadline) return `Still drafting (started ${draft.started}). Call wait_for_tour again.`;
     await sleep(4000);
@@ -823,6 +830,8 @@ function describeCatalog(catalog) {
   return [
     `Looks (a tour's or stop's "look": {"look": id, "transition": one of ${catalog.transitions.join(', ')}, "duration": seconds}; "color" is the capture as it is):`,
     ...catalog.looks.map(look => `${look.id} (${look.label}): ${look.description}${look.requires ? ' Gaussian splat spaces only.' : ''}${params(look.params)}`),
+    ...(catalog.skies?.length ? [`Skies (a tour's or stop's "sky": {"sky": id, "turn": degrees, "brightness": 0.2..2.5, "light": 0..1 how much the space takes on its light, "duration": seconds to fade}; "none" is the capture's own sky; {"sky": "custom", "url"} with a url from upload_sky or an https 360 image):`,
+      ...catalog.skies.map(sky => `${sky.id} (${sky.label}, ${sky.kind}${sky.place ? `, ${sky.place}` : ''}): ${sky.description}`)] : []),
     'Effects ({"id", "type", "target": {"kind": "scene"} or {"kind": "object", "id"} or {"kind": "point", "position": [x,y,z]}, "params", "always"}):',
     ...catalog.effects.map(effect => `${effect.type} (${effect.label}): ${effect.description} Targets ${effect.targets.join(', ')}.${params(effect.params)}`),
     `Sounds: ${catalog.sounds.map(sound => `${sound.id} (${sound.kind})`).join(', ')}, or an https audio address.`,
@@ -865,6 +874,24 @@ async function uploadModel({ tour_id, path: file }) {
   return `Uploaded ${path.basename(target)} (${formatBytes(bytes.length)}). Use url ${data.url} as the object's source url: {"kind":"model","url":"${data.url}"}. Size and turn it with scale and rotation (degrees) in save_tour.`;
 }
 
+async function uploadSky({ tour_id, path: file }) {
+  requireSite();
+  const saved = credentials();
+  if (!saved) throw new Problem(`This agent is not linked to a ${brand.name} account yet. Call link_account first.`, 401);
+  const target = path.resolve(String(file ?? ''));
+  const types = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+  const type = types[extension(target)];
+  if (!type) throw new Problem('Upload the sky as a JPEG, PNG or WebP image.');
+  if (!existsSync(target)) throw new Problem(`There is no file at ${target}. Check the path, or ask the person where the image is.`);
+  const bytes = readFileSync(target);
+  if (bytes.length > 20 * 1024 * 1024) throw new Problem(`${path.basename(target)} is ${formatBytes(bytes.length)}; skies can be up to 20 MB. Save it as a JPEG at 8192 by 4096 or smaller.`);
+  const response = await fetch(`${brand.url}/api/account/tours/${encodeURIComponent(tour_id)}/skies`, { method: 'POST', body: bytes, signal: AbortSignal.timeout(120000),
+    headers: { 'Content-Type': type, Authorization: `Bearer ${saved.token}`, 'User-Agent': `sphr-connector/${version}` } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Problem(data.error || `${brand.name} answered HTTP ${response.status}.`, response.status);
+  return `Uploaded ${path.basename(target)} (${formatBytes(bytes.length)}). Set the tour's or a stop's "sky" to {"sky":"custom","url":"${data.url}"} in save_tour; "turn" (degrees) turns it, "light" (0 to 1) sets how much the space takes on its light.`;
+}
+
 async function shareTour({ tour_id, public: shared, title }) {
   const { tour } = await api(`/api/account/tours/${encodeURIComponent(tour_id)}`, { method: 'PATCH', body: { ...(shared === undefined ? {} : { public: Boolean(shared) }), ...(title ? { title } : {}) } });
   return describeTour(tour);
@@ -885,7 +912,7 @@ The usual order
 One capture is one space. Put notes in upload_files when the person says what the capture is or how the tour should go. Spaces start private; offer set_visibility only when they are ready and the person wants to share.
 
 Tours and scavenger hunts
-A tour or hunt is built on a space (the person's own, or one of ${brand.name}'s public spaces) and has its own link. find_tour_spaces, then create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand.name}'s tour agent sees the space's photographs, writes the stops, places library models, effects, sound and looks, and saves. To change details, get_tour, edit the JSON and save_tour, or ask draft_tour again. search_models finds ready-made 3D models. For an object the library does not have, and if you have a Blender MCP connected, build it in Blender (real-world meters, Y up, low poly, materials with base colors), export glTF Binary (.glb) with everything embedded, upload_model, and add it to the tour's objects with save_tour. Looks restyle the whole frame per stop (lines, watercolor, blueprint, noir, thermal, nightvision, neon, pixel and more) with transitions (cut, fade, dissolve, wipe, iris, sweep, glitch). Tours start private; share_tour when the person wants a link to send.`;
+A tour or hunt is built on a space (the person's own, or one of ${brand.name}'s public spaces) and has its own link. find_tour_spaces, then create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand.name}'s tour agent sees the space's photographs, writes the stops, places library models, effects, sound and looks, and saves. To change details, get_tour, edit the JSON and save_tour, or ask draft_tour again. search_models finds ready-made 3D models. For an object the library does not have, and if you have a Blender MCP connected, build it in Blender (real-world meters, Y up, low poly, materials with base colors), export glTF Binary (.glb) with everything embedded, upload_model, and add it to the tour's objects with save_tour. Looks restyle the whole frame per stop (lines, watercolor, blueprint, noir, thermal, nightvision, neon, pixel and more) with transitions (cut, fade, dissolve, wipe, iris, sweep, glitch). Skies put another sky behind the space (day, sunrise, sunset, storms, night, the Milky Way) and the space takes on its light; the person's own 360 sky goes up with upload_sky. Tours start private; share_tour when the person wants a link to send.`;
 
 const prompts = [{
   name: 'publish_capture',

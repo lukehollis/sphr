@@ -283,8 +283,9 @@ async function waitForTour(args: Record<string, unknown>, context: McpContext) {
     if (tour.draft?.state === "failed") return `The draft failed: ${tour.draft.error}. Try draft_tour again, perhaps with a simpler request.`;
     if (tour.draft?.state !== "drafting") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const stops = tour.experience.stops.map((stop: any, index: number) => `${index + 1}. ${stop.title}${stop.look ? ` [look ${stop.look.look}]` : ""}`).join("; ");
-      return `${tour.draft?.reply ? `The agent says: ${tour.draft.reply}\n` : ""}${describeTour(context, tour)}\nStops: ${stops || "none yet"}.`;
+      const marks = (stop: any) => [stop.look ? `look ${stop.look.look}` : "", stop.sky ? `sky ${stop.sky.sky}` : ""].filter(Boolean).join(", ");
+      const stops = tour.experience.stops.map((stop: any, index: number) => `${index + 1}. ${stop.title}${marks(stop) ? ` [${marks(stop)}]` : ""}`).join("; ");
+      return `${tour.draft?.reply ? `The agent says: ${tour.draft.reply}\n` : ""}${describeTour(context, tour)}\nStops: ${stops || "none yet"}.${tour.experience.sky ? ` Sky: ${tour.experience.sky.sky}.` : ""}`;
     }
     if (Date.now() > deadline) return "Still drafting. Call wait_for_tour again.";
     await sleep(3000);
@@ -295,10 +296,12 @@ async function getTour(args: Record<string, unknown>, context: McpContext) {
   const id = String(args.tour_id ?? "");
   const { tour, catalog } = await call(context, readTourRoute as never, `/api/account/tours/${id}`, { id });
   const params = (list: string[]) => list.length ? ` Params ${list.join(", ")}.` : "";
-  const { looks, effects, sounds, shapes, transitions } = catalog as ReturnType<typeof experienceCatalog>;
+  const { looks, skies, effects, sounds, shapes, transitions } = catalog as ReturnType<typeof experienceCatalog>;
   return [`${describeTour(context, tour)}\nRevision ${tour.revision}. Experience JSON:\n${JSON.stringify(tour.experience)}\n`,
     `Looks (a tour's or stop's "look": {"look": id, "transition": one of ${transitions.join(", ")}, "duration": seconds}; "color" is the capture as it is):`,
     ...looks.map((look) => `${look.id} (${look.label}): ${look.description}${look.requires ? " Gaussian splat spaces only." : ""}${params(look.params)}`),
+    `Skies (a tour's or stop's "sky": {"sky": id, "turn": degrees, "brightness": 0.2..2.5, "light": 0..1 how much the space takes on its light, "duration": seconds to fade}; "none" is the capture's own sky; {"sky": "custom", "url": an https 360 image twice as wide as tall}):`,
+    ...skies.map((sky) => `${sky.id} (${sky.label}, ${sky.kind}${sky.place ? `, ${sky.place}` : ""}): ${sky.description}`),
     `Effects ({"id", "type", "target": {"kind": "scene"} or {"kind": "object", "id"} or {"kind": "point", "position": [x,y,z]}, "params", "always"}):`,
     ...effects.map((effect) => `${effect.type} (${effect.label}): ${effect.description} Targets ${effect.targets.join(", ")}.${params(effect.params)}`),
     `Sounds: ${sounds.map((sound) => `${sound.id} (${sound.kind})`).join(", ")}, or an https audio address.`,
@@ -370,11 +373,11 @@ export const hostedTools: Tool[] = [
     inputSchema: { type: "object", properties: { scene_id: { type: "string", description: "The sceneId from find_tour_spaces." }, kind: { type: "string", enum: ["tour", "hunt"] },
       title: { type: "string" } }, required: ["scene_id"] } },
   { name: "draft_tour", run: draftTour,
-    description: "Asks the site's tour agent, which sees the space's photographs, to write or rework the tour from a plain request: stops and text, hidden objects and clues, library models, effects, sound, music and looks with transitions. It places everything and saves. Returns at once; then call wait_for_tour.",
+    description: "Asks the site's tour agent, which sees the space's photographs, to write or rework the tour from a plain request: stops and text, hidden objects and clues, library models, effects, sound, music, looks with transitions and skies (day, sunset, storm, night, stars). It places everything and saves. Returns at once; then call wait_for_tour.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema, request: { type: "string" } }, required: ["tour_id", "request"] } },
   { name: "wait_for_tour", run: waitForTour, description: "Waits up to 25 seconds for a draft to finish, then summarizes the tour. Call it again to keep waiting.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema }, required: ["tour_id"] } },
-  { name: "get_tour", run: getTour, description: "The tour as JSON (stops, objects, effects, looks) with its revision, for editing with save_tour.",
+  { name: "get_tour", run: getTour, description: "The tour as JSON (stops, objects, effects, looks, skies) with its revision, for editing with save_tour.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema }, required: ["tour_id"] } },
   { name: "save_tour", run: saveTour, description: "Saves a tour edited by hand: the experience JSON from get_tour with changes. Models use a url from search_models, or any https address of a .glb.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema, experience: { type: "object" }, title: { type: "string" } }, required: ["tour_id", "experience"] } },
@@ -391,7 +394,7 @@ export function hostedInstructions() {
 
 This connector runs on the ${brand} server, so it cannot read files on the person's computer. Link the account with link_account (the person approves a code in their browser), show the plans before the first space, create one space per capture and send the person the Stripe Checkout link it returns, then wait_for_payment. Upload files you hold yourself with upload_files and finish_upload. For files on the person's own computer or phone, give them the space's page, where they drop the files and processing starts on its own.${local ? ` If you can run commands on the person's computer, the local connector uploads big files for them (${local}).` : ""} ${brand} emails the person when the space is ready. Never ask for passwords or card details.
 
-Tours and scavenger hunts are built on a space (the person's own or one of ${brand}'s public spaces) and get their own link: find_tour_spaces, create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand}'s tour agent sees the space, writes stops, places library models, effects, sound and looks (line drawing, blueprint, film noir and more, with transitions) and saves. Refine with get_tour and save_tour, find models with search_models, and share_tour when the person wants a link.`;
+Tours and scavenger hunts are built on a space (the person's own or one of ${brand}'s public spaces) and get their own link: find_tour_spaces, create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand}'s tour agent sees the space, writes stops, places library models, effects, sound, looks (line drawing, blueprint, film noir and more, with transitions) and skies (a sunset, a storm, the Milky Way behind the space) and saves. Refine with get_tour and save_tour, find models with search_models, and share_tour when the person wants a link.`;
 }
 
 export async function runHostedTool(name: string, args: Record<string, unknown>, context: McpContext) {

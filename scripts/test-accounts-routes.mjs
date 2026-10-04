@@ -464,16 +464,47 @@ try {
   assert.match(response.headers.get('content-security-policy'), /sandbox/);
   assert.equal((await fetch(`${base}/api/tour-files/${agentTour.id}/0000000000000000.glb`)).status, 404);
   assert.equal((await fetch(`${base}/api/tour-files/${agentTour.id}/..%2F..%2Fstate.db`)).status, 404);
+  // Skies of their own: 360 panoramas twice as wide as tall, read from the image header.
+  const jpeg = (width, height) => {
+    const bytes = Buffer.alloc(64);
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00]).copy(bytes, 0);
+    Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03]).copy(bytes, 20);
+    return bytes;
+  };
+  const png = (width, height) => {
+    const bytes = Buffer.alloc(40);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(bytes, 0);
+    bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20);
+    return bytes;
+  };
+  const sendSky = (bytes, type = 'image/jpeg') => agentApi(`/api/account/tours/${agentTour.id}/skies`, { method: 'POST', body: bytes, headers: { 'Content-Type': type } });
+  for (const [bytes, error] of [[Buffer.from('not an image'), /JPEG, PNG or WebP/], [jpeg(4096, 4096), /twice as wide.*4096 by 4096/], [jpeg(512, 256), /at least 1024/], [png(16384, 8192), /up to 8192/]]) {
+    response = await sendSky(bytes);
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, error);
+  }
+  assert.equal((await sendSky(Buffer.alloc(20 * 1024 * 1024 + 1))).status, 413);
+  response = await sendSky(jpeg(4096, 2048));
+  assert.equal(response.status, 200);
+  const skyUrl = (await response.json()).url;
+  assert.match(skyUrl, new RegExp(`^/api/tour-files/${agentTour.id}/[a-f0-9]{16}\\.jpg$`));
+  response = await fetch(base + skyUrl);
+  assert.deepEqual([response.status, response.headers.get('content-type')], [200, 'image/jpeg']);
+  response = await sendSky(png(2048, 1024), 'image/png');
+  assert.match((await response.json()).url, /\.png$/);
   // Saving by hand with a look per stop and the uploaded model, then renaming and sharing.
-  const agentExperience = { version: 1, kind: 'tour', look: { look: 'blueprint', transition: 'fade', duration: 1.5 },
+  const agentExperience = { version: 1, kind: 'tour', look: { look: 'blueprint', transition: 'fade', duration: 1.5 }, sky: { sky: 'custom', url: skyUrl, turn: 45 },
     objects: [{ id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: modelUrl }, position: [0, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] }],
     effects: [{ id: 'score', type: 'music', target: { kind: 'scene' }, params: { track: 'calm' } }],
     stops: [{ id: 'one', title: 'The tripod', text: 'Where the oracle sat.', format: 'plain', view: { nodeId: node, rotation: { azimuth: 0, polar: -5 } },
-      look: { look: 'lines', transition: 'sweep', duration: 2 }, objects: ['tripod'], effects: ['score'] }] };
+      look: { look: 'lines', transition: 'sweep', duration: 2 }, sky: { sky: 'drawn-night', light: 0.8 }, objects: ['tripod'], effects: ['score'] }] };
   response = await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PUT', body: JSON.stringify({ revision: 0, title: 'Lamp lighting', public: false, experience: agentExperience }) });
   assert.equal(response.status, 200, await response.clone().text());
   body = await (await agentApi(`/api/account/tours/${agentTour.id}?catalog=0`)).json();
   assert.deepEqual([body.tour.revision, body.tour.experience.look.look, body.tour.experience.stops[0].look.transition, body.tour.experience.objects[0].source.url], [1, 'blueprint', 'sweep', modelUrl]);
+  assert.deepEqual([body.tour.experience.sky, body.tour.experience.stops[0].sky], [{ sky: 'custom', url: skyUrl, turn: 45 }, { sky: 'drawn-night', light: 0.8 }], 'skies are saved for the tour and its stops');
+  body = await (await agentApi(`/api/account/tours/${agentTour.id}`)).json();
+  assert.ok(body.catalog.skies.some((sky) => sky.id === 'drawn-night' && sky.kind === 'night'), 'the catalog lists the skies');
   response = await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PATCH', body: JSON.stringify({ title: 'The oracle', public: true }) });
   assert.deepEqual(Object.values((await response.json()).tour).slice(1, 4), ['The oracle', 'tour', true]);
   assert.equal((await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'PATCH', body: JSON.stringify({ public: 'yes' }) })).status, 400);
@@ -486,7 +517,8 @@ try {
   assert.equal((await agentApi(`/api/account/tours/${agentTour.id}`, { method: 'DELETE', body: '{}' })).status, 401, 'agents cannot delete tours');
   assert.equal((await alice.request(`/api/account/tours/${agentTour.id}`, { method: 'DELETE', json: {} })).status, 200);
   assert.equal((await fetch(base + modelUrl)).status, 404, "a deleted tour's models go with it");
-  console.log("Passed: agents' tours with a token (spaces, create, catalog, library search, model uploads, saving looks, sharing, no deleting).");
+  assert.equal((await fetch(base + skyUrl)).status, 404, "and its skies");
+  console.log("Passed: agents' tours with a token (spaces, create, catalog, library search, model and sky uploads, saving looks and skies, sharing, no deleting).");
 
   // A space taken away takes its tours offline, and they can still be deleted.
   database().prepare("UPDATE visibility SET public=0 WHERE scene='0a0a0a0a0a01'").run();

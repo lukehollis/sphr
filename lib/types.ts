@@ -1,4 +1,4 @@
-import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopEarth, StopFind, StopLook } from "@/lib/experience/types";
+import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopEarth, StopFind, StopLook, StopSky } from "@/lib/experience/types";
 
 export type Vector3Like = {
   x: number;
@@ -102,6 +102,8 @@ export type TourPoint = {
   find?: StopFind;
   /** The frame's look at this stop (see TourData.look). */
   look?: StopLook;
+  /** The sky behind the space at this stop (see TourData.sky). */
+  sky?: StopSky;
   /** Seen from above over the 3D map (see TourData.place). */
   earth?: StopEarth;
   mapUrl?: string;
@@ -154,6 +156,8 @@ export type TourData = {
   finale?: string;
   /** The frame's look in free exploration and at stops without their own. */
   look?: StopLook;
+  /** The sky behind the space in free exploration and at stops without their own. */
+  sky?: StopSky;
   /** Where the space is on the 3D map; the capture's own `geo` when unset. */
   place?: EarthPlace;
   audio?: Record<string, AudioConfig>;
@@ -352,6 +356,7 @@ export type NormalizedTour = {
   effects: EffectInstance[];
   finale?: string;
   look?: StopLook;
+  sky?: StopSky;
   place?: EarthPlace;
   title: string;
   spaces: TourSpace[];

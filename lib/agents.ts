@@ -5,7 +5,7 @@
  */
 const assetsBase = (process.env.NEXT_PUBLIC_SPACERY_SITE_URL || "https://spacery.dev").replace(/\/+$/, "");
 const connectorUrl = process.env.NEXT_PUBLIC_SPACERY_CONNECTOR_URL || "https://app.spacery.dev/mcp";
-export const connectorVersion = "0.2.1";
+export const connectorVersion = "0.2.2";
 const pkg = `${assetsBase}/agents/spacery-${connectorVersion}.tgz`;
 
 export type AgentWay = {

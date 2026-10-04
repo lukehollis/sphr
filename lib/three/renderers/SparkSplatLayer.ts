@@ -12,6 +12,8 @@ type SparkRendererInstance = InstanceType<SparkModule["SparkRenderer"]>;
 type SplatMeshInstance = InstanceType<SparkModule["SplatMesh"]>;
 
 export class SparkSplatLayer {
+  private studyMode: string | undefined;
+  private readonly tint = new THREE.Color(1, 1, 1);
   private spark: SparkRendererInstance | null = null;
   private readonly splats: SplatMeshInstance[] = [];
   private readonly rendererOptions = {
@@ -31,6 +33,7 @@ export class SparkSplatLayer {
   private lookVariant: SplatRole | null = null;
   private unpack: typeof import("@sparkjsdev/spark").unpackSplat | null = null;
   private bounds: THREE.Box3 | null = null;
+  private centers: THREE.Vector3[] | null = null;
   private regenerate = false;
 
   constructor(
@@ -183,38 +186,29 @@ export class SparkSplatLayer {
   }
 
   setStudyMode(mode?: string) {
+    this.studyMode = mode;
     if (!this.splats.length) return;
-    if (mode === "nightMode") {
-      this.splats.forEach((mesh) => {
-        mesh.recolor.set(0.58, 0.66, 0.9);
-        mesh.opacity = 0.92;
-      });
-      return;
-    }
-
-    if (mode === "shrinkToPoints") {
-      this.splats.forEach((mesh) => {
-        mesh.recolor.set(1.15, 1.08, 0.82);
-        mesh.opacity = 0.62;
-        mesh.scale.setScalar(0.985);
-      });
-      return;
-    }
-
-    if (mode === "projectToSplats") {
-      this.splats.forEach((mesh) => {
-        mesh.recolor.set(1.2, 1.16, 1.0);
-        mesh.opacity = 0.82;
-        mesh.scale.setScalar(1.01);
-      });
-      return;
-    }
-
+    // Older garden tours' study modes.
+    const [opacity, scale] = mode === "nightMode" ? [0.92, null] : mode === "shrinkToPoints" ? [0.62, 0.985] : mode === "projectToSplats" ? [0.82, 1.01] : [1, 1];
     this.splats.forEach((mesh) => {
-      mesh.recolor.set(1, 1, 1);
-      mesh.opacity = 1;
-      mesh.scale.setScalar(1);
+      mesh.opacity = opacity;
+      if (scale !== null) mesh.scale.setScalar(scale);
     });
+    this.applyRecolor();
+  }
+
+  /** The light the splats take on under a tour sky (white for their own colors). */
+  setTint(color: THREE.Color) {
+    if (this.tint.equals(color)) return;
+    this.tint.copy(color);
+    this.applyRecolor();
+  }
+
+  /** A study mode's color, multiplied by the tour sky's light. */
+  private applyRecolor() {
+    const mode = this.studyMode;
+    const [r, g, b] = mode === "nightMode" ? [0.58, 0.66, 0.9] : mode === "shrinkToPoints" ? [1.15, 1.08, 0.82] : mode === "projectToSplats" ? [1.2, 1.16, 1.0] : [1, 1, 1];
+    this.splats.forEach((mesh) => { mesh.recolor.setRGB(r, g, b).multiply(this.tint); });
   }
 
   /** Effects rewrite splats through world-space modifiers chained in one block. */
@@ -263,8 +257,42 @@ export class SparkSplatLayer {
       direction: dyno.dynoVec3(new THREE.Vector3(0, -1, 0)),
       right: dyno.dynoVec3(new THREE.Vector3(1, 0, 0)),
       scale: dyno.dynoFloat(1),
-      opacity: dyno.dynoFloat(1)
+      opacity: dyno.dynoFloat(1),
+      skyAmount: dyno.dynoFloat(0),
+      skyCenter: dyno.dynoVec3(new THREE.Vector3()),
+      skyRadius: dyno.dynoFloat(1e6)
     };
+  }
+
+  /**
+   * Tour skies: captures keep their own sky as splats far out around the space. Fade
+   * the splats well beyond the space's core (by `amount`) so the tour's sky shows there.
+   */
+  setSkyCut(amount: number) {
+    const look = this.look;
+    if (!look || look.skyAmount.value === amount) return;
+    if (amount > 0 && look.skyRadius.value >= 1e6) {
+      const core = this.coreSphere();
+      if (!core) return;
+      look.skyCenter.value.copy(core.center);
+      look.skyRadius.value = core.radius;
+    }
+    look.skyAmount.value = amount;
+    this.regenerate = true;
+  }
+
+  /**
+   * Where most of the capture is: the median of a sample of splat centers, and a radius
+   * well past the near four fifths of them, beyond which a capture's splats are mostly
+   * its sky and far background.
+   */
+  private coreSphere() {
+    const points = this.sampleCenters();
+    if (points.length < 30) return null;
+    const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+    const center = new THREE.Vector3(median(points.map((p) => p.x)), median(points.map((p) => p.y)), median(points.map((p) => p.z)));
+    const distances = points.map((point) => point.distanceTo(center)).sort((a, b) => a - b);
+    return { center, radius: Math.max(4, distances[Math.floor(distances.length * 0.8)] * 1.6) };
   }
 
   /**
@@ -323,7 +351,7 @@ export class SparkSplatLayer {
     const variant = role !== "color";
     return (dyno, gsplat) => {
       const node = new dyno.Dyno({
-        inTypes: { gsplat: dyno.Gsplat, amount: "float", mode: "float", variant: "float", origin: "vec3", direction: "vec3", right: "vec3", scale: "float", opacity: "float" },
+        inTypes: { gsplat: dyno.Gsplat, amount: "float", mode: "float", variant: "float", origin: "vec3", direction: "vec3", right: "vec3", scale: "float", opacity: "float", skyAmount: "float", skyCenter: "vec3", skyRadius: "float" },
         outTypes: { gsplat: dyno.Gsplat },
         statements: ({ inputs, outputs }) => dyno.unindentLines(`
           ${outputs.gsplat} = ${inputs.gsplat};
@@ -339,12 +367,14 @@ export class SparkSplatLayer {
           else lookMask = step(fract(sin(dot(floor(${inputs.gsplat}.center * 2.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453), lookAmount);
           // The capture gives way where the drawn version arrives; other companions are left to their effects.
           float lookShow = ${variant ? `mix(1.0, lookMask, step(abs(${inputs.variant} - ${ROLE_CODES[role].toFixed(1)}), 0.1))` : `1.0 - lookMask * step(0.5, ${inputs.variant})`};
-          ${outputs.gsplat}.rgba.a *= lookShow * ${inputs.opacity};
+          float skyCut = ${variant ? "0.0" : `smoothstep(${inputs.skyRadius}, ${inputs.skyRadius} * 1.3, length(${inputs.gsplat}.center - ${inputs.skyCenter})) * ${inputs.skyAmount}`};
+          ${outputs.gsplat}.rgba.a *= lookShow * ${inputs.opacity} * (1.0 - skyCut);
           ${outputs.gsplat}.scales *= ${inputs.scale};
         `)
       });
       return node.apply({ gsplat, amount: look.amount, mode: look.mode, variant: look.variant, origin: look.origin,
-        direction: look.direction, right: look.right, scale: look.scale, opacity: look.opacity }).gsplat;
+        direction: look.direction, right: look.right, scale: look.scale, opacity: look.opacity,
+        skyAmount: look.skyAmount, skyCenter: look.skyCenter, skyRadius: look.skyRadius }).gsplat;
     };
   }
 
@@ -352,12 +382,12 @@ export class SparkSplatLayer {
    * Bounds of the captured splats from a sample of centers, trimmed of the
    * stray floaters at the edges that would otherwise inflate them.
    */
-  getBounds(out: THREE.Box3) {
-    if (this.bounds) return out.copy(this.bounds);
-    out.makeEmpty();
+  /** A sample of the captured splats' centers in world space (about 20,000), kept once read. */
+  private sampleCenters() {
+    if (this.centers?.length) return this.centers;
     const unpack = this.unpack;
-    if (!unpack) return out;
-    const xs: number[] = [], ys: number[] = [], zs: number[] = [];
+    if (!unpack) return [];
+    const points: THREE.Vector3[] = [];
     const point = new THREE.Vector3();
     for (const mesh of this.splats) {
       if (this.roles.get(mesh) !== "color") continue;
@@ -372,9 +402,18 @@ export class SparkSplatLayer {
         const splat = unpack(array, index, packed!.splatEncoding);
         if (splat.opacity < 0.2) continue;
         point.copy(splat.center).applyMatrix4(mesh.matrixWorld);
-        xs.push(point.x); ys.push(point.y); zs.push(point.z);
+        points.push(point.clone());
       }
     }
+    this.centers = points;
+    return points;
+  }
+
+  getBounds(out: THREE.Box3) {
+    if (this.bounds) return out.copy(this.bounds);
+    out.makeEmpty();
+    const points = this.sampleCenters();
+    const xs = points.map((point) => point.x), ys = points.map((point) => point.y), zs = points.map((point) => point.z);
     if (xs.length < 10) return out;
     const range = (values: number[]) => {
       values.sort((a, b) => a - b);

@@ -208,10 +208,66 @@ export function saveTourModel(tourId: string, bytes: Buffer) {
   return `/api/tour-files/${tourId}/${name}`;
 }
 
+export const maxSkyBytes = 20 * 1024 * 1024;
+const maxSkiesPerTour = 10;
+const SKY_TYPES = { jpg: "image/jpeg", png: "image/png", webp: "image/webp" } as const;
+type SkyType = keyof typeof SKY_TYPES;
+
+/** The format, width and height of a JPEG, PNG or WebP image, from its header. */
+export function imageSize(bytes: Buffer): { type: SkyType; width: number; height: number } | null {
+  if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47 && bytes.toString("ascii", 12, 16) === "IHDR") {
+    return { type: "png", width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (bytes.length > 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") {
+    const chunk = bytes.toString("ascii", 12, 16);
+    if (chunk === "VP8 ") return { type: "webp", width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+    if (chunk === "VP8L") { const bits = bytes.readUInt32LE(21); return { type: "webp", width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }; }
+    if (chunk === "VP8X") return { type: "webp", width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3) };
+    return null;
+  }
+  if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) return null;
+      const marker = bytes[offset + 1];
+      if (marker === 0xff) { offset += 1; continue; }
+      if (marker >= 0xd0 && marker <= 0xd9) { offset += 2; continue; }
+      // Start of frame (any kind but huffman, arithmetic coding and the reserved JPG marker).
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { type: "jpg", width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+      }
+      offset += 2 + bytes.readUInt16BE(offset + 2);
+    }
+  }
+  return null;
+}
+
+/**
+ * Keeps a customer's own sky for a tour: a 360 panorama in equirectangular form (twice as
+ * wide as tall) as a JPEG, PNG or WebP. Returns the address to use as the sky's url.
+ */
+export function saveTourSky(tourId: string, bytes: Buffer) {
+  const size = imageSize(bytes);
+  if (!size) throw new ModelError("Upload the sky as a JPEG, PNG or WebP image.");
+  if (Math.abs(size.width / size.height - 2) > 0.04) throw new ModelError(`A sky is a 360 panorama twice as wide as it is tall (equirectangular), like 4096 by 2048 pixels. This one is ${size.width} by ${size.height}.`);
+  if (size.width < 1024) throw new ModelError("A sky needs to be at least 1024 pixels wide to look sharp.");
+  if (size.width > 8192) throw new ModelError("Skies can be up to 8192 pixels wide. Shrink it to 8192 by 4096 or smaller.");
+  const folder = tourFiles(tourId);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const name = `${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${size.type}`;
+  const existing = readdirSync(folder).filter((file) => /\.(jpg|png|webp)$/.test(file));
+  if (!existing.includes(name) && existing.length >= maxSkiesPerTour) throw new ModelError(`A tour can hold up to ${maxSkiesPerTour} uploaded skies.`);
+  writeFileSync(path.join(folder, name), bytes, { mode: 0o600 });
+  return `/api/tour-files/${tourId}/${name}`;
+}
+
+/** A file kept with a tour (a model or a sky) and its content type. */
 export function tourModelFile(tourId: string, name: string) {
-  if (!/^[a-f0-9]{12}$/.test(tourId) || !/^[a-f0-9]{16}\.glb$/.test(name) || !process.env.SPHR_STATE_DIR) return null;
+  const match = name.match(/^[a-f0-9]{16}\.(glb|jpg|png|webp)$/);
+  if (!/^[a-f0-9]{12}$/.test(tourId) || !match || !process.env.SPHR_STATE_DIR) return null;
   const file = path.join(tourFiles(tourId), name);
-  try { return statSync(file).isFile() ? file : null; } catch { return null; }
+  const type = match[1] === "glb" ? "model/gltf-binary" : SKY_TYPES[match[1] as SkyType];
+  try { return statSync(file).isFile() ? { file, type } : null; } catch { return null; }
 }
 
 export function deleteTourModels(tourId: string) {

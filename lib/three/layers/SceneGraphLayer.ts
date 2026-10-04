@@ -33,6 +33,8 @@ export class SceneGraphLayer {
   private readonly root = new THREE.Group();
   private readonly lookup = new Map<string, THREE.Object3D>();
   private readonly records = new Map<string, SceneGraphRecord>();
+  private readonly tint = new THREE.Color(1, 1, 1);
+  private readonly originalColors = new WeakMap<THREE.Material, THREE.Color>();
   private readonly raycastObjects: THREE.Object3D[] = [];
   private readonly loader: GLTFLoader;
   private activeIds = new Set<string>();
@@ -210,6 +212,24 @@ export class SceneGraphLayer {
       const active = Boolean(record.node.persistent) || this.activeIds.has(id);
       this.applyMaterialState(record, active);
     });
+  }
+
+  /**
+   * The light unlit captured models take on under a tour sky (white for their own
+   * colors); lit models and placed objects take it from the scene's lights instead.
+   */
+  setTint(color: THREE.Color) {
+    if (this.tint.equals(color)) return;
+    this.tint.copy(color);
+    for (const record of this.records.values()) {
+      for (const material of record.materials) {
+        const basic = material as THREE.MeshBasicMaterial;
+        if (!basic.isMeshBasicMaterial || !basic.color) continue;
+        const original = this.originalColors.get(basic) ?? basic.color.clone();
+        this.originalColors.set(basic, original);
+        basic.color.copy(original).multiply(this.tint);
+      }
+    }
   }
 
   getDebugSnapshot() {

@@ -9,9 +9,9 @@ import type { ObjectTransform, RuntimeState } from "@/lib/types";
 import type { ViewerSession } from "@/lib/viewer/ViewerSession";
 import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
-import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, soundEntries } from "@/lib/experience/packs";
-import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
-import { EARTH_RANGE, LOOK_TRANSITIONS, newId, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
+import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, skyEntries, skyEntry, soundEntries } from "@/lib/experience/packs";
+import { resolveParams, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
+import { EARTH_RANGE, LOOK_TRANSITIONS, newId, SKY_RANGES, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type StopSky, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import { placeObjectAt } from "@/lib/experience/placement";
 import { matchModel, stem } from "@/lib/experience/library-search";
@@ -32,10 +32,10 @@ type Props = {
 
 type Turn = { prompt: string; reply: string };
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
-type Tab = "stops" | "objects" | "effects" | "look" | "map";
+type Tab = "stops" | "objects" | "effects" | "look" | "sky" | "map";
 
 function updateFor(draft: Experience, standalone: boolean) {
-  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, place: draft.place, standalone };
+  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, sky: draft.sky, place: draft.place, standalone };
 }
 
 export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api, tour }: Props) {
@@ -377,8 +377,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         </form>
 
         <div className="builder-tabs" role="tablist" aria-label="Tour parts">
-          {(["stops", "objects", "effects", "look", "map"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
-            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : value === "look" ? "Look" : "Map"}
+          {(["stops", "objects", "effects", "look", "sky", "map"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
+            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : value === "look" ? "Look" : value === "sky" ? "Sky" : "Map"}
           </button>)}
         </div>
 
@@ -486,6 +486,13 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           onChange={(look, stopId) => {
             if (stopId) patchStop(stopId, { look });
             else setDraft((current) => ({ ...current, look }));
+          }} />}
+
+        {tab === "sky" && <SkyPanel draft={draft} stop={activeStop ?? null} ready={Boolean(canEdit)} upload={tour ? `${api}/skies` : null}
+          support={() => session.current?.skySupport() ?? Promise.resolve({ panoramas: false, outlines: false })} onError={setError}
+          onChange={(sky, stopId) => {
+            if (stopId) patchStop(stopId, { sky });
+            else setDraft((current) => ({ ...current, sky }), true);
           }} />}
 
         {tab === "map" && <MapPanel place={draft.place} nodeId={state?.activeNodeId} ready={Boolean(canEdit)}
@@ -621,6 +628,109 @@ function LookPanel({ draft, stop, splatSpace, ready, thumbnails, onChange }: {
       {entry && <p className="editor-help">{entry.description}</p>}
       {entry?.params.map((param) => <Param key={param.key} spec={param} value={current.params?.[param.key]} onPreview={() => {}}
         onChange={(value) => patch({ params: { ...resolveParams(entry, current.params), [param.key]: value } })} />)}
+    </>}
+  </div>;
+}
+
+const SKY_GROUPS: { label: string; kinds: SkyKind[] }[] = [
+  { label: "Day", kinds: ["day"] },
+  { label: "Clouds and storms", kinds: ["cloudy", "storm"] },
+  { label: "Sunrise and sunset", kinds: ["sunrise", "sunset"] },
+  { label: "Dusk and night", kinds: ["dusk", "night"] }
+];
+
+/** A small picture of a sky: its thumbnail, or its drawn colors. */
+function SkySwatch({ sky }: { sky: SkyMeta }) {
+  if (sky.thumb) return <img src={sky.thumb} alt="" loading="lazy" />;
+  const gradient = sky.gradient;
+  return <span className="builder-sky-drawn" style={gradient ? { background: `linear-gradient(${gradient.zenith}, ${gradient.horizon} 72%, ${gradient.ground})` } : undefined} />;
+}
+
+/**
+ * The sky behind the space, for the tour or the stop in view: the capture's own sky,
+ * a sky from the packs, or the customer's own 360 image; how it turns, how bright it
+ * is and how much of its light the space takes on.
+ */
+function SkyPanel({ draft, stop, ready, upload, support, onChange, onError }: {
+  draft: Experience; stop: ExperienceStop | null; ready: boolean; upload: string | null;
+  support: () => Promise<{ panoramas: boolean; outlines: boolean }>;
+  onChange: (sky: StopSky | undefined, stopId: string | null) => void; onError: (message: string) => void;
+}) {
+  const [scope, setScope] = useState<"stop" | "tour">(stop?.sky ? "stop" : "tour");
+  const [supported, setSupported] = useState<{ panoramas: boolean; outlines: boolean } | null>(null);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (ready) void support().then(setSupported); }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  const forStop = scope === "stop" && stop;
+  const current = forStop ? stop.sky : draft.sky;
+  const selected = current?.sky ?? (forStop ? "inherit" : "none");
+  const entry = current && current.sky !== "none" && current.sky !== "custom" ? skyEntry(current.sky) : null;
+  const skies = skyEntries();
+  const target = forStop ? stop.id : null;
+  const choose = (id: string, custom?: string) => {
+    if (id === "inherit") { onChange(undefined, target); return; }
+    if (id === "none" && !forStop) { onChange(undefined, null); return; }
+    const keep = current && current.sky !== "none" ? { ...(current.turn !== undefined ? { turn: current.turn } : {}), ...(current.brightness !== undefined ? { brightness: current.brightness } : {}), ...(current.light !== undefined ? { light: current.light } : {}), ...(current.duration !== undefined ? { duration: current.duration } : {}) } : {};
+    onChange(id === "none" ? { sky: "none" } : { sky: id, ...(custom ? { url: custom } : {}), ...keep }, target);
+  };
+  const patch = (next: Partial<StopSky>) => { if (current) onChange({ ...current, ...next }, target); };
+  const inherited = draft.sky ? (draft.sky.sky === "custom" ? "Your own sky" : skyEntry(draft.sky.sky)?.label ?? "The capture's own") : "The capture's own";
+  const validUrl = /^https:\/\/\S+$/i.test(url.trim());
+
+  return <div role="tabpanel" className="builder-list builder-look builder-sky">
+    <div className="builder-kind" role="radiogroup" aria-label="Sky for">
+      <button type="button" role="radio" aria-checked={scope === "tour"} onClick={() => setScope("tour")}>Whole tour</button>
+      <button type="button" role="radio" aria-checked={scope === "stop"} disabled={!stop} onClick={() => setScope("stop")}>{stop ? "This stop" : "No stop open"}</button>
+    </div>
+    <p className="editor-help">{forStop ? `"${stop.title || "This stop"}" fades to its sky as visitors arrive.` : "Every stop without its own sky, and free exploration, use this. The space takes on the sky's light, so a night sky darkens it and a sunset warms it."}</p>
+    {supported?.panoramas && !supported.outlines && <p className="editor-help builder-note">This space's 360 photos have no sky outline yet, so a new sky changes their light but cannot show through them. It shows behind 3D models and splats.</p>}
+    <div className="builder-looks builder-skies">
+      {forStop && <button type="button" className="builder-look" aria-pressed={selected === "inherit"} onClick={() => choose("inherit")}>
+        <span className="builder-look-image builder-sky-image builder-look-same">Same as the tour</span><span>{inherited}</span>
+      </button>}
+      <button type="button" className="builder-look" aria-pressed={selected === "none"} title="The sky as it was captured." onClick={() => choose("none")}>
+        <span className="builder-look-image builder-sky-image builder-look-same">As captured</span><span>The capture's own</span>
+      </button>
+    </div>
+    {SKY_GROUPS.map((group) => {
+      const items = skies.filter((sky) => group.kinds.includes(sky.kind));
+      if (!items.length) return null;
+      return <div key={group.label}>
+        <p className="builder-picker-heading">{group.label}</p>
+        <div className="builder-looks builder-skies">{items.map((sky) => <button key={sky.id} type="button" className="builder-look" aria-pressed={selected === sky.id}
+          title={[sky.description, sky.place].filter(Boolean).join(" ")} onClick={() => choose(sky.id)}>
+          <span className="builder-look-image builder-sky-image"><SkySwatch sky={sky} /></span><span>{sky.label}</span>
+        </button>)}</div>
+      </div>;
+    })}
+    <p className="builder-picker-heading">Your own sky</p>
+    {upload && <label className="builder-upload">Upload a 360 sky image (twice as wide as tall, up to 20 MB)
+      <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || !ready} onChange={async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        setBusy(true); onError("");
+        try {
+          const response = await fetch(upload, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || "Unable to upload that sky.");
+          choose("custom", result.url);
+        } catch (failure) { onError((failure as Error).message); }
+        finally { setBusy(false); }
+      }} />
+      {busy && <span className="editor-help">Uploading</span>}
+    </label>}
+    <form className="builder-url" onSubmit={(event) => { event.preventDefault(); if (validUrl) { choose("custom", url.trim()); setUrl(""); } }}>
+      <label htmlFor="sky-url">Or the address of a 360 image</label>
+      <div className="builder-row"><input id="sky-url" type="url" placeholder="https://example.com/sky.jpg" value={url} onChange={(event) => setUrl(event.target.value)} /><button type="submit" disabled={!validUrl}>Use</button></div>
+    </form>
+    {current && current.sky !== "none" && <>
+      {entry && <p className="editor-help">{entry.description}{entry.place ? ` ${entry.place}.` : ""}{entry.credit ? ` From ${entry.credit}.` : ""}</p>}
+      {current.sky === "custom" && <p className="editor-help">Your own sky.</p>}
+      <label>Turn the sky<input type="range" min={SKY_RANGES.turn.min} max={SKY_RANGES.turn.max} step={1} value={current.turn ?? 0} onChange={(event) => patch({ turn: Number(event.target.value) })} /></label>
+      <label>Sky brightness<input type="range" min={SKY_RANGES.brightness.min} max={SKY_RANGES.brightness.max} step={0.05} value={current.brightness ?? 1} onChange={(event) => patch({ brightness: Number(event.target.value) })} /></label>
+      <label>Light on the space<input type="range" min={0} max={1} step={0.05} value={current.light ?? 1} onChange={(event) => patch({ light: Number(event.target.value) })} /></label>
+      <label>Seconds to fade in<input type="number" min={0} max={10} step={0.5} value={current.duration ?? SKY_RANGES.duration.default} onChange={(event) => patch({ duration: Math.max(0, Math.min(10, Number(event.target.value) || 0)) })} /></label>
     </>}
   </div>;
 }

@@ -1,6 +1,6 @@
 {
   "name": "sphr-connector",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local MCP server that lets your own agent publish 3D captures to an SPHR hosting site",
   "type": "module",
   "bin": { "sphr-connector": "server.mjs" },

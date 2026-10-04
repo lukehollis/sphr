@@ -1,4 +1,4 @@
-import { effectEntry, lookEntry, shapeEntry } from "@/lib/experience/packs";
+import { effectEntry, lookEntry, shapeEntry, skyEntry } from "@/lib/experience/packs";
 import { resolveParams } from "@/lib/experience/registry";
 import {
   EARTH_RANGE,
@@ -13,6 +13,8 @@ import {
   type PlacedObject,
   type LookTransition,
   type StopLook,
+  type StopSky,
+  SKY_RANGES,
   type StopView,
   type Vec3
 } from "@/lib/experience/types";
@@ -246,6 +248,34 @@ function look(value: unknown, label: string, lenient: boolean): StopLook | undef
   return result;
 }
 
+/**
+ * A sky by ID, `custom` with an image address, or `none`; an unknown sky is dropped,
+ * or refused when strict. A bare address is taken as a custom sky.
+ */
+export function sky(value: unknown, label: string, lenient: boolean): StopSky | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const bare = typeof value === "string";
+  const input = (bare ? (/^(https:\/\/|\/)/.test(value) ? { sky: "custom", url: value } : { sky: value }) : value) as Record<string, unknown>;
+  if (!input || typeof input !== "object" || typeof input.sky !== "string") { if (lenient) return undefined; fail(`${label} has an invalid sky.`); }
+  const name = input.sky as string;
+  const result: StopSky = { sky: name };
+  if (name === "custom") {
+    try { result.url = safeAssetUrl(input.url, `${label} sky image`); }
+    catch (error) { if (lenient) return undefined; throw error; }
+  } else if (name !== "none" && !skyEntry(name)) {
+    if (lenient) return undefined;
+    fail(`${label} uses a sky this site does not have: ${name.slice(0, 40)}.`);
+  }
+  for (const key of ["turn", "brightness", "light", "duration"] as const) {
+    const number = input[key];
+    if (typeof number !== "number" || !Number.isFinite(number)) continue;
+    const range = SKY_RANGES[key];
+    const clamped = Math.max(range.min, Math.min(range.max, number));
+    if (clamped !== range.default) result[key] = Math.round(clamped * 100) / 100;
+  }
+  return result;
+}
+
 function stop(value: unknown, index: number, objects: Set<string>, effects: Set<string>, options: Options): ExperienceStop {
   const input = value as Record<string, unknown>;
   if (!input || typeof input !== "object") fail(`Stop ${index + 1} is invalid.`);
@@ -275,6 +305,8 @@ function stop(value: unknown, index: number, objects: Set<string>, effects: Set<
   if (media) result.files = media;
   const stopLook = look(input.look, label, Boolean(options.lenient));
   if (stopLook) result.look = stopLook;
+  const stopSky = sky(input.sky, label, Boolean(options.lenient));
+  if (stopSky) result.sky = stopSky;
   for (const key of ["sounds", "models", "annotations"] as const) {
     const list = strings(input[key], null);
     if (list.length) result[key] = list;
@@ -320,6 +352,7 @@ export function parseExperience(value: unknown, options: Options = {}): Experien
   const title = text(input.title, LIMITS.title, "Title").trim();
   const finale = text(input.finale, LIMITS.text, "Closing message").trim();
   const tourLook = look(input.look, "The tour", lenient);
+  const tourSky = sky(input.sky, "The tour", lenient);
   const map = place(input.place, options);
-  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects, ...(tourLook ? { look: tourLook } : {}), ...(map ? { place: map } : {}) };
+  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects, ...(tourLook ? { look: tourLook } : {}), ...(tourSky ? { sky: tourSky } : {}), ...(map ? { place: map } : {}) };
 }

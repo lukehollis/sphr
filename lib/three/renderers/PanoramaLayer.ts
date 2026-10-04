@@ -86,11 +86,20 @@ export type PanoramaStyle = {
   uVariantMode: { value: number };
   uVariantDirection: { value: THREE.Vector3 };
   uVariantResolution: { value: THREE.Vector2 };
+  /** Tour skies: how much of the photographs' own sky is cut away, and the light the photographs take on. */
+  uSkyAmount: { value: number };
+  uSkyLight: { value: THREE.Color };
 };
 
 /** Line-drawn (or watercolor) versions of a space's panorama faces, made offline. */
-type VariantManifest = { styles: Record<string, string>; nodes: string[] };
+type VariantManifest = {
+  styles: Record<string, string>;
+  nodes: string[];
+  /** Sky outlines (scripts/skies/masks.py): one digit per face, 0 no sky, 1 part (a mask file), 2 all sky. */
+  sky?: { template: string; nodes: Record<string, string> };
+};
 type PanoVariant = { urls: string[]; ready: boolean };
+type SkyUniforms = { uSkyMap: { value: THREE.Texture | null }; uSkyFace: { value: number } };
 
 const STYLE_VERTEX = /* glsl */ `
   #include <project_vertex>
@@ -145,6 +154,12 @@ const STYLE_FRAGMENT = /* glsl */ `
     } else shown = step(fract(sin(dot(floor(gl_FragCoord.xy / (uVariantResolution / vec2(14.0, 30.0))), vec2(12.9898, 78.233))) * 43758.5453), uVariantAmount);
     diffuseColor.rgb = mix(diffuseColor.rgb, drawn, shown);
   }
+  diffuseColor.rgb *= uSkyLight;
+  if (uSkyAmount > 0.001 && uSkyFace > 0.5) {
+    // Masks decode as sRGB like the photographs; undo that for the edge's share of sky.
+    float skyShare = uSkyFace > 1.5 ? 1.0 : pow(texture2D(uSkyMap, vMapUv).r, 0.4545);
+    diffuseColor.a *= 1.0 - skyShare * uSkyAmount;
+  }
 `;
 
 function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, texture: THREE.Texture | null) {
@@ -153,17 +168,20 @@ function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, textu
   // Each face has its own drawn version, so this material keeps its own sampler.
   const variant = { uVariantMap: { value: null as THREE.Texture | null }, uHasVariantMap: { value: 0 } };
   material.userData.variant = variant;
+  const sky: SkyUniforms = { uSkyMap: { value: null }, uSkyFace: { value: 0 } };
+  material.userData.sky = sky;
   material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, style, { uTexel: { value: texel } }, variant);
+    Object.assign(shader.uniforms, style, { uTexel: { value: texel } }, variant, sky);
     shader.vertexShader = "varying vec3 vPanoDirection;\n" + shader.vertexShader.replace("#include <project_vertex>", STYLE_VERTEX);
     shader.fragmentShader = `uniform float uSketch; uniform vec3 uInk; uniform vec3 uPaper; uniform vec3 uRevealDirection;
       uniform float uSketchAngle; uniform float uColorAngle; uniform float uAngleWidth; uniform float uInvert; uniform vec2 uTexel;
       uniform float uScanDim; uniform float uScanGlow; uniform vec3 uScanColor; uniform vec3 uScanDirection; uniform float uScanAngle;
       uniform float uVariantAmount; uniform float uVariantMode; uniform vec3 uVariantDirection; uniform vec2 uVariantResolution;
       uniform sampler2D uVariantMap; uniform float uHasVariantMap;
+      uniform float uSkyAmount; uniform vec3 uSkyLight; uniform sampler2D uSkyMap; uniform float uSkyFace;
       varying vec3 vPanoDirection;\n` + shader.fragmentShader.replace("#include <map_fragment>", STYLE_FRAGMENT);
   };
-  material.customProgramCacheKey = () => "sphr-panorama-style-v3";
+  material.customProgramCacheKey = () => "sphr-panorama-style-v4";
   return material;
 }
 
@@ -185,13 +203,18 @@ export class PanoramaLayer {
     uVariantAmount: { value: 0 },
     uVariantMode: { value: 1 },
     uVariantDirection: { value: new THREE.Vector3(0, -1, 0) },
-    uVariantResolution: { value: new THREE.Vector2(1, 1) }
+    uVariantResolution: { value: new THREE.Vector2(1, 1) },
+    uSkyAmount: { value: 0 },
+    uSkyLight: { value: new THREE.Color(1, 1, 1) }
   };
   private variantSource: string | null = null;
   private manifest: Promise<VariantManifest | null> | null = null;
   private variantTemplate: string | null = null;
   private variantNodes = new Set<string>();
   private readonly panoVariants = new WeakMap<PanoObject, PanoVariant>();
+  private skyWanted = false;
+  private skyOutlines: VariantManifest["sky"] | null = null;
+  private readonly panoSkies = new WeakMap<PanoObject, string[]>();
 
   private active: PanoObject | null = null;
   private outgoing: PanoObject | null = null;
@@ -371,6 +394,7 @@ export class PanoramaLayer {
     applyProductionCubeRotation(group, node);
     const pano = { node, group, materials, urls };
     this.attachVariant(pano);
+    this.attachSky(pano);
     return pano;
   }
 
@@ -425,6 +449,63 @@ export class PanoramaLayer {
     this.style.uVariantResolution.value.copy(resolution);
   }
 
+  /**
+   * A tour sky shows through the photographs where they see sky (by `amount`), and the
+   * photographs take on its light. Sky outlines load the first time a sky is used.
+   */
+  setSky(amount: number, light: THREE.Color) {
+    this.style.uSkyAmount.value = amount;
+    this.style.uSkyLight.value.copy(light);
+    if (amount > 0 && !this.skyWanted) {
+      this.skyWanted = true;
+      void this.prepareSky();
+    }
+  }
+
+  /** Whether this space's photographs have sky outlines, so a tour sky can show through them. */
+  async hasSkyOutlines() {
+    await this.loadSkyOutlines();
+    return Boolean(this.skyOutlines && Object.keys(this.skyOutlines.nodes).length);
+  }
+
+  private async loadSkyOutlines() {
+    if (!this.variantSource) return;
+    this.manifest ??= fetch(this.variantSource, { credentials: "omit" }).then((response) => response.ok ? response.json() as Promise<VariantManifest> : null).catch(() => null);
+    const sky = (await this.manifest)?.sky;
+    const template = sky?.template;
+    const safe = typeof template === "string" && (/^https:\/\//.test(template) || /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(template));
+    this.skyOutlines = safe && sky?.nodes && typeof sky.nodes === "object" ? sky : null;
+  }
+
+  private async prepareSky() {
+    await this.loadSkyOutlines();
+    if (this.disposed) return;
+    for (const pano of [this.active, this.outgoing, this.transitionCapture]) if (pano) this.attachSky(pano);
+  }
+
+  private attachSky(pano: PanoObject) {
+    const outlines = this.skyOutlines;
+    if (!this.skyWanted || !outlines || pano.materials.length !== 6 || this.panoSkies.has(pano)) return;
+    const codes = outlines.nodes[pano.node.uuid];
+    if (typeof codes !== "string") return;
+    const urls: string[] = [];
+    this.panoSkies.set(pano, urls);
+    pano.materials.forEach((material, face) => {
+      const uniforms = material.userData.sky as SkyUniforms | undefined;
+      if (!uniforms) return;
+      if (codes[face] === "2") { uniforms.uSkyFace.value = 2; return; }
+      if (codes[face] !== "1") return;
+      const url = outlines.template.replace("{uuid}", encodeURIComponent(pano.node.uuid)).replace("{face}", String(face));
+      urls.push(url);
+      this.textureCache.retain([url]);
+      void this.textureCache.loadAsync(url).then((texture) => {
+        if (this.panoSkies.get(pano) !== urls) return;
+        uniforms.uSkyMap.value = texture;
+        uniforms.uSkyFace.value = 1;
+      }, () => { /* without its outline this face keeps its own sky */ });
+    });
+  }
+
   private attachVariant(pano: PanoObject, replace = false) {
     if (!this.variantTemplate || pano.materials.length !== 6 || !this.variantNodes.has(pano.node.uuid)) return;
     const existing = this.panoVariants.get(pano);
@@ -447,6 +528,8 @@ export class PanoramaLayer {
   }
 
   private disposeObject(object: PanoObject) {
+    const skies = this.panoSkies.get(object);
+    if (skies) { this.textureCache.release(skies, false); this.panoSkies.delete(object); }
     const variant = this.panoVariants.get(object);
     if (variant) { this.textureCache.release(variant.urls, false); this.panoVariants.delete(object); }
     this.textureCache.release(object.urls);

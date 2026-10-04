@@ -1,4 +1,5 @@
 import { coreLooks } from "@/lib/experience/core/looks";
+import { coreSkies } from "@/lib/experience/core/skies";
 import type { Pack } from "@/lib/experience/registry";
 
 /**
@@ -7,6 +8,7 @@ import type { Pack } from "@/lib/experience/registry";
  */
 const core: Pack = {
   looks: coreLooks,
+  skies: coreSkies,
   id: "core",
   label: "Core",
   effects: [

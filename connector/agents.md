@@ -80,9 +80,10 @@ Before the MCP tools are loaded, the same tools run from a shell, for example
    hunt on one.
 2. `draft_tour` with the person's request in plain words, then `wait_for_tour`. {{name}}'s tour agent
    writes the stops or clues and places models, effects, sound and looks (line drawing, blueprint, film
-   noir, night vision and more, changing through transitions such as a sweep or an iris).
+   noir, night vision and more, changing through transitions such as a sweep or an iris) and skies (a
+   sunset, a storm or the Milky Way behind the space, which takes on the sky's light).
 3. `search_models` finds ready-made 3D models. With a Blender MCP connected, model anything missing in
    meters, export a self-contained `.glb` and `upload_model` it; then place it with `save_tour` or ask
    `draft_tour` to.
 4. `share_tour` when the person wants a link. The hosted connector has the same tour tools except
-   `upload_model`; it takes models by their https address instead.
+   `upload_model` and `upload_sky`; it takes models and skies by their https address instead.

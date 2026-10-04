@@ -77,6 +77,20 @@ with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
   Use a look to mark a moment (a drawing that sweeps into color, blueprint for how
   a building was planned, noir for a mystery), not on every stop. The old `sketch`
   effect is retired in favor of the `lines` look with a `sweep` transition.
+- **Skies** go behind the space: `experience.sky` for the tour, `stop.sky` to
+  change it at a stop: `{ "sky": "milky-way", "turn": 90, "brightness": 1,
+  "light": 1, "duration": 2 }`, `"none"` for the capture's own sky, or
+  `{ "sky": "custom", "url": "https://...360.jpg" }` (customers upload their own
+  with `POST /api/account/tours/<id>/skies` or the connector's `upload_sky`). The
+  space takes on the sky's light (night darkens it, a sunset warms it; `light: 0`
+  keeps the capture's light). List skies with `skyEntries()`: core has five drawn
+  ones (`drawn-day`, `drawn-sunset`, `drawn-twilight`, `drawn-night`,
+  `drawn-overcast`), the Spacery pack 38 photographed ones (day, cloudy, storm,
+  sunrise, sunset, dusk, night with the Milky Way, moon, aurora and NASA star
+  maps). Splats and models show it wherever the capture is empty; 360 photos need
+  sky outlines from `scripts/skies/masks.py` (listed under `sky` in the space's
+  lines manifest), or the sky only changes their light. Change the sky at a few
+  story moments, and turn it to put the sun or moon behind what a stop shows.
 - **Drawn versions.** `lines`, `blueprint` and `watercolor` read real drawings of
   the space when `scripts/lines/linework.py` has made them (panorama faces under
   `SPHR_LINES_BASE_URL/<sceneId>/index.json`, or a companion splat with
