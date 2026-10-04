@@ -32,7 +32,9 @@ export function startDraft(tourId: string, work: () => Promise<string>) {
   void work().then(
     (reply) => { drafts.set(tourId, { ...entry, state: "done", reply, finished: new Date().toISOString() }); },
     (error) => {
-      if (!(error instanceof TourAgentError) && !(error instanceof EditConflict)) console.error("A background tour draft failed:", error);
+      // Every failure is logged, so failed drafts show in journalctl -u sphr after a restart forgets them.
+      if (!(error instanceof TourAgentError) && !(error instanceof EditConflict)) console.error(`Tour draft for ${tourId} failed:`, error);
+      else console.warn(`Tour draft for ${tourId} failed: ${failureMessage(error)}`);
       drafts.set(tourId, { ...entry, state: "failed", error: failureMessage(error), finished: new Date().toISOString() });
     }
   );

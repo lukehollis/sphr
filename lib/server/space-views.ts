@@ -29,6 +29,15 @@ const cache = new Map<string, Promise<SpaceView[] | null>>();
 let drawing: Promise<unknown> = Promise.resolve();
 
 type Points = { positions: Float32Array; colors: Uint8Array; sizes: Float32Array; count: number };
+
+// Drawing runs in the app's own process, so it gives other requests a turn every few
+// milliseconds; otherwise a first draw holds every visitor for seconds.
+let turnStarted = performance.now();
+async function pause() {
+  if (performance.now() - turnStarted < 25) return;
+  await new Promise((resolve) => setImmediate(resolve));
+  turnStarted = performance.now();
+}
 type Source = { kind: "points"; points: Points } | { kind: "triangles"; positions: Float32Array; count: number };
 
 /** The views of a space without panoramas, drawn once; null when it has panoramas or nothing to draw. */
@@ -47,7 +56,7 @@ export function spaceViews(bootstrap: SphrBootstrap, sceneId: string): Promise<S
     entry = drawing.then(() => fromDisk(key)).then(async (saved) => {
       if (saved) return saved;
       const source = splats.length ? { kind: "points" as const, points: await loadSplats(splats) } : { kind: "triangles" as const, ...(await loadModels(models)) };
-      return toDisk(key, draw(source, data.initialPosition, data.initialRotation));
+      return toDisk(key, await draw(source, data.initialPosition, data.initialRotation));
     });
     drawing = entry.catch(() => undefined);
     entry.catch(() => cache.delete(key));
@@ -115,6 +124,7 @@ async function loadSplats(splats: SplatConfig[]): Promise<Points> {
       typeof splat.scale === "number" ? new THREE.Vector3(splat.scale, splat.scale, splat.scale) : new THREE.Vector3(...((splat.scale as number[] | undefined) ?? [1, 1, 1])));
     const vector = new THREE.Vector3();
     for (let index = 0; index < points.count; index++) {
+      if ((index & 4095) === 0) await pause();
       vector.fromArray(points.positions, index * 3).applyMatrix4(matrix).toArray(points.positions, index * 3);
     }
     return points;
@@ -139,6 +149,7 @@ async function streamRecords(chunks: AsyncIterable<Uint8Array>, size: number, st
   let carry = new Uint8Array(0);
   let index = 0;
   for await (const chunk of chunks) {
+    await pause();
     const bytes = carry.length ? concat(carry, chunk) : chunk;
     let offset = 0;
     for (; offset + size <= bytes.length; offset += size, index++) {
@@ -267,6 +278,7 @@ async function loadModels(models: ModelNode[]) {
       const corners = index ? index.length : position.length / 3;
       const piece = new Float32Array(corners * 3);
       for (let corner = 0; corner < corners; corner++) {
+        if ((corner & 4095) === 0) await pause();
         vector.fromArray(position, (index ? index[corner] : corner) * 3).applyMatrix4(matrix).toArray(piece, corner * 3);
       }
       pieces.push(piece);
@@ -319,13 +331,15 @@ function candidateCameras(source: Source, start: { x: number; y: number; z: numb
 }
 
 /** The start view, then the three views that show the most of the space and look different from it. */
-function draw(source: Source, start: { x: number; y: number; z: number } | undefined, rotation: { azimuth: number; polar: number } | undefined) {
-  const rendered = candidateCameras(source, start, rotation).map((camera) => {
-    const image = source.kind === "points" ? drawPoints(source.points, camera) : drawTriangles(source.positions, source.count, camera);
+async function draw(source: Source, start: { x: number; y: number; z: number } | undefined, rotation: { azimuth: number; polar: number } | undefined) {
+  const rendered = [];
+  for (const camera of candidateCameras(source, start, rotation)) {
+    const image = source.kind === "points" ? await drawPoints(source.points, camera) : await drawTriangles(source.positions, source.count, camera);
     let filled = 0;
     for (let cell = 0; cell < image.depth.length; cell++) if (Number.isFinite(image.depth[cell])) filled++;
-    return { camera, ...image, coverage: filled / image.depth.length };
-  });
+    rendered.push({ camera, ...image, coverage: filled / image.depth.length });
+    await pause();
+  }
   const direction = (camera: ViewCamera) => new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(THREE.MathUtils.degToRad(camera.polar), THREE.MathUtils.degToRad(camera.azimuth), 0, "YXZ"));
   const chosen = [rendered[0]];
   for (const candidate of rendered.slice(1).sort((a, b) => b.coverage - a.coverage)) {
@@ -337,13 +351,14 @@ function draw(source: Source, start: { x: number; y: number; z: number } | undef
   return chosen.map(({ camera, rgb, depth }, index) => ({ id: `s${index + 1}`, camera, width, height, rgb, depth }));
 }
 
-function drawPoints(points: Points, camera: ViewCamera) {
+async function drawPoints(points: Points, camera: ViewCamera) {
   const basis = cameraBasis(camera);
   const focal = basis.focal(height);
   const rgb = new Uint8Array(width * height * 3).fill(32);
   const depth = new Float32Array(width * height).fill(Infinity);
   const { origin, forward, right, up } = basis;
   for (let index = 0; index < points.count; index++) {
+    if ((index & 4095) === 0) await pause();
     const dx = points.positions[index * 3] - origin.x, dy = points.positions[index * 3 + 1] - origin.y, dz = points.positions[index * 3 + 2] - origin.z;
     const z = dx * forward.x + dy * forward.y + dz * forward.z;
     if (z < 0.1) continue;
@@ -360,12 +375,12 @@ function drawPoints(points: Points, camera: ViewCamera) {
       rgb[cell * 3] = points.colors[index * 3]; rgb[cell * 3 + 1] = points.colors[index * 3 + 1]; rgb[cell * 3 + 2] = points.colors[index * 3 + 2];
     }
   }
-  fillHoles(rgb, depth, 2);
+  await fillHoles(rgb, depth, 2);
   return { rgb, depth };
 }
 
 /** Flat-shaded triangles with a depth buffer: a clay render of a model. */
-function drawTriangles(positions: Float32Array, count: number, camera: ViewCamera) {
+async function drawTriangles(positions: Float32Array, count: number, camera: ViewCamera) {
   const basis = cameraBasis(camera);
   const focal = basis.focal(height);
   const rgb = new Uint8Array(width * height * 3).fill(32);
@@ -378,6 +393,7 @@ function drawTriangles(positions: Float32Array, count: number, camera: ViewCamer
     return { x: width / 2 + focal * d.dot(basis.right) / z, y: height / 2 - focal * d.dot(basis.up) / z, z };
   };
   for (let triangle = 0; triangle < count; triangle++) {
+    if ((triangle & 255) === 0) await pause();
     a.fromArray(positions, triangle * 9); b.fromArray(positions, triangle * 9 + 3); c.fromArray(positions, triangle * 9 + 6);
     const [pa, pb, pc] = [project(a), project(b), project(c)];
     if (pa.z < 0.05 || pb.z < 0.05 || pc.z < 0.05) continue;
@@ -404,10 +420,12 @@ function drawTriangles(positions: Float32Array, count: number, camera: ViewCamer
 }
 
 /** Fills pinholes between points from their nearest neighbors, a few passes. */
-function fillHoles(rgb: Uint8Array, depth: Float32Array, passes: number) {
+async function fillHoles(rgb: Uint8Array, depth: Float32Array, passes: number) {
   for (let pass = 0; pass < passes; pass++) {
     const next = depth.slice();
-    for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+    for (let y = 1; y < height - 1; y++) {
+      if ((y & 31) === 0) await pause();
+      for (let x = 1; x < width - 1; x++) {
       const cell = y * width + x;
       if (Number.isFinite(depth[cell])) continue;
       let best = -1, near = Infinity, found = 0;
@@ -418,6 +436,7 @@ function fillHoles(rgb: Uint8Array, depth: Float32Array, passes: number) {
       if (found < 3 || best < 0) continue;
       next[cell] = near;
       rgb[cell * 3] = rgb[best * 3]; rgb[cell * 3 + 1] = rgb[best * 3 + 1]; rgb[cell * 3 + 2] = rgb[best * 3 + 2];
+      }
     }
     depth.set(next);
   }

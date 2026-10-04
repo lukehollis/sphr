@@ -47,6 +47,14 @@ sudo ln -sfn "node-v$node_version" /opt/sphr/runtime/node
 sudo cp -a .next/standalone/. "$destination/"
 sudo mkdir -p "$destination/.next/static" "$destination/public"
 sudo cp -a .next/static/. "$destination/.next/static/"
+# Pages opened before this deploy still ask for the previous build's scripts. Carry over
+# the ones from the last two days (by their own build time), so those pages keep working
+# and inherited files age out instead of piling up release after release.
+previous=""
+if [[ -e /opt/sphr/current ]]; then previous=$(readlink -f /opt/sphr/current); fi
+if [[ -n "$previous" && -d "$previous/.next/static" ]]; then
+  (cd "$previous/.next/static" && find . -type f -mtime -2 -print0 | sudo xargs -0 -r cp -an --parents -t "$destination/.next/static/") || true
+fi
 (cd public; tar --exclude=./datasets --exclude=./demo -cf - .) | sudo tar -xf - -C "$destination/public"
 printf '%s\n' "$revision" | sudo tee "$destination/REVISION" >/dev/null
 sudo chown -R root:root "$destination"
@@ -57,8 +65,6 @@ sudo rm -rf "$destination/.next/cache"
 sudo ln -s /var/cache/sphr "$destination/.next/cache"
 sudo install -m 644 scripts/deploy/sphr.service /etc/systemd/system/sphr.service
 
-previous=""
-if [[ -e /opt/sphr/current ]]; then previous=$(readlink -f /opt/sphr/current); fi
 sudo ln -sfn "$destination" /opt/sphr/current.next
 sudo mv -Tf /opt/sphr/current.next /opt/sphr/current
 sudo systemctl daemon-reload
@@ -67,6 +73,10 @@ sudo systemctl restart sphr.service
 for attempt in {1..30}; do
   if curl --fail --silent --max-time 2 'http://127.0.0.1:3035/?demo=garden' -o /dev/null; then
     echo "SPHR deployed: $revision ($destination)"
+    # Keep the newest eight releases for rolling back; older ones only take disk.
+    ls -1dt /opt/sphr/releases/*/ | sed 's:/$::' | tail -n +9 | while read -r old; do
+      [[ "$old" == "$destination" || "$old" == "$previous" ]] || sudo rm -rf -- "$old"
+    done
     exit 0
   fi
   sleep 1
