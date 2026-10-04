@@ -212,7 +212,8 @@ a.site-card:hover .site-card-media img, .site-card-link:hover .site-card-media i
 .site-card-kind { color: var(--text-heading); font-size: 12px; font-weight: var(--weight-bold); }
 a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
 .site-card-controls { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: 12px; }
-.site-card-controls .site-segmented { flex: 1; max-width: 200px; margin: 0; }
+.site-card-controls .site-segmented { flex: 0 0 auto; margin: 0; }
+.site-card-controls .site-segmented button { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .site-card-body p { margin: 0; color: var(--site-muted); font-size: var(--size-caption); font-variant-numeric: tabular-nums; }
 
 /* Drawings and empty states */
@@ -389,7 +390,6 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
   .site-kind { grid-column: 1 / -1; }
   .site-search, .site-sort { max-width: none; }
   .site-password { grid-template-columns: minmax(0, 1fr); }
-  .site-card-controls .site-segmented { max-width: none; }
   .site-grid { grid-template-columns: minmax(0, 1fr); }
   .site-empty { grid-template-columns: minmax(0, 1fr); padding: var(--space-3); }
   .site-empty svg { max-width: 200px; }
