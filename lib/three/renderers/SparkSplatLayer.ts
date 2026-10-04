@@ -282,9 +282,9 @@ export class SparkSplatLayer {
   }
 
   /**
-   * Where most of the capture is: the median of a sample of splat centers, and a radius
-   * well past the near four fifths of them, beyond which a capture's splats are mostly
-   * its sky and far background.
+   * Where most of the capture is: the median of a sample of splat centers, and the radius
+   * holding four fifths of them. Beyond it, sky-colored splats high up are the capture's
+   * own sky, and past twice it nearly everything is.
    */
   private coreSphere() {
     const points = this.sampleCenters();
@@ -292,7 +292,7 @@ export class SparkSplatLayer {
     const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
     const center = new THREE.Vector3(median(points.map((p) => p.x)), median(points.map((p) => p.y)), median(points.map((p) => p.z)));
     const distances = points.map((point) => point.distanceTo(center)).sort((a, b) => a - b);
-    return { center, radius: Math.max(4, distances[Math.floor(distances.length * 0.8)] * 1.6) };
+    return { center, radius: Math.max(3, distances[Math.floor(distances.length * 0.8)]) };
   }
 
   /**
@@ -367,7 +367,22 @@ export class SparkSplatLayer {
           else lookMask = step(fract(sin(dot(floor(${inputs.gsplat}.center * 2.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453), lookAmount);
           // The capture gives way where the drawn version arrives; other companions are left to their effects.
           float lookShow = ${variant ? `mix(1.0, lookMask, step(abs(${inputs.variant} - ${ROLE_CODES[role].toFixed(1)}), 0.1))` : `1.0 - lookMask * step(0.5, ${inputs.variant})`};
-          float skyCut = ${variant ? "0.0" : `smoothstep(${inputs.skyRadius}, ${inputs.skyRadius} * 1.3, length(${inputs.gsplat}.center - ${inputs.skyCenter})) * ${inputs.skyAmount}`};
+          float skyCut = 0.0;
+          ${variant ? "" : `if (${inputs.skyAmount} > 0.0) {
+            // A capture's own sky: splats far past its core, or sky-colored (blue, or bright and
+            // gray like cloud) splats high above it and beyond most of the capture.
+            vec3 skyOffset = ${inputs.gsplat}.center - ${inputs.skyCenter};
+            float skyDistance = length(skyOffset);
+            float skyHigh = smoothstep(0.15, 0.3, skyOffset.y / max(skyDistance, 0.001));
+            float skyBeyond = smoothstep(${inputs.skyRadius} * 0.9, ${inputs.skyRadius} * 1.15, skyDistance);
+            vec3 skyColor = ${inputs.gsplat}.rgba.rgb;
+            float skyLuma = dot(skyColor, vec3(0.299, 0.587, 0.114));
+            float skyChroma = max(skyColor.r, max(skyColor.g, skyColor.b)) - min(skyColor.r, min(skyColor.g, skyColor.b));
+            float skyBlue = smoothstep(0.0, 0.08, skyColor.b - max(skyColor.r, skyColor.g) * 0.92) * smoothstep(0.2, 0.4, skyLuma);
+            float skyCloud = smoothstep(0.62, 0.8, skyLuma) * (1.0 - smoothstep(0.08, 0.2, skyChroma));
+            float skyFar = smoothstep(${inputs.skyRadius} * 1.6, ${inputs.skyRadius} * 2.1, skyDistance);
+            skyCut = max(skyFar, max(skyBlue, skyCloud) * skyHigh * skyBeyond) * ${inputs.skyAmount};
+          }`}
           ${outputs.gsplat}.rgba.a *= lookShow * ${inputs.opacity} * (1.0 - skyCut);
           ${outputs.gsplat}.scales *= ${inputs.scale};
         `)
