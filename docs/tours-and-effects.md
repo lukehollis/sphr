@@ -303,6 +303,18 @@ clicking it opens the link, another page of the site in place and anything else
 in a new tab. With a `label` it reads as a portal, for example a sphere wrapped in
 a 360 photo of the next tour.
 
+`tour_data.continueTo: { "url": "/s/<sceneId>/<slug>", "label": "Continue to the Great Sphinx" }`
+chains a guided tour to the next one: the last stop's button reads the label and
+opens the address instead of switching to free exploration. Another tour on this
+site opens in place, inside a framing page's frame too; an https page elsewhere
+replaces the whole window.
+
+Shown in a frame, a guided tour tells the framing page how far the visitor has
+gone: once the space is ready and at each stop it posts
+`{ type: "spacery:tour", page, stop, stops, guided }` to `window.parent` (stops
+counted across the tour's spaces), and `continue: <url>` when the visitor takes
+the onward link. Scavenger hunts post `spacery:hunt` instead.
+
 ## Sound
 
 Two effects make sound. `sound` plays a clip when a stop opens, loops it

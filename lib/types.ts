@@ -156,6 +156,8 @@ export type TourData = {
   effects?: EffectInstance[];
   /** Shown after the last tour stop, or when every hunt item is found. */
   finale?: string;
+  /** Where the tour goes after its last stop: that stop's button opens it instead of free exploration. */
+  continueTo?: TourContinue;
   /** The frame's look in free exploration and at stops without their own. */
   look?: StopLook;
   /** The sky behind the space in free exploration and at stops without their own. */
@@ -380,12 +382,16 @@ export type SphrBootstrap = {
   orderedSpaces?: SphrSpace[];
 };
 
+/** The next page after a tour: another tour on this site, or an https page elsewhere. */
+export type TourContinue = { url: string; label: string };
+
 export type NormalizedTour = {
   hasGuidedTour: boolean;
   kind: ExperienceKind;
   objects: PlacedObject[];
   effects: EffectInstance[];
   finale?: string;
+  continueTo?: TourContinue;
   look?: StopLook;
   sky?: StopSky;
   place?: EarthPlace;

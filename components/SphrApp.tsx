@@ -244,6 +244,20 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     }, "*");
   }, [hunt, editor, started, foundKey, huntSteps.length, runtimeState.finished]);
 
+  // A page that shows a guided tour in a frame (to see how far visitors go) hears when the space is
+  // ready, each stop reached (counted across the tour's spaces) and the onward link when it's taken.
+  const guidedTour = tour?.hasGuidedTour && !hunt ? tour : null;
+  const tourStops = guidedTour ? guidedTour.spaces.reduce((total, space) => total + space.tourpoints.length, 0) : 0;
+  const tourStop = guidedTour ? guidedTour.spaces.slice(0, runtimeState.activeSpaceIndex).reduce((total, space) => total + space.tourpoints.length, 0) + runtimeState.activePointIndex + 1 : 0;
+  const tourReady = started && runtimeState.loading.ready;
+  useEffect(() => {
+    if (!guidedTour || editor || !tourReady || window.parent === window) return;
+    window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, guided: runtimeState.guided }, "*");
+  }, [guidedTour, editor, tourReady, tourStop, tourStops, runtimeState.guided]);
+  const tellFrameContinue = (url: string) => {
+    if (window.parent !== window) window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, continue: url }, "*");
+  };
+
   return (
     <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
@@ -297,6 +311,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onNext={() => runtimeRef.current?.next()}
             hunt={hunt && activePoint.find ? { step: Math.max(1, huntStep), steps: huntSteps.length, onHint: () => runtimeRef.current?.requestHint() } : undefined}
             textStyle={tour.textStyle}
+            continueTo={tour.continueTo}
+            onContinue={tellFrameContinue}
           />}
         </>
       )}

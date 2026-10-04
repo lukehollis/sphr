@@ -684,3 +684,16 @@ test('objects can open a link, and tours can set their text over the view', () =
   base.tour.tour_data.textStyle = 'neon';
   assert.equal(normalizeTour(base).textStyle, 'panel');
 });
+
+test('a guided tour can continue to another page after its last stop', () => {
+  const base = (continueTo, mode = 'guided') => ({ space: { id: 's', title: 'Space', space_data: { nodes: [{ uuid: 'a', position: { x: 0, y: 1.6, z: 0 } }] } },
+    tour: { tour_data: { mode, continueTo, spaces: [{ id: 's', tourpoints: [{ nodeUUID: 'a', text: 'Hi' }] }] } } });
+  assert.deepEqual(normalizeTour(base({ url: '/s/5b073eb82f3f/the-great-sphinx-of-giza', label: ' Continue to the Great Sphinx ' })).continueTo,
+    { url: '/s/5b073eb82f3f/the-great-sphinx-of-giza', label: 'Continue to the Great Sphinx' });
+  assert.equal(normalizeTour(base({ url: 'https://mused.com/edu/', label: 'Open the school library' })).continueTo.url, 'https://mused.com/edu/');
+  assert.equal(normalizeTour(base({ url: 'javascript:alert(1)', label: 'Go' })).continueTo, undefined);
+  assert.equal(normalizeTour(base({ url: '//evil.example/', label: 'Go' })).continueTo, undefined);
+  assert.equal(normalizeTour(base({ url: 'http://mused.com/edu/', label: 'Go' })).continueTo, undefined);
+  assert.equal(normalizeTour(base({ url: '/s/x', label: '  ' })).continueTo, undefined);
+  assert.equal(normalizeTour(base({ url: '/s/x', label: 'Go' }, 'explore')).continueTo, undefined, 'free exploration has no last stop');
+});

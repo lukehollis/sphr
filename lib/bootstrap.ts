@@ -7,6 +7,7 @@ import type {
   SphrBootstrap,
   SphrSpace,
   SphrTour,
+  TourContinue,
   TourData,
   TourSpace,
   TourUiText
@@ -305,6 +306,7 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
     objects: Array.isArray(tourData.objects) ? tourData.objects : [],
     effects: Array.isArray(tourData.effects) ? tourData.effects : [],
     finale: typeof tourData.finale === "string" ? tourData.finale : undefined,
+    continueTo: hasGuidedTour ? tourContinue(tourData.continueTo) : undefined,
     look: tourData.look && typeof tourData.look === "object" ? tourData.look : undefined,
     sky: tourData.sky && typeof tourData.sky === "object" ? tourData.sky : undefined,
     place: tourData.place && typeof tourData.place === "object" ? tourData.place : bootstrap.space.space_data.geo,
@@ -317,6 +319,22 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
     sceneGraph: tourData.sceneGraph ?? bootstrap.space.space_data.sceneGraph ?? [],
     annotationGraph: tourData.annotationGraph ?? bootstrap.space.space_data.annotationGraph ?? []
   };
+}
+
+/** A tour's onward link: a path on this site or an https address, with a short button label. */
+function tourContinue(value: unknown): TourContinue | undefined {
+  const input = value as Partial<TourContinue> | null | undefined;
+  if (!input || typeof input !== "object" || typeof input.url !== "string" || typeof input.label !== "string") return undefined;
+  const label = input.label.trim().slice(0, 80);
+  const url = input.url.trim();
+  if (!label) return undefined;
+  if (/^\/(?!\/)\S*$/.test(url)) return { url, label };
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password ? { url: parsed.toString(), label } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function activeTourPoint(tour: NormalizedTour, spaceIndex: number, pointIndex: number) {

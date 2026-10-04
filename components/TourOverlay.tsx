@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { ChevronLeft, ChevronRight, Footprints, Lightbulb, RotateCcw } from "lucide-react";
-import type { RuntimeState, TourPoint, TourUiText } from "@/lib/types";
+import type { RuntimeState, TourContinue, TourPoint, TourUiText } from "@/lib/types";
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
 import { sanitizeTourHtml } from "@/lib/tour-html";
 import { paragraphs } from "@/lib/experience/types";
@@ -19,7 +19,20 @@ type Props = {
   hunt?: { step: number; steps: number; onHint: () => void };
   /** Text in a dark panel, or straight over the view on a gradient from its side. */
   textStyle?: "panel" | "gradient";
+  /** The tour's onward page, opened by the last stop's button. */
+  continueTo?: TourContinue;
+  onContinue?: (url: string) => void;
 };
+
+/**
+ * Another page of this site opens in place (inside a framing page's frame too);
+ * a page elsewhere replaces the whole window, framing page included.
+ */
+function continueTarget(url: string) {
+  if (typeof window === "undefined") return "_top";
+  try { return new URL(url, window.location.href).origin === window.location.origin ? "_self" : "_top"; }
+  catch { return "_top"; }
+}
 
 /** Text written in the tour builder is plain; older authored tours carry HTML. */
 function StopText({ value, plain, className }: { value?: string | null; plain: boolean; className: string }) {
@@ -56,7 +69,7 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
     : image ? <a href={image} target="_blank" rel="noopener noreferrer"><img className="tour-media" src={image} alt={file.title ?? ''} /></a> : null;
 }
 
-export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt, textStyle = "panel" }: Props) {
+export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt, textStyle = "panel", continueTo, onContinue }: Props) {
   const plain = point.format === "plain";
   const huntStep = hunt && point.find ? state.hunt : undefined;
   const found = Boolean(huntStep?.stepFound);
@@ -103,10 +116,15 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
             <ChevronLeft size={22} aria-hidden="true" />
             <span className="tour-button-label">{ui?.previousButtonText ?? "Previous"}</span>
           </button>
-          <button type="button" className={isLastPoint ? "tour-next tour-next-final" : "tour-next"} aria-label={nextLabel} title={nextLabel} onClick={onNext} disabled={state.navigating || locked}>
-            <span className="tour-button-label">{nextLabel}</span>
-            {isLastPoint ? <Footprints size={22} aria-hidden="true" /> : <ChevronRight size={22} aria-hidden="true" />}
-          </button>
+          {isLastPoint && !hunt && continueTo
+            ? <a className="tour-next tour-next-final" href={continueTo.url} target={continueTarget(continueTo.url)} title={continueTo.label} onClick={() => onContinue?.(continueTo.url)}>
+              <span className="tour-button-label">{continueTo.label}</span>
+              <ChevronRight size={22} aria-hidden="true" />
+            </a>
+            : <button type="button" className={isLastPoint ? "tour-next tour-next-final" : "tour-next"} aria-label={nextLabel} title={nextLabel} onClick={onNext} disabled={state.navigating || locked}>
+              <span className="tour-button-label">{nextLabel}</span>
+              {isLastPoint ? <Footprints size={22} aria-hidden="true" /> : <ChevronRight size={22} aria-hidden="true" />}
+            </button>}
         </nav>
       )}
     </section>
