@@ -3,11 +3,13 @@ import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { db, isScenePublic } from "./admin-store";
-import { cleanText, listCustomerSpaces, readUser } from "./accounts-store";
+import { cleanText, listCustomerSpaces, readUser, readUserByEmail } from "./accounts-store";
 import { spaceHosted } from "./accounts";
-import { canBuildOn, listUserTours, tourPath } from "./user-tours";
+import { canBuildOn, isOperatorScene, listUserTours, onePerCapture, pickerSpace, tourPath } from "./user-tours";
+import { readSceneTour } from "./tours";
 import { readAllScenes } from "@/lib/scene-catalog";
 import { webAddress } from "@/lib/space-info";
+import type { SceneListing } from "@/lib/scene-types";
 
 /**
  * People's public profiles: a handle, a name, a picture and a cover, a few words about
@@ -191,29 +193,65 @@ export function profileCard(userId: string): ProfileCard {
   return { handle: profile.handle, name: profile.name || profile.handle, avatar: profile.avatar, path: `/u/${profile.handle}` };
 }
 
+/** `hearts` is null for the site's own guided tours, which are spaces rather than tours people heart. */
 export type SharedTour = { id: string; title: string; kind: "tour" | "hunt"; path: string; thumbnail: string | null; space: string | null;
-  stops: number; hearts: number; updated: string };
+  stops: number; hearts: number | null; updated: string };
 export type SharedCapture = { sceneId: string; title: string; path: string; thumbnail: string; created: string };
+
+/**
+ * The account of the person who runs the site (`SPHR_OPERATOR_ACCOUNT`, its email address).
+ * Its profile also shows the site's own public spaces and their guided tours as its work.
+ */
+export function operatorAccount() {
+  const email = process.env.SPHR_OPERATOR_ACCOUNT?.trim();
+  const user = email ? readUserByEmail(email) : undefined;
+  return user?.emailVerified ? user.id : undefined;
+}
+
+/** The site's own public spaces that open in the viewer (Matterport embeds without a capture do not). */
+async function operatorScenes() {
+  return (await readAllScenes()).filter(scene => isOperatorScene(scene.sceneId) && isScenePublic(scene.sceneId)
+    && !((scene.sourceType === "matterport" || scene.sourceType === "spaces") && scene.nodeCount === 0));
+}
+
+/** A space of the site's own that visitors open as a guided tour or hunt: one from the old collection, or one built in the admin. */
+function operatorTour(scene: SceneListing): SharedTour | null {
+  const authored = readSceneTour(scene.sceneId).experience;
+  const stops = authored?.stops.length ?? 0;
+  if (!stops && !(scene.hasGuidedTour ?? scene.legacy?.kind === "tour")) return null;
+  return { id: `scene-${scene.sceneId}`, title: scene.title, kind: authored?.kind ?? "tour", path: scene.scenePath, thumbnail: scene.thumbnail ?? null,
+    space: null, stops, hearts: null, updated: scene.createdAt };
+}
 
 /** The tours a person has shared that visitors can open, newest first. */
 export async function sharedTours(userId: string): Promise<SharedTour[]> {
   const scenes = new Map((await readAllScenes()).map(scene => [scene.sceneId, scene]));
-  return listUserTours(userId).flatMap(tour => {
+  const own = listUserTours(userId).flatMap(tour => {
     const scene = scenes.get(tour.sceneId);
     if (!tour.public || !scene || !canBuildOn(userId, scene)) return [];
     return [{ id: tour.id, title: tour.title, kind: tour.kind, path: tourPath(tour), thumbnail: scene.thumbnail ?? null, space: scene.title,
       stops: tour.experience?.stops.length ?? 0, hearts: heartCount(tour.id), updated: tour.updated }];
   });
+  if (userId !== operatorAccount()) return own;
+  const site = (await operatorScenes()).flatMap(scene => operatorTour(scene) ?? []);
+  return [...own, ...site.sort((a, b) => b.updated.localeCompare(a.updated))];
 }
 
-/** The person's own hosted spaces that are public. */
+/** The person's own hosted spaces that are public, and for the site's operator the site's own. */
 export async function sharedCaptures(userId: string): Promise<SharedCapture[]> {
   const scenes = new Map((await readAllScenes()).map(scene => [scene.sceneId, scene]));
-  return listCustomerSpaces(userId).flatMap(space => {
+  const own = listCustomerSpaces(userId).flatMap(space => {
     const scene = space.sceneId ? scenes.get(space.sceneId) : undefined;
     if (!scene || space.status !== "ready" || !spaceHosted(space) || !isScenePublic(scene.sceneId)) return [];
     return [{ sceneId: scene.sceneId, title: scene.title, path: scene.scenePath, thumbnail: scene.thumbnail, created: space.created }];
   });
+  if (userId !== operatorAccount()) return own;
+  // The same capture listed twice (an older copy and a newer conversion) shows once; guided tours show with the tours.
+  const spaces = (await operatorScenes()).filter(scene => !operatorTour(scene));
+  const kept = new Set(onePerCapture(spaces.map(pickerSpace)).map(space => space.sceneId));
+  const site = spaces.filter(scene => kept.has(scene.sceneId))
+    .map(scene => ({ sceneId: scene.sceneId, title: scene.title, path: scene.scenePath, thumbnail: scene.thumbnail, created: scene.createdAt }));
+  return [...own, ...site.sort((a, b) => b.created.localeCompare(a.created))];
 }
 
 /** Recently shared tours from the people someone follows. */
