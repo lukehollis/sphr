@@ -14,6 +14,7 @@ import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
 import { LOOK_TRANSITIONS, newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import { placeObjectAt } from "@/lib/experience/placement";
+import { matchModel, stem } from "@/lib/experience/library-search";
 import type { LibraryModel } from "@/lib/experience/library";
 
 type Props = {
@@ -585,8 +586,9 @@ function Transform({ label, value, step, onChange }: { label: string; value: Vec
 function LibraryPicker({ library, onAdd }: { library: LibraryModel[]; onAdd: (model: LibraryModel) => void }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string[]>([]);
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const matches = library.filter((model) => words.every((word) => `${model.name} ${model.category} ${model.pack ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase().includes(word)));
+  // Every word must start a word of the model (it is typed as you go), plurals included.
+  const words = (query.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(stem);
+  const matches = words.length ? library.filter((model) => matchModel(model, words, true).all) : library;
   const categories = [...new Set(matches.map((model) => model.category))];
   return <div className="builder-library">
     <label className="builder-picker-heading" htmlFor="library-search">Library</label>

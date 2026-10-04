@@ -245,6 +245,13 @@ test('agents search the whole library and name models by ID', async () => {
   assert.deepEqual(searchLibrary(library, 'lamp').map((model) => model.id), ['lamp'], 'an exact ID comes first');
   assert.deepEqual(searchLibrary(library, 'the and please'), [], 'words without meaning find nothing');
   assert.equal(searchLibrary(library, 'ancient', 2).length, 2);
+  const more = [...library, { id: 'cart', name: 'Wooden cart', category: 'Farm', pack: 'Medieval Village (Camelot)', url: 'https://cdn.example/cart.glb', height: 1 },
+    { id: 'spice', name: 'Bowl Spice', category: 'Ancient Egypt', url: 'https://cdn.example/bowl.glb', height: 0.1 },
+    { id: 'owl', name: 'Barn owl', category: 'Animals', url: 'https://cdn.example/owl.glb', height: 0.3 }];
+  assert.deepEqual(searchLibrary(more, 'camel'), [], 'camel is not Camelot');
+  assert.deepEqual(searchLibrary(more, 'owls').map((model) => model.id), ['owl'], 'owl is not bowl, and plurals match');
+  const { matchModel } = await import('../lib/experience/library-search.ts');
+  assert.ok(matchModel(more[0], ['amph'], true).all && !matchModel(more[0], ['amph']).all, 'word beginnings only while someone types in the builder');
   assert.equal(describeModel(library[0]), 'amphora-red: Red-figure amphora (Ancient Greece, Greek pottery), about 0.9 m tall at scale 1, vase');
   assert.equal(describeModel(library[4]), 'cat: Temple cat (Animals), about 0.3 m tall at scale 1, animated: idle, walk', 'agents see which models move');
   const raw = resolveLibraryCodes({ objects: [{ id: 'a', source: { kind: 'model', url: 'athena' } }, { id: 'b', source: { kind: 'model', url: 'library:lamp' } },

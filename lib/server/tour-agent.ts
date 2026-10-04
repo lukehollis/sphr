@@ -8,7 +8,7 @@ import { effectEntries, lookEntries, shapeEntries, soundEntries } from "@/lib/ex
 import { paramSummary } from "@/lib/experience/catalog";
 import type { SpaceView } from "./space-views";
 import { LOOK_TRANSITIONS } from "@/lib/experience/types";
-import { describeModel, searchLibrary } from "@/lib/experience/library-search";
+import { describeModel, matchModel, searchLibrary, stem } from "@/lib/experience/library-search";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience } from "@/lib/experience/types";
 import type { NodeData, SphrBootstrap } from "@/lib/types";
@@ -121,12 +121,11 @@ const STOPWORDS = new Set("the and for with that this make tour hunt space aroun
  * placed, plus a few from every category, under short codes the server maps back to URLs.
  */
 export function pickLibrary(library: LibraryModel[], prompt: string, draft: Experience, limit = 180, perCategory = 4) {
-  const words = [...new Set((prompt.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((word) => !STOPWORDS.has(word)).map((word) => word.replace(/(ies|es|s)$/, "")))];
+  const words = [...new Set((prompt.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((word) => !STOPWORDS.has(word)).map(stem))];
   const placed = new Set(draft.objects.flatMap((object) => object.source.kind === "model" ? [object.source.url] : []));
-  const scored = library.map((model, index) => {
-    const text = `${model.name} ${model.category} ${model.pack ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase();
-    return { model, index, score: placed.has(model.url) ? 100 : words.filter((word) => text.includes(word)).length };
-  });
+  // Whole words of the request (a camel is not Camelot), each counted once per model.
+  const scored = library.map((model, index) => ({ model, index,
+    score: placed.has(model.url) ? 100 : words.filter((word) => matchModel(model, [word]).score > 0).length }));
   const chosen = new Set(scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, limit).map((item) => item.model));
   const seen = new Map<string, number>();
   for (const model of library) {

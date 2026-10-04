@@ -855,6 +855,7 @@ async function uploadModel({ tour_id, path: file }) {
   if (!saved) throw new Problem(`This agent is not linked to a ${brand.name} account yet. Call link_account first.`, 401);
   const target = path.resolve(String(file ?? ''));
   if (extension(target) !== 'glb') throw new Problem('Upload a .glb file (glTF Binary). In Blender: File > Export > glTF 2.0, format glTF Binary.');
+  if (!existsSync(target)) throw new Problem(`There is no file at ${target}. Check the path, or ask the person where the model is.`);
   const bytes = readFileSync(target);
   if (bytes.length > 25 * 1024 * 1024) throw new Problem(`${path.basename(target)} is ${formatBytes(bytes.length)}; models can be up to 25 MB. Decimate it or export with Draco compression.`);
   const response = await fetch(`${brand.url}/api/account/tours/${encodeURIComponent(tour_id)}/models`, { method: 'POST', body: bytes, signal: AbortSignal.timeout(120000),
