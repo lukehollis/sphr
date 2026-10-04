@@ -261,11 +261,28 @@ export async function buildableSpaces(userId: string) {
   const spacery: PickerSpace[] = [];
   for (const scene of await readAllScenes()) {
     if (!canBuildOn(userId, scene)) continue;
-    const item = { sceneId: scene.sceneId, title: scene.title, thumbnail: scene.thumbnail, nodeCount: scene.nodeCount, sourceType: scene.sourceType,
-      guided: scene.hasGuidedTour ?? scene.legacy?.kind === "tour", createdAt: scene.createdAt, hasMesh: scene.hasMesh, legacyKind: scene.legacy?.kind };
-    (isOperatorScene(scene.sceneId) ? spacery : own).push(item);
+    (isOperatorScene(scene.sceneId) ? spacery : own).push(pickerSpace(scene));
   }
   own.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   spacery.sort((a, b) => a.title.localeCompare(b.title));
   return { own, spacery: onePerCapture(spacery) };
+}
+
+function pickerSpace(scene: SceneListing): PickerSpace {
+  return { sceneId: scene.sceneId, title: scene.title, thumbnail: scene.thumbnail, nodeCount: scene.nodeCount, sourceType: scene.sourceType,
+    guided: scene.hasGuidedTour ?? scene.legacy?.kind === "tour", createdAt: scene.createdAt, hasMesh: scene.hasMesh, legacyKind: scene.legacy?.kind };
+}
+
+/**
+ * Where a visitor to one of the operator's public spaces starts building on it: the picker
+ * with the space chosen, or the copy of the same capture the picker lists instead. Nothing
+ * for a customer's space, which only its owner builds on.
+ */
+export async function buildOnPath(sceneId: string) {
+  if (!accountsEnabled()) return undefined;
+  const offered = (await readAllScenes()).filter((scene) => buildableScene(scene) && isOperatorScene(scene.sceneId) && isScenePublic(scene.sceneId)).map(pickerSpace);
+  const space = offered.find((item) => item.sceneId === sceneId);
+  if (!space) return undefined;
+  const listed = onePerCapture(offered).find((item) => captureKey(item) === captureKey(space));
+  return `/account/tours/new?scene=${listed?.sceneId ?? sceneId}`;
 }

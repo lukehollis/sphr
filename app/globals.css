@@ -88,7 +88,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 /* The site name above the title, in the pixel face of the wordmark. */
 .scene-host { color: var(--text-muted); font-size: 8px; line-height: 1; text-decoration: none; pointer-events: auto; }
 .scene-host:hover, .scene-host:focus-visible { color: var(--text-heading); }
-.viewer-host { position: absolute; z-index: 19; right: var(--space-3); bottom: var(--space-3); display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; background: var(--surface-page); color: var(--text-muted); font-size: var(--size-label); line-height: 1; text-decoration: none; }
+/* Building on the space and the site credit share the bottom right corner. */
+.viewer-corner { position: absolute; z-index: 19; right: var(--space-3); bottom: var(--space-3); display: flex; gap: 1px; background: var(--rule-hair-color); }
+.viewer-build { display: inline-flex; align-items: center; padding: 6px 10px; background: var(--always-paper); color: #000000; font-size: var(--size-label); font-weight: var(--weight-bold); line-height: 1; text-decoration: none; }
+.viewer-build:hover, .viewer-build:focus-visible { background: #ececec; }
+.viewer-host { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 10px; background: var(--surface-page); color: var(--text-muted); font-size: var(--size-label); line-height: 1; text-decoration: none; }
 .viewer-host span { color: var(--text-heading); font-size: 8px; }
 .viewer-host:hover, .viewer-host:focus-visible { color: var(--text-heading); }
 .hud-left, .hud-right { display: flex; gap: 1px; background: var(--rule-hair-color); pointer-events: none; }
@@ -144,9 +148,10 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .tour-secondary-text { font-size: var(--size-caption); }
   .tour-media { max-height: 18vh; }
   .earth-credit { top: calc(64px + env(safe-area-inset-top)); bottom: auto; max-width: calc(100% - 32px); }
-  .viewer-host { right: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .viewer-corner { right: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .viewer-build, .viewer-host { padding: 11px 12px; }
   /* The guided tour's panel fills the bottom of a phone screen; the site name above the title stays. */
-  .has-guided-tour .viewer-host { display: none; }
+  .has-guided-tour .viewer-corner { display: none; }
   .navigation-status { top: calc(112px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -6,7 +6,7 @@ import { sceneTitleSlug } from "@/lib/scene-edits";
 import { readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath } from "@/lib/server/accounts";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
-import { readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
+import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
 
 export const dynamic = "force-dynamic";
@@ -37,5 +37,5 @@ export default async function TourPage({ params }: Props) {
   if (slug?.length !== 1 || slug[0] !== sceneTitleSlug(tour.title)) redirect(tourPath(tour));
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl}
     edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants: await existingVariantsUrl(scene.sceneId) }}
-    preview={{ title: tour.title, image: scene.thumbnail }} host={viewerHost()} />;
+    preview={{ title: tour.title, image: scene.thumbnail }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} />;
 }

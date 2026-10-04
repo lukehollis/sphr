@@ -18,3 +18,7 @@ export function hostHref(host: ViewerHost, placement: "eyebrow" | "badge") {
 export function trackHostClick(label: string, href: string) {
   track("cta_click", { label, href: href.slice(0, 200) });
 }
+
+export function trackBuildClick(href: string) {
+  track("cta_click", { label: "Build on this space", href: href.slice(0, 200) });
+}

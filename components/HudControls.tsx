@@ -3,11 +3,12 @@
 import { Box, Footprints, Volume2, VolumeX } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
 import { pixelFont } from "@/app/design-system/fonts";
-import { hostHref, trackHostClick, type ViewerHost } from "@/lib/host-link";
+import { hostHref, trackBuildClick, trackHostClick, type ViewerHost } from "@/lib/host-link";
 
 type Props = {
   title?: string;
   host?: ViewerHost;
+  build?: string;
   state: RuntimeState;
   hasGuidedTour: boolean;
   hasAudio: boolean;
@@ -20,6 +21,7 @@ type Props = {
 export default function HudControls({
   title,
   host,
+  build,
   state,
   hasGuidedTour,
   hasAudio,
@@ -52,10 +54,13 @@ export default function HudControls({
         </div>}
       </header>
       {/* Google's credit takes this corner while its 3D map is in view. */}
-      {host && !state.earth && <a className="viewer-host" href={hostHref(host, "badge")} target="_blank" rel="noopener"
-        onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>
-        Hosted on <span className={pixelFont.className}>{host.name}</span>
-      </a>}
+      {(build || host) && !state.earth && <div className="viewer-corner">
+        {build && <a className="viewer-build" href={build} onClick={(event) => trackBuildClick(event.currentTarget.href)}>Build on this space</a>}
+        {host && <a className="viewer-host" href={hostHref(host, "badge")} target="_blank" rel="noopener"
+          onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>
+          Hosted on <span className={pixelFont.className}>{host.name}</span>
+        </a>}
+      </div>}
     </>
   );
 }

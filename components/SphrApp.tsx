@@ -29,6 +29,8 @@ const initialRuntimeState: RuntimeState = {
 type Props = { configUrl?: string; preview?: { title: string; image: string };
   /** The operator's site, named above the title and credited in a corner. */
   host?: ViewerHost;
+  /** Where visitors start their own tour or scavenger hunt on this space, when they may. */
+  build?: string;
   edits?: ViewerEdits;
   editor?: {
     onReady: (session: ViewerSession | null, issue: string | null) => void;
@@ -48,7 +50,7 @@ function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, stat
   return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
 }
 
-export default function SphrApp({ configUrl, preview, host, edits, editor, chrome = !editor, revision = 0 }: Props) {
+export default function SphrApp({ configUrl, preview, host, build, edits, editor, chrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -179,6 +181,7 @@ export default function SphrApp({ configUrl, preview, host, edits, editor, chrom
           <HudControls
             title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
             host={host}
+            build={build}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
             hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim())) || Boolean(tour?.effects.some((effect) => effect.type === "sound" || effect.type === "music"))}
