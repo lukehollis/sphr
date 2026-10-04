@@ -2,9 +2,12 @@
 
 import { Box, Footprints, Volume2, VolumeX } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
+import { pixelFont } from "@/app/design-system/fonts";
+import { hostHref, trackHostClick, type ViewerHost } from "@/lib/host-link";
 
 type Props = {
   title?: string;
+  host?: ViewerHost;
   state: RuntimeState;
   hasGuidedTour: boolean;
   hasAudio: boolean;
@@ -16,6 +19,7 @@ type Props = {
 
 export default function HudControls({
   title,
+  host,
   state,
   hasGuidedTour,
   hasAudio,
@@ -32,7 +36,11 @@ export default function HudControls({
         </ControlButton>
       </div>}
       <header className="viewer-header">
-        <div className="scene-heading"><span>{title}</span></div>
+        <div className="scene-heading">
+          {host && <a className={`scene-host ${pixelFont.className}`} href={hostHref(host, "eyebrow")} target="_blank" rel="noopener"
+            onClick={(event) => trackHostClick(host.name, event.currentTarget.href)}>{host.name}</a>}
+          <span className="scene-title">{title}</span>
+        </div>
         {(hasGuidedTour || hasAudio) && <div className="hud-right" aria-label="Viewer settings">
           {hasGuidedTour && <button className="guide-toggle" type="button" role="switch" aria-label="Guide" aria-checked={state.guided} title={state.guided ? "Switch to free exploration" : "Switch to guided tour"} onClick={onToggleGuide}>
             <span className="guide-switch" aria-hidden="true" />
@@ -43,6 +51,11 @@ export default function HudControls({
           </ControlButton>}
         </div>}
       </header>
+      {/* Google's credit takes this corner while its 3D map is in view. */}
+      {host && !state.earth && <a className="viewer-host" href={hostHref(host, "badge")} target="_blank" rel="noopener"
+        onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>
+        Hosted on <span className={pixelFont.className}>{host.name}</span>
+      </a>}
     </>
   );
 }

@@ -4,7 +4,7 @@ import { readAllScenes, readSceneCatalog } from "@/lib/scene-catalog";
 import { accessControlled } from "@/lib/server/admin-store";
 import { isAdmin } from "@/lib/server/auth";
 import { accountsEnabled } from "@/lib/server/accounts";
-import { siteBrand } from "@/lib/server/brand";
+import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<Rec
     if (scene) redirect(scene.scenePath);
     if (!(await isAdmin())) redirect("/admin/login");
   }
-  if (params.config || params.demo !== undefined) return <SphrApp />;
+  if (params.config || params.demo !== undefined) return <SphrApp host={viewerHost()} />;
   // The collection is an admin index; public scenes remain reachable by their URLs. With customer
   // accounts, someone who types the bare address is a customer looking for their spaces.
   if (accessControlled() && !(await isAdmin())) redirect(accountsEnabled() ? "/account" : "/admin/login?next=%2F");

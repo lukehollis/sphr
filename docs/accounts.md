@@ -174,6 +174,9 @@ SPHR_OPERATOR_NAME="Example Spaces"
 SPHR_CONTACT_EMAIL=support@example.com
 # Where the code this deployment runs is published. The plan choice links to it.
 # SPHR_SOURCE_URL=https://github.com/example/sphr
+# The operator's own website. When set, the viewer shows the site name above each space's
+# title and a "Hosted on" link in a corner, both leading there with utm_source=viewer.
+# SPHR_OPERATOR_URL=https://example.com
 ```
 
 Restart the service after changing these. Accounts, sessions, subscriptions, spaces,
