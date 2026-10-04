@@ -75,6 +75,13 @@ export function readSceneTourRow(scene: string): { experience: unknown; revision
   catch { return { experience: null, revision: row.revision }; }
 }
 
+/** The title of every space's saved tour, by space, for naming spaces' links after their tours. */
+export function readSceneTourTitles(): Map<string, string> {
+  if (!process.env.SPHR_STATE_DIR) return new Map();
+  const rows = db().prepare("SELECT scene, json_extract(experience, '$.title') AS title FROM scene_tours WHERE experience IS NOT NULL").all() as { scene: string; title: unknown }[];
+  return new Map(rows.flatMap(row => typeof row.title === 'string' && row.title.trim() ? [[row.scene, row.title.trim()] as [string, string]] : []));
+}
+
 /** Save (or with null, remove) a space's tour, refusing stale revisions. */
 export function saveSceneTour(scene: string, revision: number, experience: Experience | null) {
   if (!/^[a-f0-9]{12}$/.test(scene) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Invalid edit.');

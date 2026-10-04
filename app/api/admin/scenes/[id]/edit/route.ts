@@ -1,6 +1,6 @@
 import { readSourceScenes } from '@/lib/scene-catalog';
-import { editedListing, validateStartView } from '@/lib/scene-edits';
-import { EditConflict, saveSceneEdits } from '@/lib/server/admin-store';
+import { editedListing, tourNamedListing, validateStartView } from '@/lib/scene-edits';
+import { EditConflict, readSceneTourTitles, saveSceneEdits } from '@/lib/server/admin-store';
 import { adminResponse, readAdminBody } from '@/lib/server/auth';
 import { canManageScene } from '@/lib/server/accounts';
 import { decodeThumbnail, readSceneBootstrap } from '@/lib/server/scene-editor';
@@ -26,7 +26,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
     const title = body.title.trim();
     const edits = saveSceneEdits(id, body.revision, title === scene.title ? null : title, capture);
-    return adminResponse({ ok: true, edits, scene: editedListing(scene, edits) });
+    return adminResponse({ ok: true, edits, scene: tourNamedListing(editedListing(scene, edits), readSceneTourTitles().get(id)) });
   } catch (error) {
     return adminResponse({ error: error instanceof Error ? error.message : 'Unable to save.' }, error instanceof EditConflict ? 409 : 400);
   }

@@ -21,6 +21,14 @@ export function editedListing(scene: SceneListing, edits?: SceneEdits): SceneLis
     thumbnail: edits.thumbnailVersion ? `/api/scenes/${scene.sceneId}/thumbnail?v=${edits.thumbnailVersion}` : scene.thumbnail };
 }
 
+/** A space with a titled tour is linked by the tour's name (/s/<id>/the-queen-who-vanished), not the capture's. */
+export function tourNamedListing(scene: SceneListing, tourTitle?: string | null): SceneListing {
+  const title = tourTitle?.trim();
+  if (!title) return scene;
+  const titleSlug = sceneTitleSlug(title);
+  return { ...scene, titleSlug, scenePath: `/s/${scene.sceneId}/${titleSlug}` };
+}
+
 export function openingSpace(bootstrap: SphrBootstrap): SphrSpace {
   const segment = (bootstrap.tour?.tour_data?.spaces ?? bootstrap.tour?.tour_data?.tourmodels)?.[0];
   return bootstrap.orderedSpaces?.find(space => String(space.id) === String(segment?.id)) ?? bootstrap.space;

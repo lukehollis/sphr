@@ -3,8 +3,8 @@ import path from "node:path";
 import { cache } from "react";
 import type { SceneListing } from "@/lib/scene-types";
 import { parseSceneCatalog } from "./scene-catalog-data";
-import { isScenePublic, readSceneEdits } from "./server/admin-store";
-import { editedListing } from "./scene-edits";
+import { isScenePublic, readSceneEdits, readSceneTourTitles } from "./server/admin-store";
+import { editedListing, tourNamedListing } from "./scene-edits";
 import { isAdmin } from "./server/auth";
 import { accountsEnabled, sceneAccess } from "./server/accounts";
 import { readCustomerListings } from "./server/accounts-store";
@@ -45,7 +45,8 @@ function withCustomerScenes(scenes: SceneListing[]) {
 
 export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
   const edits = readSceneEdits();
-  return (await readSourceScenes()).map(scene => editedListing(scene, edits.get(scene.sceneId)));
+  const tours = readSceneTourTitles();
+  return (await readSourceScenes()).map(scene => tourNamedListing(editedListing(scene, edits.get(scene.sceneId)), tours.get(scene.sceneId)));
 });
 
 export const readSceneCatalog = cache(async (): Promise<SceneListing[]> => {

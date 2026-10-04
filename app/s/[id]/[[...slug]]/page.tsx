@@ -12,7 +12,15 @@ import { readSpaceInfo } from "@/lib/server/space-info";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 
 export const dynamic = "force-dynamic";
-type Props = { params: Promise<{ id: string; slug?: string[] }> };
+type Props = { params: Promise<{ id: string; slug?: string[] }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
+
+/** The canonical path with the request's own query kept, so embed and viewer options survive a renamed link. */
+function withQuery(path: string, query: Record<string, string | string[] | undefined> = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) search.append(key, item);
+  const text = search.toString();
+  return text ? `${path}?${text}` : path;
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const scene = await findScene((await params).id);
@@ -28,15 +36,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function ScenePage({ params }: Props) {
+export default async function ScenePage({ params, searchParams }: Props) {
   const { id, slug } = await params;
   const scene = /^[a-f0-9]{12}$/.test(id) ? (await readAllScenes()).find(item => item.sceneId === id) : undefined;
   if (!scene) notFound();
   const access = await sceneAccess(id);
   if (access === "unavailable") notFound();
   if (access === "login") redirect(loginPath(scene.scenePath));
-  // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
-  if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
+  // Resolve by ID. Old titles and ID-only links lead to the current canonical URL, named after the
+  // space's tour when it has a titled one.
+  if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(withQuery(scene.scenePath, await searchParams));
   const [variants, reconstruction] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id)]);
   return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction }} preview={{ title: scene.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)} />;
 }

@@ -238,6 +238,25 @@ test('stores tours with revision checks', () => {
   assert.deepEqual(readSceneTour('abcdefabcdef'), { experience: null, revision: 2 });
 });
 
+test('a space with a titled tour is linked by the tour name', async () => {
+  const { tourNamedListing } = await import('../lib/scene-edits.ts');
+  const listing = { sceneId: 'fedcbafedcba', title: 'The Tomb of Tausert and Setnakht (KV 14)', titleSlug: 'the-tomb-of-tausert-and-setnakht-kv-14',
+    scenePath: '/s/fedcbafedcba/the-tomb-of-tausert-and-setnakht-kv-14' };
+  store.saveSceneTour('fedcbafedcba', 0, parseExperience({ ...tour(), title: 'The Queen Who Vanished' }));
+  store.saveSceneTour('0123456789ab', 0, parseExperience(tour()));
+  const titles = store.readSceneTourTitles();
+  assert.equal(titles.get('fedcbafedcba'), 'The Queen Who Vanished');
+  assert.equal(titles.has('0123456789ab'), false, 'an untitled tour keeps the space name');
+  const named = tourNamedListing(listing, titles.get('fedcbafedcba'));
+  assert.equal(named.scenePath, '/s/fedcbafedcba/the-queen-who-vanished');
+  assert.equal(named.titleSlug, 'the-queen-who-vanished');
+  assert.equal(named.title, listing.title, 'the space keeps its own title');
+  assert.equal(tourNamedListing(listing, undefined), listing);
+  assert.equal(tourNamedListing(listing, '  '), listing);
+  store.saveSceneTour('fedcbafedcba', 1, null);
+  assert.equal(store.readSceneTourTitles().has('fedcbafedcba'), false, 'removing the tour gives the space its own name back');
+});
+
 test('the agent sees the library models that match the request, under codes it can place', () => {
   const library = [
     ...Array.from({ length: 30 }, (_, index) => ({ id: `chair-${index}`, name: `Chair ${index}`, category: 'Furniture', url: `https://cdn.example/chair-${index}.glb`, height: 1 })),

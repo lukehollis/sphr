@@ -1,4 +1,4 @@
-import { readSceneEdits } from "./admin-store";
+import { readSceneEdits, readSceneTourTitles } from "./admin-store";
 import { isScenePublic, sceneBuildersChoice } from "./admin-store";
 import { latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
@@ -6,12 +6,12 @@ import { spaceHosted } from "./accounts";
 import { sourceUrl } from "./brand";
 import { maxSpaceBytes } from "./uploads";
 import { readSourceScenes } from "../scene-catalog";
-import { editedListing } from "../scene-edits";
+import { editedListing, tourNamedListing } from "../scene-edits";
 
 /** The customer's view of one space, with its published scene once processing has finished. */
 export async function describeSpace(space: CustomerSpace) {
   const scene = space.sceneId ? (await readSourceScenes().catch(() => [])).find(item => item.sceneId === space.sceneId) : undefined;
-  const listing = scene && editedListing(scene, readSceneEdits().get(scene.sceneId));
+  const listing = scene && tourNamedListing(editedListing(scene, readSceneEdits().get(scene.sceneId)), readSceneTourTitles().get(scene.sceneId));
   const job = latestJob(space.id);
   return {
     id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, output: space.output, message: space.message,
