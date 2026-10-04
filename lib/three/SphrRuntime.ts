@@ -318,7 +318,7 @@ export class SphrRuntime {
     this.updateControlsForViewMode();
     this.prepareEarth(outgoingNode);
     const earth = this.earth;
-    const earthPoint = nextViewMode === "ORBIT" && Boolean(earth && this.earthPlace() && point.earth);
+    const earthPoint = nextViewMode === "ORBIT" && Boolean(earth?.available && this.earthPlace() && point.earth);
     const climbing = earthPoint && !fromOverview && !instant;
     if (this.isNavigating) this.nav?.beginTransition();
     this.nav?.setOrbit(nextViewMode === "ORBIT");
@@ -1558,7 +1558,8 @@ export class SphrRuntime {
 
   private earthPoseFor(point: TourPoint): CameraPose | null {
     const place = this.earthPlace();
-    if (!place || !point.earth) return null;
+    // Without the map (no key on this site), the stop shows the usual overview instead.
+    if (!place || !point.earth || this.earth?.available === false) return null;
     return earthPose(this.earthTarget(point), point.earth, point.rotation, place.scale ?? 1);
   }
 

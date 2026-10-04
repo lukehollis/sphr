@@ -61,6 +61,8 @@ export class EarthLayer {
   }
 
   get ready() { return Boolean(this.tiles) && !this.failed; }
+  /** False once the site turns out to have no key, or the map cannot load. */
+  get available() { return !this.failed; }
   get visible() { return this.target > 0.001; }
   get opacity() { return this.target; }
 
@@ -97,8 +99,10 @@ export class EarthLayer {
   load(): Promise<boolean> {
     this.loading ??= this.create().catch((error) => {
       console.warn("The 3D map could not load.", error);
-      this.failed = true;
       return false;
+    }).then((loaded) => {
+      if (!loaded) this.failed = true;
+      return loaded;
     });
     return this.loading;
   }
@@ -124,19 +128,20 @@ export class EarthLayer {
 
   setOpacity(value: number) {
     this.target = THREE.MathUtils.clamp(value, 0, 1);
-    this.sky.visible = this.visible;
-    this.sky.material.uniforms.opacity.value = this.target;
-    // The dots come in only once the camera is well above the ground.
-    this.path.material.opacity = THREE.MathUtils.smoothstep(this.target, 0.6, 1) * 0.95;
-    this.path.visible = this.path.material.opacity > 0.01;
     this.show();
   }
 
+  /** The map, its sky and the dots show only once the map's ground meets the floor. */
   private show() {
     const shown = this.grounded ? this.target : 0;
     if (Math.abs(shown - this.shown) < 1e-4) return;
     this.shown = shown;
     this.group.visible = shown > 0.001;
+    this.sky.visible = this.group.visible;
+    this.sky.material.uniforms.opacity.value = shown;
+    // The dots come in only once the camera is well above the ground.
+    this.path.material.opacity = THREE.MathUtils.smoothstep(shown, 0.6, 1) * 0.95;
+    this.path.visible = this.path.material.opacity > 0.01;
     for (const material of this.materials) this.applyOpacity(material);
   }
 
