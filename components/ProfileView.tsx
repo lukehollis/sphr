@@ -96,8 +96,8 @@ export default function ProfileView({ brand, profile, nav }: { brand: string; pr
           </a>
           <div className="space-card-body">
             <h3><a href={tour.path}>{tour.title}</a></h3>
-            <p className="profile-card-line"><span>{tour.space ? `In ${tour.space}` : plural(tour.stops, "stop", "stops")}</span>
-              <span className="profile-hearts" aria-label={plural(tour.hearts, "heart", "hearts")}><Heart size={13} aria-hidden="true" />{tour.hearts}</span></p>
+            <p className="profile-card-line"><span>{tour.space ? `In ${tour.space}` : tour.stops ? plural(tour.stops, "stop", "stops") : null}</span>
+              {tour.hearts !== null && <span className="profile-hearts" aria-label={plural(tour.hearts, "heart", "hearts")}><Heart size={13} aria-hidden="true" />{tour.hearts}</span>}</p>
           </div>
         </article>)}</div>
       </section>}

@@ -306,7 +306,7 @@ const captureKey = (space: PickerSpace) => `${space.nodeCount}:${space.title.toL
  * (objects are placed against it) or else the space rather than the tour. The others still
  * work by their links and IDs.
  */
-function onePerCapture(spaces: PickerSpace[]) {
+export function onePerCapture(spaces: PickerSpace[]) {
   const rank = (space: PickerSpace) => (space.hasMesh ? 4 : 0) + (space.legacyKind === "space" ? 2 : 0) + (space.guided ? 0 : 1);
   const best = new Map<string, PickerSpace>();
   for (const space of spaces) {

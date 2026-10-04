@@ -135,7 +135,11 @@ a bio, a location, a website, a profile picture and a cover. A profile starts wi
 gave) is published until its owner fills it in. Pictures are cropped to shape (512 by 512 and 2400
 by 800), re-encoded as WebP without their metadata, and kept under `SPHR_STATE_DIR/profile-files/`.
 A profile lists its owner's shared tours and public hosted spaces, with follower counts, a follow
-button and a share button; one that has shared nothing is kept out of search results.
+button and a share button; one that has shared nothing is kept out of search results. Anything
+titled as a test ("[test] …" or "(… test)") is left off profiles, though its link still opens. The profile
+of the operator's own account (`SPHR_OPERATOR_ACCOUNT`, once its email is confirmed) also lists the
+site's public spaces, one per capture, and the site's guided tours (the collection's older tours and
+any built in the admin), linking to their spaces' pages.
 
 Signed-in people follow each other (`PUT`/`DELETE /api/follows/<handle>`) and heart tours they can
 open (`PUT`/`DELETE /api/hearts/<tour id>`, the heart beside the guide switch on a tour's page, which
@@ -207,6 +211,9 @@ SPHR_CONTACT_EMAIL=support@example.com
 # The operator's own website. When set, the viewer shows the site name above each space's
 # title and a "Hosted on" link in a corner, both leading there with utm_source=viewer.
 # SPHR_OPERATOR_URL=https://example.com
+# The email address of the account of the person who runs the site. Its profile also lists the
+# site's own public spaces and their guided tours.
+# SPHR_OPERATOR_ACCOUNT=owner@example.com
 ```
 
 Restart the service after changing these. Accounts, sessions, subscriptions, spaces,
