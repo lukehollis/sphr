@@ -66,10 +66,8 @@ export default function HudControls({
       {/* Google's credit takes this corner while its 3D map is in view. */}
       {(build || host) && !state.earth && <div className="viewer-corner">
         {build && <a className="viewer-build" href={build} onClick={(event) => trackBuildClick(event.currentTarget.href)}>Build on this space</a>}
-        {host && <a className="viewer-host" href={hostHref(host, "badge")} target="_blank" rel="noopener"
-          onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>
-          Hosted on <span className={pixelFont.className}>{host.name}</span>
-        </a>}
+        {host && <a className={`viewer-host ${pixelFont.className}`} href={hostHref(host, "badge")} target="_blank" rel="noopener"
+          title={`Hosted on ${host.name}`} onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>{host.name}</a>}
       </div>}
     </>
   );
