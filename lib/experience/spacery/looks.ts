@@ -72,6 +72,46 @@ export const spaceryLooks: LookEntry[] = [
     `
   },
   {
+    id: "flashlight",
+    label: "Flashlight",
+    description: "Pitch dark except a warm flashlight beam wherever the view points, with a little flicker and dust drifting in the light. Good for tombs, caves and night hunts.",
+    params: [
+      amount("size", "Beam size", 0.32, 0.15, 0.6),
+      amount("power", "Brightness", 1.15, 0.6, 2),
+      amount("dark", "Light around the beam", 0.05, 0, 0.3),
+      amount("warmth", "Warmth", 0.6),
+      amount("flicker", "Flicker", 0.3),
+      amount("dust", "Dust in the beam", 0.4)
+    ],
+    glsl: /* glsl */ `
+      vec2 aspect = vec2(uResolution.x / uResolution.y, 1.0);
+      // A hand holds the light, so it drifts a little and trembles a little.
+      vec2 sway = (vec2(NOISE(vec2(uTime * 0.31, 3.7)), NOISE(vec2(8.1, uTime * 0.27))) - 0.5) * 0.06
+        + (vec2(NOISE(vec2(uTime * 2.9, 1.3)), NOISE(vec2(5.2, uTime * 3.3))) - 0.5) * 0.006;
+      float r = length((uv - 0.5 - sway) * aspect) / P(size);
+      // A bright hotspot inside the beam, a soft rim from the reflector, and faint spill around it.
+      float hot = 1.0 - smoothstep(0.0, 0.7, r);
+      float body = 1.0 - smoothstep(0.5, 1.05, r);
+      float rim = exp(-pow((r - 0.9) / 0.09, 2.0));
+      float spill = 1.0 - smoothstep(0.9, 2.3, r);
+      float beam = body * 0.6 + hot * 0.45 + rim * 0.08 + spill * 0.16;
+      // Tired batteries: the light breathes, and now and then it stutters.
+      float stutter = step(0.975, HASH(vec2(floor(uTime * 9.0), 7.0)));
+      float flicker = 1.0 - P(flicker) * (0.12 * NOISE(vec2(uTime * 6.0, 2.0)) + 0.45 * stutter);
+      vec3 c = SAMPLE(uv);
+      vec3 warm = mix(vec3(1.0), vec3(1.0, 0.87, 0.68), P(warmth));
+      // Bright stone in the hotspot rolls off instead of burning out.
+      vec3 col = 1.0 - exp(-c * warm * beam * P(power) * flicker * 1.7);
+      // Outside the beam it is dark, but lamps, daylight through a doorway and anything glowing still shows.
+      float glow = smoothstep(0.78, 0.98, LUM(c));
+      col += c * vec3(0.6, 0.68, 0.9) * P(dark) + c * glow * 0.55 * (1.0 - clamp(beam, 0.0, 1.0));
+      // Dust drifting through the light.
+      vec2 g = uv * uResolution / 7.0 + vec2(uTime * 1.6, -uTime * 0.9) + vec2(sin(uTime * 0.7 + uv.y * 6.0), cos(uTime * 0.5 + uv.x * 5.0)) * 2.0;
+      float mote = step(0.996, HASH(floor(g))) * (1.0 - smoothstep(0.1, 0.45, length(fract(g) - 0.5)));
+      return col + mote * 0.35 * P(dust) * clamp(beam, 0.0, 1.0) * warm;
+    `
+  },
+  {
     id: "oldfilm",
     label: "Old film",
     description: "Sepia silent film with grain, flicker, dust and scratches.",

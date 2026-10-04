@@ -71,9 +71,9 @@ with `SphrRuntime.resolveAnchor`. See `docs/tours-and-effects.md`.
   "sweep", "duration": 2, "params": {} }`, or `"color"` for the capture itself.
   Transitions are `cut`, `fade`, `dissolve`, `wipe`, `iris`, `sweep`, `glitch`.
   Core looks are `lines`, `watercolor`, `blueprint`, `noir`; the Spacery pack adds
-  ink, toon, thermal, nightvision, oldfilm, neon, halftone, pixel, duotone, xray,
-  miniature, dream, vhs, infrared, pointillism, splatdots (splats only), cutout,
-  terminal, hologram and cinematic. List them with `lookEntries()`.
+  ink, toon, thermal, nightvision, flashlight, oldfilm, neon, halftone, pixel,
+  duotone, xray, miniature, dream, vhs, infrared, pointillism, splatdots (splats
+  only), cutout, terminal, hologram and cinematic. List them with `lookEntries()`.
   Use a look to mark a moment (a drawing that sweeps into color, blueprint for how
   a building was planned, noir for a mystery), not on every stop. The old `sketch`
   effect is retired in favor of the `lines` look with a `sweep` transition.
