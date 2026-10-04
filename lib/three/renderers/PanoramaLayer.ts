@@ -95,7 +95,10 @@ export type PanoramaStyle = {
 type VariantManifest = {
   styles: Record<string, string>;
   nodes: string[];
-  /** Sky outlines (scripts/skies/masks.py): one digit per face, 0 no sky, 1 part (a mask file), 2 all sky. */
+  /**
+   * Sky outlines (scripts/skies/masks.py): one digit per cube face, 0 no sky, 1 part (a mask
+   * file), 2 all sky; a single equirectangular photo has one digit and its mask is face "e".
+   */
   sky?: { template: string; nodes: Record<string, string> };
 };
 type PanoVariant = { urls: string[]; ready: boolean };
@@ -387,8 +390,10 @@ export class PanoramaLayer {
       sphere.renderOrder = -10;
       sphere.rotation.copy(eulerFromLike(node.rotation));
       group.add(sphere);
-      // Drawn versions exist for cube faces only.
-      return { node, group, materials: [material], urls };
+      // Drawn versions exist for cube faces only; sky outlines for both.
+      const pano = { node, group, materials: [material], urls };
+      this.attachSky(pano);
+      return pano;
     }
 
     const materials: THREE.Material[] = [];
@@ -503,9 +508,10 @@ export class PanoramaLayer {
 
   private attachSky(pano: PanoObject) {
     const outlines = this.skyOutlines;
-    if (!this.skyWanted || !outlines || pano.materials.length !== 6 || this.panoSkies.has(pano)) return;
+    if (!this.skyWanted || !outlines || this.panoSkies.has(pano)) return;
     const codes = outlines.nodes[pano.node.uuid];
-    if (typeof codes !== "string") return;
+    // Six digits for cube faces, one for a single equirectangular photo.
+    if (typeof codes !== "string" || codes.length !== pano.materials.length) return;
     const urls: string[] = [];
     this.panoSkies.set(pano, urls);
     pano.materials.forEach((material, face) => {
@@ -513,7 +519,7 @@ export class PanoramaLayer {
       if (!uniforms) return;
       if (codes[face] === "2") { uniforms.uSkyFace.value = 2; return; }
       if (codes[face] !== "1") return;
-      const url = outlines.template.replace("{uuid}", encodeURIComponent(pano.node.uuid)).replace("{face}", String(face));
+      const url = outlines.template.replace("{uuid}", encodeURIComponent(pano.node.uuid)).replace("{face}", codes.length === 1 ? "e" : String(face));
       urls.push(url);
       this.textureCache.retain([url]);
       void this.textureCache.loadAsync(url).then((texture) => {

@@ -10,7 +10,9 @@ reads from SPHR_LINES_BASE_URL/<sceneId>/index.json:
 
     "sky": {"template": ".../<sceneId>/sky/{uuid}/{face}.jpg", "nodes": {"<uuid>": "221100"}}
 
-with one digit per face: 0 no sky, 1 part sky (a mask file), 2 all sky.
+with one digit per cube face: 0 no sky, 1 part sky (a mask file), 2 all sky. A location shown
+as one equirectangular image (customers' 360 photos) has a single digit, and its mask is
+`{face}` = `e`.
 
     python3 scripts/skies/masks.py scan                       # which catalog spaces are outdoors
     python3 scripts/skies/masks.py scene --scene <id> --work <cache> --out <dir>
@@ -51,14 +53,15 @@ class SkyModel:
         self.model = UperNetForSemanticSegmentation.from_pretrained(MODEL).to(self.device).eval()
         self.sky = next(int(i) for i, name in self.model.config.id2label.items() if name.lower() == "sky")
 
-    def __call__(self, images: list[np.ndarray]) -> list[np.ndarray]:
-        """Sky probability (0..1) at INPUT size for RGB images."""
+    def __call__(self, images: list[np.ndarray], size: tuple[int, int] = (INPUT, INPUT)) -> list[np.ndarray]:
+        """Sky probability (0..1) for RGB images, at `size` (width, height; multiples of 32)."""
         torch = self.torch
-        batch = [cv2.resize(image, (INPUT, INPUT), interpolation=cv2.INTER_AREA) for image in images]
+        width, height = size
+        batch = [cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA) for image in images]
         inputs = self.processor(images=batch, do_resize=False, return_tensors="pt").to(self.device)
         with torch.no_grad():
             logits = self.model(**inputs).logits
-            logits = torch.nn.functional.interpolate(logits, size=(INPUT, INPUT), mode="bilinear", align_corners=False)
+            logits = torch.nn.functional.interpolate(logits, size=(height, width), mode="bilinear", align_corners=False)
             probability = logits.softmax(1)[:, self.sky].float().cpu().numpy()
         return list(probability)
 
@@ -74,9 +77,9 @@ def guided(guide: np.ndarray, source: np.ndarray, radius: int = 6, eps: float = 
     return box(a) * guide + box(b)
 
 
-def refine(rgb: np.ndarray, probability: np.ndarray) -> np.ndarray:
-    gray = cv2.cvtColor(cv2.resize(rgb, (MASK, MASK), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32) / 255
-    mask = cv2.resize(probability.astype(np.float32), (MASK, MASK), interpolation=cv2.INTER_LINEAR)
+def refine(rgb: np.ndarray, probability: np.ndarray, size: tuple[int, int] = (MASK, MASK)) -> np.ndarray:
+    gray = cv2.cvtColor(cv2.resize(rgb, size, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32) / 255
+    mask = cv2.resize(probability.astype(np.float32), size, interpolation=cv2.INTER_LINEAR)
     mask = guided(gray, mask)
     t = np.clip((mask - 0.3) / 0.4, 0, 1)
     return t * t * (3 - 2 * t)
@@ -104,18 +107,52 @@ def nodes_for(a):
 
 
 def cube_nodes(nodes):
-    """Nodes drawn from cube faces; single equirectangular images have no faces to outline."""
+    """Nodes drawn from cube faces."""
     return [node for node in nodes if node.get("faces") or node.get("cubeFaces") or node.get("textureTemplate") or not node.get("image")]
 
 
+def equirect_nodes(nodes):
+    """Nodes drawn from one equirectangular image (customers' 360 photos), outlined whole as face "e"."""
+    return [node for node in nodes if node.get("image") and not (node.get("faces") or node.get("cubeFaces") or node.get("textureTemplate"))]
+
+
+EQUIRECT_INPUT = (1152, 576)  # width, height, multiples of 32
+EQUIRECT_MASK = (1024, 512)
+
+
+def outline_equirect(model_for, nodes, work: Path, cache: Path, workers: int):
+    """Codes ("0", "1" or "2") for equirectangular nodes, masks written as <uuid>/e.jpg in the cache."""
+    codes, pending = {}, []
+    for node in nodes:
+        known = cache / node["uuid"] / "codes.txt"
+        if known.exists():
+            codes[node["uuid"]] = known.read_text().strip()
+        else:
+            pending.append(node)
+    with futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda node: download(node["image"], work / node["uuid"] / "e.jpg"), pending))
+    for node in pending:
+        rgb = read_rgb(work / node["uuid"] / "e.jpg")
+        mask = refine(rgb, model_for()([rgb], EQUIRECT_INPUT)[0], EQUIRECT_MASK)
+        share = float(mask.mean())
+        code = "0" if share < 0.004 else "2" if share > 0.996 else "1"
+        (cache / node["uuid"]).mkdir(parents=True, exist_ok=True)
+        if code == "1":
+            cv2.imwrite(str(cache / node["uuid"] / "e.jpg"), (mask * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 90])
+        (cache / node["uuid"] / "codes.txt").write_text(code)
+        codes[node["uuid"]] = code
+    return codes, len(pending)
+
+
 def cmd_scene(a):
-    title, nodes = nodes_for(a)
-    nodes = cube_nodes(nodes)
+    title, every = nodes_for(a)
+    nodes = cube_nodes(every)
+    equirects = equirect_nodes(every)
     work, out = Path(a.work) / "faces", Path(a.out) / a.scene
     done = Path(a.work) / "sky"
     jobs = [(url, work / node["uuid"] / f"{face}.jpg") for node in nodes if not (done / node["uuid"] / "codes.txt").exists()
             for face, url in enumerate(face_urls(node)) if face in FACES]
-    print(f"{a.scene} {title}: {len(nodes)} locations, {len(jobs)} faces")
+    print(f"{a.scene} {title}: {len(nodes)} cube locations, {len(jobs)} faces, {len(equirects)} equirectangular locations")
     started = time.time()
     with futures.ThreadPoolExecutor(max_workers=a.workers) as pool:
         list(pool.map(lambda job: download(*job), jobs))
@@ -130,7 +167,9 @@ def cmd_scene(a):
             codes[node["uuid"]] = known.read_text().strip()
         else:
             pending += [(node["uuid"], face) for face in FACES]
-    model = SkyModel(a.device) if pending else None
+    loaded: list[SkyModel] = []
+    model_for = lambda: loaded[0] if loaded else (loaded.append(SkyModel(a.device)) or loaded[0])  # noqa: E731
+    model = model_for() if pending else None
     started = time.time()
     fresh: dict[str, str] = {}
     for start in range(0, len(pending), a.batch):
@@ -153,16 +192,21 @@ def cmd_scene(a):
             print(f"  {start + len(chunk)} of {len(pending)} faces, {time.time() - started:.0f} s", flush=True)
     codes.update(fresh)
     print(f"  outlined {len(pending)} faces in {time.time() - started:.0f} s ({len(nodes) - len(pending) // len(FACES)} locations already done)")
+    if equirects:
+        equirect_codes, outlined = outline_equirect(model_for, equirects, work, cache, a.workers)
+        codes.update(equirect_codes)
+        print(f"  outlined {outlined} equirectangular photos ({len(equirects) - outlined} already done)")
     # Copy this space's outlines next to its manifest.
     for uuid, code in codes.items():
         for face, digit in enumerate(code):
             if digit != "1":
                 continue
-            source, destination = cache / uuid / f"{face}.jpg", out / "sky" / uuid / f"{face}.jpg"
+            name = "e" if len(code) == 1 else str(face)
+            source, destination = cache / uuid / f"{name}.jpg", out / "sky" / uuid / f"{name}.jpg"
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
                 destination.write_bytes(source.read_bytes())
-    with_sky = {uuid: code for uuid, code in codes.items() if code != "000000"}
+    with_sky = {uuid: code for uuid, code in codes.items() if code.strip("0")}
     # Merge into the drawn-versions manifest, keeping any line drawings already listed.
     manifest_path = out / "index.json"
     try:
@@ -172,7 +216,7 @@ def cmd_scene(a):
     manifest["sky"] = {"template": f"{PUBLIC_BASE}/{a.scene}/sky/{{uuid}}/{{face}}.jpg", "size": MASK, "nodes": with_sky}
     out.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=1))
-    print(f"  {len(with_sky)} of {len(nodes)} locations see sky; wrote {manifest_path}")
+    print(f"  {len(with_sky)} of {len(nodes) + len(equirects)} locations see sky; wrote {manifest_path}")
 
 
 def cmd_scan(a):
