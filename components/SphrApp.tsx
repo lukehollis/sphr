@@ -233,6 +233,17 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
   }, [showingCopy, activePoint, runtimeState.hunt?.hint, runtimeState.hunt?.found.length]);
 
+  // A page that shows this hunt in a frame (a school library keeping players' progress, say) hears
+  // each find and the finish: the found objects' ids, the number of finds and whether it's finished.
+  const foundKey = runtimeState.hunt?.found.join("\n") ?? "";
+  useEffect(() => {
+    if (!hunt || editor || !started || window.parent === window) return;
+    window.parent.postMessage({
+      type: "spacery:hunt", page: window.location.pathname,
+      found: foundKey ? foundKey.split("\n") : [], steps: huntSteps.length, finished: runtimeState.finished
+    }, "*");
+  }, [hunt, editor, started, foundKey, huntSteps.length, runtimeState.finished]);
+
   return (
     <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
