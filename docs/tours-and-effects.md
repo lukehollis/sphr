@@ -212,6 +212,17 @@ below its frame, turns toward them instead, keeping them a little right of
 center and tilting no more than 35 degrees down. A
 space without a capture mesh uses the floor under each location as the ground.
 
+A space without panoramas (a Gaussian splat or a 3D model) has no photographs
+to show the agent, so `lib/server/space-views.ts` draws four views of it on the
+server: the splat's points at their own size (streamed from `.splat` or `.ply`,
+a sample of up to 900,000) or the model's triangles as a clay render, from the
+start view and the turns and orbits around it that show the most of the space.
+Each view keeps a depth buffer, so a pixel the agent points at becomes a point
+in the space, and a stop aimed in a view stands at that view's camera. Views
+are drawn once per space (a few seconds) and kept under
+`SPHR_STATE_DIR/space-views`; in the builder they are sent with the person's own
+view, and spots in them are placed on the server.
+
 ## Checks
 
 ```bash

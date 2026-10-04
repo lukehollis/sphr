@@ -110,7 +110,9 @@ agent can build one end to end:
 Drafts started by an agent are placed on the server (`lib/server/tour-placement.ts`)
 exactly as the builder places them: rays from each pixel the drafting agent chose,
 cast against the capture mesh (`lib/server/capture-mesh.ts`), with the shared rules
-in `lib/experience/placement.ts`. Still check the result in the viewer or a
+in `lib/experience/placement.ts`. Splat and model spaces have no photographs, so the
+server draws views of them with depth (`lib/server/space-views.ts`) for the agent to
+point into; stops then stand at those views' cameras. Still check the result in the viewer or a
 screenshot, and adjust positions in `save_tour` when something hides behind a wall.
 
 From a shell, the local connector runs the same tools:

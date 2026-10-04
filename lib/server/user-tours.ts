@@ -230,7 +230,7 @@ export async function describeTours(userId: string) {
 }
 export type TourView = Awaited<ReturnType<typeof describeTours>>[number];
 
-export type PickerSpace = { sceneId: string; title: string; thumbnail: string; nodeCount: number; guided: boolean; createdAt: string };
+export type PickerSpace = { sceneId: string; title: string; thumbnail: string; nodeCount: number; guided: boolean; createdAt: string; sourceType?: string };
 
 /** The spaces a customer can build on: their own finished spaces, and the operator's public ones. */
 export async function buildableSpaces(userId: string) {
@@ -238,7 +238,7 @@ export async function buildableSpaces(userId: string) {
   const spacery: PickerSpace[] = [];
   for (const scene of await readAllScenes()) {
     if (!canBuildOn(userId, scene)) continue;
-    const item = { sceneId: scene.sceneId, title: scene.title, thumbnail: scene.thumbnail, nodeCount: scene.nodeCount,
+    const item = { sceneId: scene.sceneId, title: scene.title, thumbnail: scene.thumbnail, nodeCount: scene.nodeCount, sourceType: scene.sourceType,
       guided: scene.hasGuidedTour ?? scene.legacy?.kind === "tour", createdAt: scene.createdAt };
     (isOperatorScene(scene.sceneId) ? spacery : own).push(item);
   }

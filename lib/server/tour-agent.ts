@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
 import { effectEntries, lookEntries, shapeEntries, soundEntries } from "@/lib/experience/packs";
 import { paramSummary } from "@/lib/experience/catalog";
+import type { SpaceView } from "./space-views";
 import { LOOK_TRANSITIONS } from "@/lib/experience/types";
 import { describeModel, searchLibrary } from "@/lib/experience/library-search";
 import { parseExperience } from "@/lib/experience/validate";
@@ -151,7 +152,7 @@ export function resolveLibraryCodes(raw: RawDraft, codes: Map<string, string>, l
   return raw;
 }
 
-export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "", drawn: string[] = []) {
+export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "", drawn: string[] = [], spaceViews: SpaceView[] = []) {
   const space = bootstrap.space;
   const data = space.space_data;
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
@@ -168,6 +169,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
       if (image) images.push({ label: `location ${node.uuid} panorama (equirectangular, no face)`, data: image });
     }
   }));
+  for (const view of spaceViews) images.push({ label: `view ${view.id}`, data: view.image });
   for (const view of views.slice(0, 4)) {
     const image = decodeClientImage(view.image);
     if (image) images.push({ label: `view ${view.id}`, data: image });
@@ -182,6 +184,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(bootstrap.tour?.tour_data?.sceneGraph ?? data.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
     nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
+    spaceViews.length ? `This space has no panoramas, so it is shown in views drawn from its 3D ${bootstrap.space.space_data.splats?.length ? "Gaussian splat as dots of color (the real space is sharp and continuous)" : "model as a plain clay render (the real model has its own colors)"}: ${spaceViews.map((view) => `${view.id} from ${view.camera.position.map((value) => round(value)).join(" ")} heading ${round(view.camera.azimuth, 1)} tilt ${round(view.camera.polar, 1)}`).join("; ")}. Place objects, point effects and stops with {"view": view id, "x", "y"} on these images. A stop stands where its view's camera is and looks at the pixel you give, so give every stop a look in one of these views, and point at surfaces (the ground, a table, a wall), not empty background.` : "",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
     `Effects you can use:\n${effectEntries().filter((entry) => !entry.retired).map((entry) => `${entry.type} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""} Targets ${entry.targets.join(", ")}. Params ${entry.params.map(paramSummary).join(", ")}.`).join("\n")}`,
     `Sounds for the sound and music effects (use the ID as the sound or track param, or an https audio file address):\n${soundEntries().map((entry) => `${entry.id} (${entry.kind}): ${entry.label}. ${entry.description}`).join("\n")}`,
@@ -201,7 +204,7 @@ A tour is a sequence of stops. Each stop stands at a panorama location (or a fre
 
 You always answer by calling the write_tour tool exactly once with the complete new draft. Keep everything from the current draft that the request does not change, including IDs, text the person wrote and object positions they set.
 
-Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a client view. Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Place objects a few meters out in the scene where a visitor will see them, never on the floor right below the camera, which is where the visitor stands. Keep each object within about 3 to 15 meters of the location of the stop that shows it and inside that stop's view: much farther away a life-size thing is too small to notice, so in a large space point at a spot near the stop rather than across it. In a guided tour, place a stop's objects by pointing into the same image you aimed that stop with, near what it looks at, so they are in its view. Keep an existing object's position by leaving its position as it is and place null.
+Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a view (one the person sent, or one drawn of a space without panoramas). Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Place objects a few meters out in the scene where a visitor will see them, never on the floor right below the camera, which is where the visitor stands. Keep each object within about 3 to 15 meters of the location of the stop that shows it and inside that stop's view: much farther away a life-size thing is too small to notice, so in a large space point at a spot near the stop rather than across it. In a guided tour, place a stop's objects by pointing into the same image you aimed that stop with, near what it looks at, so they are in its view. Keep an existing object's position by leaving its position as it is and place null.
 
 Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues describe where to look without naming the exact spot; hints are more direct; found messages reward the visitor with one real detail about the place. Hunt steps should start from a location where the object is reachable but not in the middle of the view.
 
@@ -483,9 +486,14 @@ async function viaService(context: { text: string; images: AgentImage[] }, histo
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.SPHR_TOUR_AGENT_TOKEN ?? ""}` },
       body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images }),
-      signal: AbortSignal.timeout(330_000)
+      // Long enough to wait behind other drafts in the service's queue, then draft.
+      signal: AbortSignal.timeout(900_000)
     });
-  } catch { throw new TourAgentError("The agent is not reachable right now. Try again in a minute."); }
+  } catch (failure) {
+    throw new TourAgentError((failure as Error).name === "TimeoutError"
+      ? "The tour agent took too long, usually because several drafts were waiting. Try again in a few minutes."
+      : "The tour agent is not reachable right now. Try again in a minute.");
+  }
   const result = await response.json().catch(() => ({})) as { output?: string; error?: string };
   if (!response.ok || typeof result.output !== "string") throw new TourAgentError(result.error || "The agent could not finish. Try again.");
   return extractJson(result.output);
@@ -520,11 +528,13 @@ export async function composeTour(options: {
   bootstrap: SphrBootstrap; draft: Experience; prompt: string; history: AgentTurn[]; views: ClientView[]; origin: string; kind: "tour" | "hunt"; team?: boolean;
   /** Drawn versions of the space (from its variants manifest or companion splats), such as contour and watercolor. */
   drawn?: string[];
+  /** Views drawn on the server of a space without panoramas (see space-views.ts). */
+  spaceViews?: SpaceView[];
 }): Promise<AgentResult & { library: LibraryModel[] }> {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
-  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn);
+  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
   const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()

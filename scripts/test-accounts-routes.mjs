@@ -413,7 +413,7 @@ try {
   const agentApi = (route, init = {}) => fetch(base + route, { ...init, headers: { Authorization: `Bearer ${agentToken}`,
     ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}), ...init.headers } });
   body = await (await agentApi('/api/account/tours/spaces?q=operator')).json();
-  assert.deepEqual(body.spaces, [{ sceneId: '0a0a0a0a0a01', title: 'Operator hall', locations: 1, whose: 'spacery' }], 'agents search the spaces they can build on');
+  assert.deepEqual(body.spaces, [{ sceneId: '0a0a0a0a0a01', title: 'Operator hall', locations: 1, kind: 'panoramas', whose: 'spacery' }], 'agents search the spaces they can build on');
   body = await (await agentApi('/api/account/tours/spaces')).json();
   assert.ok(body.spaces.some(space => space.sceneId === reserved && space.whose === 'own') && !body.spaces.some(space => space.sceneId === '0a0a0a0a0a02'));
   assert.equal((await fetch(`${base}/api/account/tours/spaces`)).status, 401);

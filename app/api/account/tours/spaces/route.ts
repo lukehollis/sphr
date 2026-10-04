@@ -10,6 +10,8 @@ export async function GET(request: Request) {
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 40) || 40));
   const match = (title: string) => terms.every((term) => title.toLowerCase().includes(term));
   const { own, spacery } = await buildableSpaces(user.id);
-  const describe = (whose: "own" | "spacery") => (space: (typeof own)[number]) => ({ sceneId: space.sceneId, title: space.title, locations: space.nodeCount, whose });
+  // What kind of capture it is: 360 photos to stand in, a Gaussian splat or a 3D model.
+  const kind = (space: (typeof own)[number]) => space.nodeCount > 0 ? "panoramas" : space.sourceType === "model" ? "model" : space.sourceType === "splat" ? "splat" : "other";
+  const describe = (whose: "own" | "spacery") => (space: (typeof own)[number]) => ({ sceneId: space.sceneId, title: space.title, locations: space.nodeCount, kind: kind(space), whose });
   return accountResponse({ spaces: [...own.filter((space) => match(space.title)).map(describe("own")), ...spacery.filter((space) => match(space.title)).map(describe("spacery"))].slice(0, limit) });
 }

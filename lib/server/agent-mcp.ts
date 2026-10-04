@@ -251,8 +251,9 @@ function describeTour(context: McpContext, tour: any) {
 async function findTourSpaces(args: Record<string, unknown>, context: McpContext) {
   const { spaces } = await call(context, tourSpacesRoute as never, `/api/account/tours/spaces?q=${encodeURIComponent(String(args.query ?? ""))}&limit=30`);
   if (!spaces.length) return `No spaces match ${JSON.stringify(args.query ?? "")}. Try fewer or other words.`;
+  const kinds: Record<string, string> = { panoramas: "360 photos", splat: "a Gaussian splat", model: "a 3D model" };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return spaces.map((space: any) => `${space.sceneId}: ${space.title} (${space.whose === "own" ? "your space" : `${siteBrand()} space`}${space.locations ? `, ${space.locations} places to stand` : ""})`).join("\n");
+  return spaces.map((space: any) => `${space.sceneId}: ${space.title} (${space.whose === "own" ? "your space" : `${siteBrand()} space`}${kinds[space.kind] ? `, ${kinds[space.kind]}` : ""}${space.locations ? `, ${space.locations} places to stand` : ""})`).join("\n");
 }
 
 async function listTours(_args: Record<string, unknown>, context: McpContext) {

@@ -7,6 +7,7 @@ import { cameraDirection, sceneGroupSettings, worldFromGroupedPoint } from "@/li
 import { panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
 import type { SphrBootstrap } from "@/lib/types";
 import type { AgentAnchors } from "@/lib/server/tour-agent";
+import { pointInView, type SpaceView } from "@/lib/server/space-views";
 
 /**
  * Places an agent's draft without a browser, for people's own agents that build tours
@@ -15,7 +16,7 @@ import type { AgentAnchors } from "@/lib/server/tour-agent";
  * (see capture-mesh.ts), and objects follow the builder's rules (placeObjectAt). A
  * space without a capture mesh uses the floor under each location as the ground.
  */
-export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, anchors: AgentAnchors, meshes: THREE.Object3D[] = []): Experience {
+export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, anchors: AgentAnchors, meshes: THREE.Object3D[] = [], views: SpaceView[] = []): Experience {
   const data = openingSpace(bootstrap).space_data;
   const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
   const settings = sceneGroupSettings("nodes", data);
@@ -23,7 +24,19 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
   const raycaster = new THREE.Raycaster();
   raycaster.far = 500;
 
-  const resolve = (anchor: { nodeId?: string; face?: number; x: number; y: number }): AnchorSpot | null => {
+  const resolve = (anchor: { nodeId?: string; face?: number; view?: string; x: number; y: number }): AnchorSpot | null => {
+    // A view drawn on the server: its depth gives the point under the pixel.
+    const view = anchor.view ? views.find((item) => item.id === anchor.view) : undefined;
+    if (view) {
+      const origin = new THREE.Vector3(...view.camera.position);
+      const found = pointInView(view, anchor.x, anchor.y);
+      const toward = found ? found.point.clone().sub(origin).normalize() : null;
+      if (!found || !toward) return null;
+      const normal = found.normal;
+      const point = found.point.clone().addScaledVector(normal ?? toward.clone().negate(), normal && normal.y > 0.7 ? 0.01 : 0.06);
+      return { origin: toArray(origin), floor: null, position: toArray(point), normal: normal ? toArray(normal) : null, hit: true, distance: found.distance,
+        rotation: { azimuth: THREE.MathUtils.radToDeg(Math.atan2(-toward.x, -toward.z)), polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(toward.y, -1, 1))) } };
+    }
     const node = anchor.nodeId ? nodes.get(anchor.nodeId) : undefined;
     if (!node) return null;
     const origin = worldFromGroupedPoint(node.position, settings);
@@ -69,6 +82,13 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     const anchor = anchors.stops[stop.id];
     const spot = anchor ? resolve(anchor) : null;
     if (!spot) return stop;
+    // In a space without panoramas, a stop stands where the view it was aimed in was drawn from.
+    const drawnFrom = anchor?.view ? views.find((item) => item.id === anchor.view) : undefined;
+    if (drawnFrom && !stop.view.nodeId) {
+      const aimed = aimFrom(drawnFrom.camera.position, spot.position);
+      const [x, y, z] = drawnFrom.camera.position;
+      return { ...stop, view: { ...stop.view, position: { x, y, z }, rotation: aimed ?? { azimuth: Number(drawnFrom.camera.azimuth.toFixed(2)), polar: Number(drawnFrom.camera.polar.toFixed(2)) } } };
+    }
     const standing = stop.view.nodeId ? nodes.get(stop.view.nodeId) : undefined;
     const aimed = standing && spot.hit ? aimFrom(toArray(worldFromGroupedPoint(standing.position, settings)), spot.position) : null;
     return { ...stop, view: { ...stop.view, rotation: aimed ?? { azimuth: Number(spot.rotation.azimuth.toFixed(2)), polar: Number(spot.rotation.polar.toFixed(2)) } } };

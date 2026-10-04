@@ -362,6 +362,28 @@ test('a tour stop high above its objects turns toward them', async () => {
   assert.deepEqual(two.view.rotation, { azimuth: 0, polar: -40 }, 'a stop that already shows its objects keeps its view');
 });
 
+test('in a space without panoramas, the agent points into views drawn on the server', async () => {
+  const { pointInView } = await import('../lib/server/space-views.ts');
+  const { placeOnServer } = await import('../lib/server/tour-placement.ts');
+  // A view from 1.5 m up looking level at a wall 5 m away (depth along the view is 5 everywhere).
+  const view = { id: 's1', camera: { position: [0, 1.5, 0], azimuth: 0, polar: 0, fov: 60 }, width: 960, height: 640, image: '', depth: new Float32Array(960 * 640).fill(5) };
+  const middle = pointInView(view, 0.5, 0.5);
+  assert.ok(middle.point.distanceTo({ x: 0, y: 1.5, z: -5 }) < 0.02, 'the pixel in the middle is on the wall straight ahead');
+  assert.ok(middle.normal.z > 0.99, 'and the wall faces the camera');
+  // Holes in a drawing are bridged from the nearest drawn pixel.
+  const holed = { ...view, depth: view.depth.slice() };
+  for (let y = 300; y < 340; y++) for (let x = 460; x < 500; x++) holed.depth[y * 960 + x] = Infinity;
+  assert.ok(pointInView(holed, 0.5, 0.5) === null || pointInView({ ...holed }, 0.5, 0.5).point.z < -4.9, 'a small hole is bridged or skipped');
+  const space = { space: { id: 'space', title: 'Space', type: 'splat', space_data: { noPanos: true, splats: [] } } };
+  const experience = parseExperience({ version: 1, kind: 'tour', effects: [],
+    objects: [{ id: 'urn', name: 'Urn', source: { kind: 'shape', shape: 'orb' }, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    stops: [{ id: 'one', title: 'One', text: 'Look.', view: { rotation: { azimuth: 0, polar: 0 } }, objects: ['urn'], effects: [] }] });
+  const placed = placeOnServer(space, experience, { objects: { urn: { view: 's1', x: 0.5, y: 0.5 } }, stops: { one: { view: 's1', x: 0.75, y: 0.5 } }, effects: {} }, [], [view]);
+  assert.ok(Math.abs(placed.objects[0].position[2] + 4.94) < 0.02, `the urn stands just off the wall (${placed.objects[0].position})`);
+  assert.deepEqual(placed.stops[0].view.position, { x: 0, y: 1.5, z: 0 }, 'the stop stands where the view was drawn from');
+  assert.ok(placed.stops[0].view.rotation.azimuth < -10, 'and looks toward the pixel it was given, right of center');
+});
+
 test('agents learn the looks, effects and sounds a site has', async () => {
   const { experienceCatalog } = await import('../lib/experience/catalog.ts');
   const catalog = experienceCatalog();

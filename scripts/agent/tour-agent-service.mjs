@@ -45,7 +45,9 @@ const mcpConfig = librarySearch && existsSync(libraryServer) ? (() => {
 
 let running = 0;
 const waiting = [];
-const slot = () => new Promise((resolve) => { if (running < 1) { running += 1; resolve(); } else waiting.push(resolve); });
+// Two drafts at a time (each CLI takes a few hundred MB); the rest wait their turn.
+const concurrent = Math.max(1, Number(process.env.SPHR_TOUR_AGENT_SERVICE_CONCURRENCY ?? 2));
+const slot = () => new Promise((resolve) => { if (running < concurrent) { running += 1; resolve(); } else waiting.push(resolve); });
 const release = () => { const next = waiting.shift(); if (next) next(); else running -= 1; };
 
 function compose({ system, prompt, images }) {
@@ -92,7 +94,7 @@ createServer((request, response) => {
   if (request.method === 'GET' && request.url === '/health') return send(200, { ok: true, running, waiting: waiting.length });
   if (request.method !== 'POST' || request.url !== '/compose') return send(404, { error: 'Not found.' });
   if (!authorized(request)) return send(401, { error: 'Unauthorized.' });
-  if (waiting.length >= 4) return send(429, { error: 'The agent is busy. Try again in a minute.' });
+  if (waiting.length >= 6) return send(429, { error: 'The tour agent is busy with other drafts. Try again in a few minutes.' });
   const chunks = [];
   let size = 0;
   request.on('data', (chunk) => { size += chunk.length; if (size > 24 * 1024 * 1024) request.destroy(); else chunks.push(chunk); });

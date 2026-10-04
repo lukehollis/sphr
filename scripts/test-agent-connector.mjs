@@ -300,7 +300,7 @@ try {
     thumbnail: '/datasets/legacy/temple-court/preview.jpg', nodeCount: 1, createdAt: '2026-01-01', sourceType: 'panoramas' }] }));
   new DatabaseSync(path.join(state, 'admin.sqlite')).prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run('0b0b0b0b0b01', 1);
   result = await connector.call('find_tour_spaces', { query: 'temple' });
-  assert.equal(result.text, '0b0b0b0b0b01: Temple court (Example Spaces space, 1 places to stand)');
+  assert.equal(result.text, '0b0b0b0b0b01: Temple court (Example Spaces space, 360 photos, 1 places to stand)');
   assert.match((await connector.call('find_tour_spaces', { query: 'volcano' })).text, /No spaces match/);
   result = await connector.call('create_tour', { scene_id: '0b0b0b0b0b01', kind: 'tour', title: 'The oracle' });
   assert.ok(!result.error, result.text);
@@ -362,6 +362,45 @@ try {
   assert.match(result.text, new RegExp(`shared at ${base}/t/${tourId}/the-oracle`));
   assert.ok((await (await fetch(`${base}/t/${tourId}/the-oracle`)).text()).includes(tripodUrl), 'anyone with the link sees the tour and its model');
   assert.match((await connector.call('list_tours')).text, /"The oracle" .* shared at/);
+
+  // ---- A Gaussian splat space has no panoramas: the agent sees views drawn on the server ----
+  const garden = path.join(root, 'public/datasets/legacy/garden-court');
+  mkdirSync(garden, { recursive: true });
+  // The splat's points (32-byte .splat rows): open ground, and a table top 0.75 m up five meters ahead.
+  const splatRow = (x, y, z, [r, g, b]) => {
+    const row = Buffer.alloc(32);
+    row.writeFloatLE(x, 0); row.writeFloatLE(y, 4); row.writeFloatLE(z, 8);
+    for (const offset of [12, 16, 20]) row.writeFloatLE(0.05, offset);
+    row.set([r, g, b, 255, 128, 128, 128, 255], 24);
+    return row;
+  };
+  const rows = [];
+  for (let x = -6; x <= 6; x += 0.08) for (let z = -8; z <= 4; z += 0.08) rows.push(splatRow(x, 0, z, [70, 140, 60]));
+  for (let x = -0.6; x <= 0.6; x += 0.03) for (let z = -3.6; z <= -2.4; z += 0.03) rows.push(splatRow(x, 0.75, z, [120, 80, 40]));
+  writeFileSync(path.join(garden, 'scene.splat'), Buffer.concat(rows));
+  // The start view looks from 1.6 m up straight at the middle of the table.
+  writeFileSync(path.join(garden, 'bootstrap.json'), JSON.stringify({ space: { id: '0b0b0b0b0b02', title: 'Garden court', type: 'splat',
+    space_data: { noPanos: true, initialPosition: { x: 0, y: 1.6, z: 2 }, initialRotation: { azimuth: 0, polar: -9.65 },
+      splats: [{ id: 'main', url: '/datasets/legacy/garden-court/scene.splat', fileType: 'splat' }] } } }));
+  const catalog = JSON.parse(readFileSync(path.join(root, 'public/datasets/legacy/index.json'), 'utf8'));
+  catalog.spaces.push({ sceneId: '0b0b0b0b0b02', titleSlug: 'garden-court', scenePath: '/s/0b0b0b0b0b02/garden-court', slug: 'garden-court', title: 'Garden court',
+    bootstrapUrl: '/datasets/legacy/garden-court/bootstrap.json', thumbnail: '/datasets/legacy/garden-court/preview.jpg', nodeCount: 0, createdAt: '2026-01-01', sourceType: 'splat' });
+  writeFileSync(path.join(root, 'public/datasets/legacy/index.json'), JSON.stringify(catalog));
+  new DatabaseSync(path.join(state, 'admin.sqlite')).prepare('INSERT OR REPLACE INTO visibility VALUES (?, ?)').run('0b0b0b0b0b02', 1);
+  result = await connector.call('create_tour', { scene_id: '0b0b0b0b0b02', kind: 'tour', title: 'Garden table' });
+  const gardenTour = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
+  assert.match((await connector.call('draft_tour', { tour_id: gardenTour, request: 'Show the table' })).text, /working on it/);
+  result = await connector.call('wait_for_tour', { tour_id: gardenTour });
+  assert.match(result.text, /Stops: 1\. The altar/, result.text);
+  const gardenDraft = (await (await agentFetch(`/api/account/tours/${gardenTour}?catalog=0`)).json()).tour.experience;
+  const [onTable] = gardenDraft.objects;
+  assert.ok(onTable.position[1] > 0.7 && onTable.position[1] < 0.85 && onTable.position[2] < -2.3 && onTable.position[2] > -3.7,
+    `the object stands on the table the agent pointed at in the drawn view (${onTable.position.map((value) => value.toFixed(2))})`);
+  assert.deepEqual(gardenDraft.stops[0].view.position, { x: 0, y: 1.6, z: 2 }, 'the stop stands where the view was drawn from');
+  const gardenPrompt = readFileSync(path.join(state, 'tour-agent.log'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).prompt).find((text) => text.includes('Garden court'));
+  assert.match(gardenPrompt, /This space has no panoramas, so it is shown in views drawn from its 3D Gaussian splat/);
+  assert.match(gardenPrompt, /Images of the space are files in .*01-view-s1\.jpg is view s1/s, 'the drawn views go to the agent as pictures');
+  assert.ok(existsSync(path.join(state, 'space-views')), 'the drawn views are kept for the next draft');
 
   // ---- The account page lists the agent; unlinking there or from the agent revokes it ----
   const agents = await (await alice.get('/api/account/agents')).json();
@@ -436,7 +475,8 @@ try {
   assert.match((await tool('wait_for_payment', { space_id: harbor }, museSession)).text, /Payment received/);
   assert.match((await tool('space_status', { space_id: harbor }, museSession)).text, new RegExp(`drop files at ${base}/account/spaces/${harbor}`));
   // Tours from the cloud: the same tools, with models by address.
-  assert.match((await tool('find_tour_spaces', { query: 'court' }, museSession)).text, /^0b0b0b0b0b01: Temple court \(SPHR space, 1 places to stand\)$/);
+  assert.equal((await tool('find_tour_spaces', { query: 'court' }, museSession)).text,
+    '0b0b0b0b0b02: Garden court (SPHR space, a Gaussian splat)\n0b0b0b0b0b01: Temple court (SPHR space, 360 photos, 1 places to stand)', 'spaces say what kind of capture they are');
   result = await tool('create_tour', { scene_id: '0b0b0b0b0b01', kind: 'hunt', title: 'Offerings' }, museSession);
   const cloudTour = result.text.match(/tour_id ([a-f0-9]{12})/)[1];
   assert.match(result.text, /a scavenger hunt with 0 clues/);

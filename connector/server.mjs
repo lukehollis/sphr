@@ -781,7 +781,8 @@ function describeTour(tour) {
 async function findTourSpaces({ query = '' } = {}) {
   const { spaces } = await api(`/api/account/tours/spaces?q=${encodeURIComponent(String(query))}&limit=30`);
   if (!spaces.length) return `No spaces match ${JSON.stringify(query)}. Try fewer or other words.`;
-  return spaces.map(space => `${space.sceneId}: ${space.title} (${space.whose === 'own' ? 'your space' : `${brand.name} space`}${space.locations ? `, ${space.locations} places to stand` : ''})`).join('\n');
+  const kinds = { panoramas: '360 photos', splat: 'a Gaussian splat', model: 'a 3D model' };
+  return spaces.map(space => `${space.sceneId}: ${space.title} (${space.whose === 'own' ? 'your space' : `${brand.name} space`}${kinds[space.kind] ? `, ${kinds[space.kind]}` : ''}${space.locations ? `, ${space.locations} places to stand` : ''})`).join('\n');
 }
 
 async function listTours() {
