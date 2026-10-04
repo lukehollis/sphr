@@ -11,6 +11,24 @@ import { LOOK_VERTEX, lookFragment } from "@/lib/three/looks/shader";
  * it renders to an offscreen frame that a full-screen shader redraws.
  */
 
+/**
+ * An offscreen frame that holds what the screen would show. three.js tone maps
+ * and encodes color only for the screen and XR targets, and draws into any other
+ * target in linear light, where additive glows add up before the display curve:
+ * a halo's soft edge came out as a flat disk with a hard rim. Drawn as an output
+ * target in sRGB, every material and blend lands in the frame as on the screen.
+ */
+function screenFrame(width: number, height: number, float: boolean) {
+  const frame = new THREE.WebGLRenderTarget(width, height, {
+    type: float ? THREE.HalfFloatType : THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace,
+    // Bytes tagged sRGB would be stored as SRGB8_ALPHA8 and encoded a second time.
+    internalFormat: float ? null : "RGBA8",
+    depthBuffer: true, stencilBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+  });
+  (frame as THREE.WebGLRenderTarget & { isXRRenderTarget: boolean }).isXRRenderTarget = true;
+  return frame;
+}
+
 export type LookVariant = "sketch" | "watercolor";
 
 /** What the runtime offers looks: other versions of the space, and splat styling. */
@@ -21,8 +39,6 @@ export type LookHost = {
   showVariant(variant: LookVariant | null, amount: number, transition: LookTransition, direction: THREE.Vector3, center: THREE.Vector2): void;
   /** Splat spaces: shrink or flatten splats, blended by amount. */
   styleSplats(style: LookMeta["splats"] | null, amount: number): void;
-  /** Called while a look renders offscreen, so splats write linear color like the rest of the scene. */
-  setLinearOutput(linear: boolean): void;
   /** Whether the drawn version is ready where the visitor is now (panoramas are drawn location by location). */
   variantReady(variant: LookVariant): boolean;
 };
@@ -144,11 +160,9 @@ export class LookPass {
       return;
     }
     const target = this.ensureTarget();
-    this.host.setLinearOutput(true);
     this.renderer.setRenderTarget(target);
     this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
-    this.host.setLinearOutput(false);
     this.draw(target.texture, camera, time, null);
   }
 
@@ -209,7 +223,8 @@ export class LookPass {
     for (const [slot, look] of [["A", from], ["B", to]] as const) {
       if (!look?.meta) continue;
       uniforms[`u${slot}_hasVariant`] = { value: 0 };
-      uniforms[`u${slot}_backdrop`] = { value: new THREE.Color(look.meta.backdrop ?? "#0a0c10") };
+      // As displayed, like the frame it fills in.
+      uniforms[`u${slot}_backdrop`] = { value: new THREE.Color(look.meta.backdrop ?? "#0a0c10").convertLinearToSRGB() };
       for (const spec of look.meta.params) uniforms[`u${slot}_${spec.key}`] = { value: spec.type === "color" ? new THREE.Color(spec.default) : 0 };
     }
     material = new THREE.ShaderMaterial({
@@ -225,10 +240,7 @@ export class LookPass {
     const width = Math.max(1, Math.floor(this.size.x)), height = Math.max(1, Math.floor(this.size.y));
     if (this.target && this.target.width === width && this.target.height === height) return this.target;
     this.target?.dispose();
-    this.target = new THREE.WebGLRenderTarget(width, height, {
-      type: this.floatTargets ? THREE.HalfFloatType : THREE.UnsignedByteType,
-      depthBuffer: true, stencilBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
-    });
+    this.target = screenFrame(width, height, this.floatTargets);
     return this.target;
   }
 
@@ -239,7 +251,7 @@ export class LookPass {
   thumbnails(scene: THREE.Scene, camera: THREE.PerspectiveCamera, ids: string[], width = 240): Record<string, string> {
     const aspect = camera.aspect;
     const height = Math.round(width / aspect);
-    const frame = new THREE.WebGLRenderTarget(width * 2, height * 2, { type: this.floatTargets ? THREE.HalfFloatType : THREE.UnsignedByteType });
+    const frame = screenFrame(width * 2, height * 2, this.floatTargets);
     const output = new THREE.WebGLRenderTarget(width, height);
     const pixels = new Uint8Array(width * height * 4);
     const canvas = document.createElement("canvas");
@@ -248,11 +260,9 @@ export class LookPass {
     const image = context.createImageData(width, height);
     const result: Record<string, string> = {};
     try {
-      this.host.setLinearOutput(true);
       this.renderer.setRenderTarget(frame);
       this.renderer.render(scene, camera);
       this.renderer.setRenderTarget(null);
-      this.host.setLinearOutput(false);
       for (const id of ids) {
         const meta = id === "color" ? null : lookEntry(id);
         if (id !== "color" && !meta) continue;
@@ -264,7 +274,6 @@ export class LookPass {
         result[id] = canvas.toDataURL("image/jpeg", 0.8);
       }
     } finally {
-      this.host.setLinearOutput(false);
       this.renderer.setRenderTarget(null);
       frame.dispose();
       output.dispose();

@@ -341,11 +341,6 @@ export class SparkSplatLayer {
     this.regenerate = true;
   }
 
-  /** While a look renders offscreen, splats write linear color like the rest of the scene. */
-  setLinearOutput(linear: boolean) {
-    if (this.spark) this.spark.encodeLinear = linear;
-  }
-
   private lookModifier(role: SplatRole): SplatModifier {
     const look = this.look!;
     const variant = role !== "color";

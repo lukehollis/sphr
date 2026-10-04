@@ -302,6 +302,69 @@ test('looks are validated for the tour and each stop, and reach the viewer', () 
   assert.equal(agent.experience.stops[1].look.look, 'color', 'a stop the agent leaves alone keeps its look');
 });
 
+test('a look redraws the frame the screen would show, so glows blend as they do without one', async () => {
+  const THREE = await import('three');
+  const { LookPass } = await import('../lib/three/looks/LookPass.ts');
+  for (const float of [true, false]) {
+    let target = null;
+    const drawn = [];
+    const renderer = {
+      getContext: () => ({ getExtension: () => (float ? {} : null) }),
+      getDrawingBufferSize: (out) => out.set(64, 32),
+      setRenderTarget: (next) => { target = next; },
+      render: (scene) => drawn.push({ scene, target })
+    };
+    const host = { prepareVariant: async () => false, showVariant() {}, styleSplats() {}, variantReady: () => false };
+    const pass = new LookPass(renderer, host, true);
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+    pass.set({ look: 'lines', transition: 'cut' }, camera, null, { instant: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pass.render(scene, camera, 0);
+    const frame = drawn.find((call) => call.scene === scene)?.target;
+    assert.ok(frame, 'with a look, the space is drawn offscreen');
+    // three.js tone maps and encodes for the screen and for XR targets only; anything else gets linear
+    // light, where a halo's additive glow sums before the display curve and turns into a flat disk.
+    assert.equal(frame.isXRRenderTarget, true, 'the frame is drawn as an output, like the screen');
+    assert.equal(THREE.ColorManagement.getTransfer(frame.texture.colorSpace), THREE.SRGBTransfer, 'materials encode for display into it');
+    assert.equal(frame.texture.type, float ? THREE.HalfFloatType : THREE.UnsignedByteType);
+    if (!float) assert.equal(frame.texture.internalFormat, 'RGBA8', 'bytes are not stored as sRGB, which would encode them twice');
+    const material = [...pass.materials.values()][0];
+    assert.equal(material.uniforms.uB_backdrop.value.getHexString(THREE.LinearSRGBColorSpace), 'f4f1e8', 'the paper behind a look is as displayed, like the frame');
+    pass.dispose();
+  }
+});
+
+test('a halo keeps a bounded glow at any strength', async () => {
+  const THREE = await import('three');
+  // The glow sprite's texture is drawn on a 2D canvas; node has none, and the drawing does not matter here.
+  const context2d = { createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, fillStyle: '' };
+  globalThis.document ??= { createElement: () => ({ width: 0, height: 0, getContext: () => context2d }) };
+  const { default: halo } = await import('../lib/experience/spacery/halo.ts');
+  const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+  const object = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshBasicMaterial());
+  scene.add(object);
+  const effect = halo({ scene, camera, object: () => object, anchor: (out) => out.copy(object.position), bounds: (out) => out.setFromObject(object) },
+    { id: 'halo', type: 'halo', target: { kind: 'object', id: 'orb' }, params: { color: '#ffe9a8', strength: 2, pulse: 3 } });
+  const sprite = scene.children.find((child) => child.isSprite);
+  effect.setActive(true);
+  let time = 0;
+  for (let frame = 0; frame < 60 * 120; frame += 1) {
+    time += 1 / 60;
+    if (frame % 600 === 0) effect.play('found');
+    effect.update({ time, delta: 1 / 60, camera });
+    // A sprite opacity that ran off to Infinity made 0 x Infinity = NaN at the sprite's clear corners,
+    // which the screen clamps away but a look's frame keeps: a solid square.
+    assert.ok(Number.isFinite(sprite.material.opacity) && sprite.material.opacity <= 1, `sprite opacity ${sprite.material.opacity} at frame ${frame}`);
+    const rim = object.children[0].material.uniforms.uOpacity.value;
+    assert.ok(Number.isFinite(rim) && rim <= 2, `rim opacity ${rim} at frame ${frame}`);
+  }
+  assert.equal(sprite.material.blending, THREE.AdditiveBlending);
+  effect.setActive(false);
+  for (let frame = 0; frame < 60 * 5; frame += 1) effect.update({ time: (time += 1 / 60), delta: 1 / 60, camera });
+  assert.equal(sprite.visible, false, 'it fades out when its stop is left');
+  effect.dispose();
+});
+
 test('skies are validated for the tour and each stop, reach the viewer, and agents can set them', () => {
   const input = tour();
   input.sky = { sky: 'drawn-night', turn: 400, brightness: 9, light: 0.5, duration: 2 };

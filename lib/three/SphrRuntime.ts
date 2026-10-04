@@ -1046,7 +1046,6 @@ export class SphrRuntime {
         this.panorama?.showVariant(variant ? amount : 0, mode < 0 ? 1 : mode, direction, size);
       },
       styleSplats: (style, amount) => this.splats?.styleSplats(style ?? null, amount),
-      setLinearOutput: (linear) => this.splats?.setLinearOutput(linear),
       variantReady: (variant) => Boolean(this.splats?.variantReady(variant) || this.panorama?.variantReady())
     };
   }

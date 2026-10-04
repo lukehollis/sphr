@@ -21,15 +21,12 @@ export const LOOK_HELPERS = /* glsl */ `
   varying vec2 vUv;
   #define PX (1.0 / uResolution)
 
-  vec3 toDisplay(vec3 c) {
-    c = max(c, vec3(0.0));
-    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-  }
-  // Set by each look before it runs: what shows where the space leaves gaps (linear color).
-  vec3 gBackdrop = vec3(0.003);
+  // Set by each look before it runs: what shows where the space leaves gaps, as displayed.
+  vec3 gBackdrop = vec3(0.039);
+  // The frame holds the space as the screen would show it (tone mapped, display encoded).
   vec3 SAMPLE(vec2 uv) {
     vec4 frame = texture2D(tFrame, clamp(uv, PX * 0.5, 1.0 - PX * 0.5));
-    return clamp(toDisplay(frame.rgb + gBackdrop * (1.0 - clamp(frame.a, 0.0, 1.0))), 0.0, 1.0);
+    return clamp(frame.rgb + gBackdrop * (1.0 - clamp(frame.a, 0.0, 1.0)), 0.0, 1.0);
   }
   float LUM(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
   float COVER(vec2 uv) { return texture2D(tFrame, uv).a; }
@@ -115,7 +112,7 @@ function paramUniform(spec: ParamSpec, slot: string) {
 }
 
 function lookFunction(meta: LookMeta | null, slot: "A" | "B") {
-  if (!meta) return `vec3 look${slot}(vec2 uv) { gBackdrop = vec3(0.003); return SAMPLE(uv); }`;
+  if (!meta) return `vec3 look${slot}(vec2 uv) { gBackdrop = vec3(0.039); return SAMPLE(uv); }`;
   const body = meta.glsl
     .replace(/\bP\((\w+)\)/g, (_match, key: string) => `u${slot}_${key}`)
     .replace(/\bHAS_VARIANT\b/g, `u${slot}_hasVariant`);

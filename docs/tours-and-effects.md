@@ -174,7 +174,9 @@ tour or a stop can change to one through a transition: `cut`, `fade`,
 The tour's look covers free exploration and every stop without its own;
 `color` is the capture as it is. With no look, frames render straight to the
 screen. With one, the frame renders offscreen and a full-screen shader redraws
-it (`lib/three/looks`). Each look is GLSL for `vec3 look(vec2 uv)`, so adding
+it (`lib/three/looks`). The offscreen frame holds what the screen would show,
+tone mapped and encoded for display, so glows, sparkles and splats blend into it
+the way they blend on screen; a look only restyles them. Each look is GLSL for `vec3 look(vec2 uv)`, so adding
 one is a few lines in a pack (`looks` on a Pack; see `LookMeta` in
 `registry.ts`). Core ships `lines` (line drawing), `watercolor`, `blueprint`
 and `noir`.
