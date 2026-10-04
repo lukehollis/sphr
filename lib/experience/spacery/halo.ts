@@ -84,7 +84,8 @@ const create: EffectFactory = (context, instance) => {
       sprite.scale.setScalar(Math.max(0.4, size.length() * 1.6) * (0.92 + 0.08 * Math.sin(time * 2.5)));
     },
     setActive(value) { active = value; },
-    play() { flash = 2.5; },
+    // A hint keeps the object lit as long as a hint's beacon stands; a find or a click flashes.
+    play(cue) { flash = cue === "hint" ? 8 : 2.5; },
     setParams(next) { params = next; },
     dispose() {
       for (const shell of shells) shell.parent?.remove(shell);

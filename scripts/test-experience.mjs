@@ -362,6 +362,14 @@ test('a halo keeps a bounded glow at any strength', async () => {
   effect.setActive(false);
   for (let frame = 0; frame < 60 * 5; frame += 1) effect.update({ time: (time += 1 / 60), delta: 1 / 60, camera });
   assert.equal(sprite.visible, false, 'it fades out when its stop is left');
+  // Held back for a hint, it lights the object about as long as the hint's beacon stands.
+  const lit = (seconds) => { for (let frame = 0; frame < 60 * seconds; frame += 1) effect.update({ time: (time += 1 / 60), delta: 1 / 60, camera }); return sprite.visible; };
+  effect.play('hint');
+  assert.equal(lit(7), true, 'a hint keeps it glowing');
+  assert.equal(lit(4), false, 'and then it fades by itself');
+  effect.play('found');
+  assert.equal(lit(1), true);
+  assert.equal(lit(4), false, 'a find flashes it briefly');
   effect.dispose();
 });
 
