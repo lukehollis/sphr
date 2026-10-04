@@ -41,6 +41,8 @@ const create: EffectFactory = (context, instance) => {
   const size = new THREE.Vector3();
   let active = false;
   let flash = 0;
+  /** How far the glow has faded in, 0..1; strength scales it on the way to the shaders. */
+  let level = 0;
 
   const attach = () => {
     const object = context.object();
@@ -64,13 +66,17 @@ const create: EffectFactory = (context, instance) => {
       attach();
       flash = Math.max(0, flash - delta);
       const target = active || flash > 0 ? 1 : 0;
-      const opacity = approach(shellMaterial.uniforms.uOpacity.value, target, delta, 3);
-      shellMaterial.uniforms.uOpacity.value = opacity * num(params, "strength", 1);
+      // Fade the level itself: scaling the stored opacity by strength every frame compounded past 1.
+      level = approach(level, target, delta, 3);
+      const strength = num(params, "strength", 1);
+      shellMaterial.uniforms.uOpacity.value = level * strength;
       shellMaterial.uniforms.uTime.value = time;
       shellMaterial.uniforms.uPulse.value = num(params, "pulse", 1);
       color.set(str(params, "color", "#ffe9a8"));
-      sprite.material.opacity = opacity * 0.7 * num(params, "strength", 1);
-      sprite.visible = opacity > 0.01;
+      // The sprite keeps its own copy of the color, so it follows the param here.
+      sprite.material.color.copy(color);
+      sprite.material.opacity = Math.min(1, level * 0.7 * strength);
+      sprite.visible = level > 0.01;
       if (!sprite.visible) return;
       context.anchor(center);
       context.bounds(box).getSize(size);
