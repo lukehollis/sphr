@@ -151,8 +151,10 @@ export function frameStops(bootstrap: SphrBootstrap, experience: Experience, onl
  * that stop's view or out of it comes onto the ground a few meters ahead, a little right of
  * center (the tour's text covers the left on wide screens); one more than 18 meters away
  * comes to the first ground along the same line of sight; and one the capture hides comes
- * forward onto the surface in the way, or the floor just in front of that. Ground can be
- * sloped (seating, a hillside) but not a wall. `only` limits it to objects just placed.
+ * forward onto the surface in the way, or the floor just in front of that. A hunt's find
+ * may hide from its stop where a location a few steps away sees it, since visitors walk
+ * around while they look. Ground can be sloped (seating, a hillside) but not a wall. `only`
+ * limits it to objects just placed.
  */
 export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience, meshes: THREE.Object3D[], only?: Set<string>) {
   const data = openingSpace(bootstrap).space_data;
@@ -188,6 +190,10 @@ export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience,
     return !hit || hit.distance >= toward.length() - 0.4;
   };
   const moved = new Map<string, number>();
+  const eyes = [...nodes.values()].map((node) => worldFromGroupedPoint(node.position, settings));
+  /** Whether a location within a few steps of a stop sees a point up close (hunts only). */
+  const seenNearby = (eye: THREE.Vector3, point: THREE.Vector3) => experience.kind === "hunt" && eyes.some((other) =>
+    other.distanceTo(eye) > 0.3 && other.distanceTo(eye) <= 15 && other.distanceTo(point) <= nearby && visibleFrom(other, point));
 
   return experience.objects.map((original) => {
     let object = original;
@@ -242,6 +248,8 @@ export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience,
         }
       }
     }
+    // A hunt's find a few steps away from its stop stays put.
+    if (!framedHere && seenNearby(eye, target)) return object;
     // Not across the valley: the first ground along the same line within reach (in a tour,
     // still in the stop's view).
     if (!framedHere && target.distanceTo(eye) > nearby) {

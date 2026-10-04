@@ -129,6 +129,13 @@ server draws views of them with depth (`lib/server/space-views.ts`) for the agen
 point into; stops then stand at those views' cameras. Still check the result in the viewer or a
 screenshot, and adjust positions in `save_tour` when something hides behind a wall.
 
+Hunts should make visitors look around and walk a little. During a clue they can walk to
+other locations and the clue stays open, and a click from anywhere counts. So aim each
+clue's stop at the area the clue names, keep every find but the first out of that opening
+view (turned away, up high, down low, or behind a column or corner and seen from a location
+one to three steps away), let the hint say exactly where, and give unfound objects no
+effects that run before the hint. The server keeps a find that only a nearby location sees.
+
 From a shell, the local connector runs the same tools:
 `node connector/server.mjs call draft_tour '{"tour_id":"<id>","request":"..."}'`.
 
