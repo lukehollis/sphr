@@ -11,6 +11,7 @@ import { parseExperience } from "@/lib/experience/validate";
 import type { Experience, ExperienceKind } from "@/lib/experience/types";
 import type { SceneListing } from "@/lib/scene-types";
 import { sceneTitleSlug } from "@/lib/scene-edits";
+import { tourThumbnail } from "./tour-thumbnails";
 
 /**
  * Customers' own guided tours and scavenger hunts. Each one is built on a space, either
@@ -288,7 +289,7 @@ export async function describeTours(userId: string) {
     const scene = scenes.get(tour.sceneId);
     return { id: tour.id, title: tour.title, kind: tour.kind, public: tour.public, stops: tour.experience?.stops.length ?? 0, updated: tour.updated,
       path: tourPath(tour), editor: `/account/tours/${tour.id}`, available: Boolean(scene && canBuildOn(userId, scene)),
-      space: scene ? { title: scene.title, thumbnail: scene.thumbnail, spacery: isOperatorScene(scene.sceneId) } : null };
+      space: scene ? { title: scene.title, thumbnail: tourThumbnail(tour.id) ?? scene.thumbnail, spacery: isOperatorScene(scene.sceneId) } : null };
   });
 }
 export type TourView = Awaited<ReturnType<typeof describeTours>>[number];

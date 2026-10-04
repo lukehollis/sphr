@@ -902,6 +902,11 @@ export class SphrRuntime {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Hides the location rings, for a clean frame of the view (a tour's thumbnail). */
+  setNavigationHidden(hidden: boolean) {
+    if (this.nav) this.nav.group.visible = !hidden;
+  }
+
   captureStartView(): { view: StartView; thumbnail: string } {
     if (!this.state.loading.ready || this.isNavigating || this.cameraTween || this.activePointerId !== null) {
       throw new Error('Wait for the camera to stop moving, then capture again.');

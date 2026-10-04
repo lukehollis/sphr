@@ -202,6 +202,7 @@ export class ViewerSession {
   showEarth(range?: number) { return this.active?.three?.showEarth(range) ?? Promise.resolve(false); }
   aimFrom(nodeId: string, point: [number, number, number]) { return this.active?.three?.aimFrom(nodeId, point) ?? null; }
   captureView() { return this.active?.three?.captureView() ?? null; }
+  setNavigationHidden(hidden: boolean) { this.active?.three?.setNavigationHidden(hidden); }
   requestHint() { this.active?.three?.requestHint(); }
   /** How much of the bottom of the screen the tour's text covers, in pixels. */
   setViewInset(bottom: number) { this.viewInset = bottom; this.active?.three?.setViewInset(bottom); }

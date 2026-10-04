@@ -6,6 +6,7 @@ import { sceneTitleSlug } from "@/lib/scene-edits";
 import { readSceneEdits } from "@/lib/server/admin-store";
 import { currentUser, loginPath } from "@/lib/server/accounts";
 import { readSpaceInfo } from "@/lib/server/space-info";
+import { tourThumbnail } from "@/lib/server/tour-thumbnails";
 import { hasHeart, heartCount, profileCard } from "@/lib/server/profiles";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
@@ -21,10 +22,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const scene = tour && await tourAccess(tour) === "allowed" ? await tourScene(tour) : undefined;
   if (!tour || !scene) return { title: "Tour not found", robots: { index: false, follow: false } };
   const description = tour.kind === "hunt" ? `Play a scavenger hunt in ${scene.title}.` : `Take a guided tour of ${scene.title}.`;
+  const image = tourThumbnail(tour.id) ?? scene.thumbnail;
   return {
     title: `${tour.title} · ${siteBrand()}`, description, robots: { index: false, follow: false },
-    openGraph: { type: "website", title: tour.title, description, url: tourPath(tour), images: [{ url: scene.thumbnail, alt: scene.title }] },
-    twitter: { card: "summary_large_image", title: tour.title, description, images: [scene.thumbnail] }
+    openGraph: { type: "website", title: tour.title, description, url: tourPath(tour), images: [{ url: image, alt: tour.title }] },
+    twitter: { card: "summary_large_image", title: tour.title, description, images: [image] }
   };
 }
 

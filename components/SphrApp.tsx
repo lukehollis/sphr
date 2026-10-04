@@ -68,6 +68,19 @@ function monthOf(value?: string) {
   return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : undefined;
 }
 
+/**
+ * With `?frame` (alongside `?stop=N`) the page shows only the view, without controls, text or
+ * location rings, and sets `data-frame-ready` on the viewer once the stop's effects, look and sky
+ * have settled, so a browser can take the tour's thumbnail.
+ */
+async function markFrameReady(runtime: ViewerSession) {
+  if (!new URLSearchParams(window.location.search).has("frame")) return;
+  runtime.setNavigationHidden(true);
+  await new Promise(resolve => setTimeout(resolve, 3500));
+  runtime.setNavigationHidden(true);
+  document.querySelector(".sphr-root")?.setAttribute("data-frame-ready", "true");
+}
+
 function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, state: RuntimeState) {
   return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
 }
@@ -93,12 +106,16 @@ function linkEntry(data: SphrBootstrap): ViewerEntry {
   return Number.isInteger(stop) && stop >= 1 && stop <= stops ? { stop: stop - 1 } : {};
 }
 
-export default function SphrApp({ configUrl, preview, host, info, social, build, edits, editor, chrome = !editor, revision = 0 }: Props) {
+export default function SphrApp({ configUrl, preview, host, info, social, build, edits, editor, chrome: withChrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>(initialRuntimeState);
   const [started, setStarted] = useState(false);
+  // A frame for a thumbnail (?frame): the view alone, without controls or the tour's text.
+  const [frame, setFrame] = useState(false);
+  useEffect(() => { setFrame(new URLSearchParams(window.location.search).has("frame")); }, []);
+  const chrome = withChrome && !frame;
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +153,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         runtime.start(!entry.view && normalizeTour(data).hasGuidedTour);
         setStarted(true);
         editor?.onReady(runtime, issue);
+        if (!editor) await markFrameReady(runtime);
       } catch (error) {
         if (cancelled) return;
         console.error(error);

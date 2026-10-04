@@ -9,6 +9,7 @@ import { canBuildOn, isOperatorScene, listUserTours, onePerCapture, pickerSpace,
 import { readSceneTour } from "./tours";
 import { readAllScenes } from "@/lib/scene-catalog";
 import { webAddress } from "@/lib/space-info";
+import { tourThumbnail } from "./tour-thumbnails";
 import type { SceneListing } from "@/lib/scene-types";
 
 /**
@@ -222,7 +223,7 @@ function operatorTour(scene: SceneListing): SharedTour | null {
   const authored = readSceneTour(scene.sceneId).experience;
   const stops = authored?.stops.length ?? 0;
   if (!stops && !(scene.hasGuidedTour ?? scene.legacy?.kind === "tour")) return null;
-  return { id: `scene-${scene.sceneId}`, title: scene.title, kind: authored?.kind ?? "tour", path: scene.scenePath, thumbnail: scene.thumbnail ?? null,
+  return { id: `scene-${scene.sceneId}`, title: scene.title, kind: authored?.kind ?? "tour", path: scene.scenePath, thumbnail: tourThumbnail(`scene-${scene.sceneId}`) ?? scene.thumbnail ?? null,
     space: null, stops, hearts: null, updated: scene.createdAt };
 }
 
@@ -232,7 +233,7 @@ export async function sharedTours(userId: string): Promise<SharedTour[]> {
   const own = listUserTours(userId).flatMap(tour => {
     const scene = scenes.get(tour.sceneId);
     if (!tour.public || !scene || !canBuildOn(userId, scene) || testTitle(tour.title)) return [];
-    return [{ id: tour.id, title: tour.title, kind: tour.kind, path: tourPath(tour), thumbnail: scene.thumbnail ?? null, space: scene.title,
+    return [{ id: tour.id, title: tour.title, kind: tour.kind, path: tourPath(tour), thumbnail: tourThumbnail(tour.id) ?? scene.thumbnail ?? null, space: scene.title,
       stops: tour.experience?.stops.length ?? 0, hearts: heartCount(tour.id), updated: tour.updated }];
   });
   if (userId !== operatorAccount()) return own;
