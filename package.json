@@ -27,6 +27,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@sparkjsdev/spark": "2.1.0",
+    "3d-tiles-renderer": "^0.5.3",
     "draco3dgltf": "^1.5.7",
     "lucide-react": "1.23.0",
     "next": "16.2.10",

@@ -15,7 +15,9 @@ export function stopToTourPoint(stop: ExperienceStop): TourPoint {
     secondaryText: stop.detail ?? null,
     nodeUUID: stop.view.nodeId,
     targetType: stop.view.nodeId ? "NODE" : "FREE",
-    viewMode: stop.view.viewMode ?? "FPV",
+    // A stop above the map orbits it like the overview, and lands in the next one.
+    viewMode: stop.view.earth ? "ORBIT" : stop.view.viewMode ?? "FPV",
+    ...(stop.view.earth ? { earth: stop.view.earth } : {}),
     ...(stop.view.position ? { position: stop.view.position } : {}),
     rotation: stop.view.rotation,
     ...(stop.view.fov ? { fov: stop.view.fov } : {}),
@@ -57,6 +59,7 @@ export function applyExperience(input: SphrBootstrap, experience: Experience, { 
       kind: experience.kind,
       finale: experience.finale,
       look: experience.look,
+      place: experience.place ?? (standalone ? undefined : data.place),
       objects: experience.objects,
       effects: experience.effects,
       spaces: standalone ? [updated] : [updated, ...spaces.slice(1)],
@@ -80,6 +83,7 @@ export function experienceFromBootstrap(bootstrap: SphrBootstrap): Experience {
     kind: data?.kind === "hunt" ? "hunt" : "tour",
     finale: data?.finale,
     look: data?.look,
+    place: data?.place,
     objects: segment?.objects ?? data?.objects ?? [],
     effects: segment?.effects ?? data?.effects ?? [],
     stops: points.map((point, index) => ({
@@ -92,7 +96,8 @@ export function experienceFromBootstrap(bootstrap: SphrBootstrap): Experience {
         position: point.nodeUUID ? undefined : point.position,
         rotation: point.rotation ?? { azimuth: 0, polar: 0 },
         fov: point.fov,
-        viewMode: point.viewMode === "ORBIT" ? "ORBIT" : "FPV"
+        viewMode: point.viewMode === "ORBIT" && !point.earth ? "ORBIT" : "FPV",
+        earth: point.earth
       },
       objects: point.objects ?? [],
       effects: point.effects ?? [],

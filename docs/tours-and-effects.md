@@ -157,6 +157,34 @@ the drawn photos with the same cameras is listed in `space_data.splats` with
 `role: "sketch"` (or `"watercolor"`), loaded only when a look asks for it.
 Without a drawn version, a look draws the frame's edges itself.
 
+## The map
+
+A stop can fly up out of the capture to a view from above over Google's
+photorealistic 3D map, and the next stop dives back down into its panorama
+or splat. The tour first needs the space's spot on the map: in the builder's
+**Map** tab, stand at a panorama, paste its coordinates from Google Maps, then
+choose **See it from above** and turn the map until the amber dots for the
+panoramas follow the paths and walls under them. Each stop then has **Fly up
+over the map at this stop** and a height.
+
+```json
+"place": { "lat": 30.3221, "lon": 35.4517, "heading": 62, "nodeId": "pano-157" },
+"stops": [{ "id": "above", "view": { "nodeId": "pano-150", "rotation": { "azimuth": 0, "polar": -50 }, "earth": { "range": 700 } } }]
+```
+
+`heading` is the compass bearing a view at azimuth 0 faces, `nodeId` the
+panorama at `lat`/`lon` (the space's origin without one), and `range` the
+camera's distance in meters from the floor at the stop's location, along its
+view. The map's ground is matched to the floor where the camera takes off, so
+no elevation data is needed; `elevation` raises or lowers it after that, and
+`scale` fits captures not measured in meters. A capture package that knows
+where it is can carry the same object as `space_data.geo`.
+
+The map loads only when a stop above it is current or next, as seen from
+that stop, and Google's logo and data credits show while it is in view. The
+browser key comes from `SPHR_GOOGLE_TILES_KEY` through `/api/earth`; restrict
+it to the site's addresses and the Map Tiles API in the Google Cloud console.
+
 ## Sound
 
 Two effects make sound. `sound` plays a clip when a stop opens, loops it

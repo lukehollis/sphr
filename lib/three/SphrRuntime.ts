@@ -23,6 +23,8 @@ import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
 import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
 import { ExperienceAudio } from "@/lib/experience/audio";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
+import { EarthLayer } from "@/lib/three/layers/EarthLayer";
+import { earthNear, earthPose } from "@/lib/three/earth";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { LookPass, lookKey, type LookHost } from "@/lib/three/looks/LookPass";
 import { PanoramaLayer, panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
@@ -32,7 +34,7 @@ import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 import type { StartView } from '@/lib/scene-edits';
-import type { EffectInstance, ExperienceKind, PlacedObject, StopLook, StopView, Vec3 } from "@/lib/experience/types";
+import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopLook, StopView, Vec3 } from "@/lib/experience/types";
 
 export type GizmoMode = "translate" | "rotate" | "scale";
 /** A pixel in a panorama face (agents) or in the current view (editor), as 0..1 fractions from the top left. */
@@ -40,7 +42,7 @@ export type PixelAnchor = { nodeId?: string; face?: number; x: number; y: number
 /** A camera pose remembered with a captured view, so later placements aim from where it was taken. */
 export type ViewCamera = { position: Vec3; quaternion: [number, number, number, number]; fov: number; aspect: number };
 /** Live edits from the builder. A `standalone` tour's points replace the stops even when there are none. */
-export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; look?: StopLook; standalone?: boolean };
+export type ExperienceUpdate = { kind: ExperienceKind; objects: PlacedObject[]; effects: EffectInstance[]; points: TourPoint[]; finale?: string; look?: StopLook; place?: EarthPlace; standalone?: boolean };
 
 type CameraPose = {
   position: THREE.Vector3;
@@ -49,6 +51,11 @@ type CameraPose = {
 };
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const NEAR = 0.02;
+// Flights up to the map and back down take longer than a step between panoramas.
+const EARTH_CLIMB_MS = 4200;
+const EARTH_DIVE_MS = 3800;
+const EARTH_GLIDE_MS = 3000;
 const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
 
 function isTypingTarget(target: EventTarget | null) {
@@ -58,7 +65,7 @@ function isTypingTarget(target: EventTarget | null) {
 
 export class SphrRuntime {
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(80, 1, 0.02, 20000);
+  readonly camera = new THREE.PerspectiveCamera(80, 1, NEAR, 20000);
   readonly renderer: THREE.WebGLRenderer;
 
   private readonly tour;
@@ -81,6 +88,8 @@ export class SphrRuntime {
   private iiif: IiifImageLayer | null = null;
   private nav: NavigationLayer | null = null;
   private skybox: SkyboxLayer | null = null;
+  private earth: EarthLayer | null = null;
+  private lastEarthCredits = 0;
   private sceneGraph: SceneGraphLayer | null = null;
   private cursor: CursorLayer | null = null;
   private annotations: AnnotationLayer | null = null;
@@ -307,6 +316,10 @@ export class SphrRuntime {
     this.state.activePointIndex = pointIndex;
     this.state.viewMode = nextViewMode;
     this.updateControlsForViewMode();
+    this.prepareEarth(outgoingNode);
+    const earth = this.earth;
+    const earthPoint = nextViewMode === "ORBIT" && Boolean(earth && this.earthPlace() && point.earth);
+    const climbing = earthPoint && !fromOverview && !instant;
     if (this.isNavigating) this.nav?.beginTransition();
     this.nav?.setOrbit(nextViewMode === "ORBIT");
 
@@ -329,7 +342,8 @@ export class SphrRuntime {
 
     if (node) {
       this.currentNode = node;
-      this.panorama?.navigate(node, navigationMs, {
+      // Climbing, the photograph the visitor stands in stays until it fades; the next one loads on landing.
+      if (!climbing) this.panorama?.navigate(node, navigationMs, {
         replaceImmediately: returningFromOverview || instant,
         fadeStart: navigationTransition?.fadeStart
       });
@@ -339,14 +353,18 @@ export class SphrRuntime {
     this.audio.play("navigate");
     this.audio.updateForPoint(this.state.guided ? point : undefined, outgoingPoint);
 
-    this.panorama?.setVisible(this.state.viewMode === "FPV");
+    // Climbing to the map, the photograph stays and fades as the camera rises out of it.
+    this.panorama?.setVisible(this.state.viewMode === "FPV" || climbing);
     const pose = this.poseForPoint(point, this.state.viewMode);
     if (preserveHeading && this.state.viewMode === "FPV") {
       pose.target.copy(pose.position).addScaledVector(heading, 0.1);
       pose.fov = this.camera.fov;
     }
-    if (returningFromOverview) this.flyFromOverview(pose);
+    if (climbing) this.flyToEarth(pose);
+    else if (returningFromOverview) this.flyFromOverview(pose);
+    else if (earth && !instant && (earthPoint || earth.visible)) this.glideOverEarth(pose, earthPoint);
     else {
+      if (instant) earth?.setOpacity(earthPoint ? 1 : 0);
       this.flyTo(pose, instant || teleport);
       if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationMs);
       else if (this.isNavigating) this.endNavigationTransition();
@@ -461,6 +479,7 @@ export class SphrRuntime {
     this.navigationReleaseTween = null;
     this.audio.dispose();
     this.skybox?.dispose();
+    this.earth?.dispose();
     this.splats?.dispose();
     this.panorama?.dispose();
     this.iiif?.dispose();
@@ -1068,7 +1087,13 @@ export class SphrRuntime {
     this.tour.effects = update.effects;
     this.tour.finale = update.finale;
     this.tour.look = update.look;
+    this.tour.place = update.place ?? this.bootstrap.space.space_data.geo;
     if (this.state.activePointIndex >= (segment?.tourpoints.length ?? 1)) this.state.activePointIndex = 0;
+    // The builder turns and moves the map live while it is in view.
+    const place = this.earthPlace();
+    if (this.earth && place) this.earth.setPlace(place, this.placeAnchor(place));
+    else if (this.earth && !place) this.earth.setOpacity(0);
+    this.prepareEarth(this.currentNode);
     await Promise.all([this.objects?.setObjects(update.objects), this.effects?.setEffects(update.effects)]);
     if (this.disposed) return;
     this.sceneGraph?.setOccluding(update.objects.length > 0 || update.effects.length > 0);
@@ -1184,8 +1209,36 @@ export class SphrRuntime {
       ...(!panoramas ? { position: { x: Number(this.camera.position.x.toFixed(3)), y: Number(this.camera.position.y.toFixed(3)), z: Number(this.camera.position.z.toFixed(3)) } } : {}),
       rotation,
       fov: Math.round(this.camera.fov),
-      ...(this.state.viewMode === "ORBIT" ? { viewMode: "ORBIT" as const } : {})
+      ...(this.state.viewMode === "ORBIT" ? { viewMode: "ORBIT" as const } : {}),
+      ...(this.state.viewMode === "ORBIT" && this.earth?.visible
+        ? { earth: { range: Math.round(this.camera.position.distanceTo(this.controls.target) / (this.earthPlace()?.scale ?? 1)) } } : {})
     };
+  }
+
+  /** Builder: rise over the map from where the camera stands, to line the map up with the space. */
+  async showEarth(range = 600) {
+    const place = this.earthPlace();
+    if (!place || this.isNavigating) return false;
+    const anchor = this.placeAnchor(place);
+    if (this.earth) this.earth.setPlace(place, anchor);
+    else this.earth = this.createEarth(place, anchor);
+    if (this.currentNode && !this.earth.visible) this.earth.setFocus(this.floorOf(this.currentNode));
+    if (!(await this.earth.load()) || this.disposed || this.isNavigating) return false;
+    const target = this.currentNode ? this.floorOf(this.currentNode) : this.controls.target.clone();
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    const azimuth = THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z));
+    const pose = earthPose(target, { range }, { azimuth, polar: -50 }, place.scale ?? 1);
+    const fromOverview = this.state.viewMode === "ORBIT";
+    this.state.viewMode = "ORBIT";
+    this.updateControlsForViewMode();
+    this.nav?.setOrbit(true);
+    if (fromOverview) this.glideOverEarth(pose, true);
+    else {
+      this.panorama?.setVisible(true);
+      this.flyToEarth(pose);
+    }
+    this.emitState();
+    return true;
   }
 
   /** Bounds of everything captured: meshes, splats and panorama locations. */
@@ -1286,6 +1339,7 @@ export class SphrRuntime {
       this.effects?.update(now / 1000, elapsed);
       this.looks?.update(elapsed);
       this.splats?.update();
+      this.updateEarth(now);
       this.cursor?.update(now);
       if (this.looks) this.looks.render(this.scene, this.camera, now / 1000);
       else this.renderer.render(this.scene, this.camera);
@@ -1300,15 +1354,99 @@ export class SphrRuntime {
     this.panorama?.setVisible(true);
     this.panorama?.setPresentationOpacity(0);
     this.sceneGraph?.setOverviewReturnBlend(0);
-    this.flyTo(pose, false, () => {
+    // Diving from the map, the map gives way to the photograph just above the ground.
+    const earth = this.earth?.visible ? this.earth : null;
+    const done = () => {
+      earth?.setOpacity(0);
       this.panorama?.setPresentationOpacity(1);
       this.sceneGraph?.setOverviewReturnBlend(null);
       this.endNavigationTransition();
-    }, (progress) => {
+    };
+    const update = (progress: number) => {
       // Retain spatial depth during the flight; reveal the photo only near its capture origin.
-      const blend = THREE.MathUtils.smoothstep(progress, 0.85, 1);
+      const blend = THREE.MathUtils.smoothstep(progress, earth ? 0.78 : 0.85, earth ? 0.98 : 1);
       this.panorama?.setPresentationOpacity(blend);
       this.sceneGraph?.setOverviewReturnBlend(blend);
+      earth?.setOpacity(1 - THREE.MathUtils.smoothstep(progress, 0.72, 0.93));
+    };
+    if (earth) this.flyArc(pose, EARTH_DIVE_MS, update, done);
+    else this.flyTo(pose, false, done, update);
+  }
+
+  /** Rise out of the photograph to the stop's view over the map. */
+  private flyToEarth(pose: CameraPose) {
+    const earth = this.earth!;
+    this.isNavigating = true;
+    this.state.navigating = true;
+    this.controls.enabled = false;
+    this.sceneGraph?.setViewMode("FPV", this.state.debug);
+    this.flyArc(pose, EARTH_CLIMB_MS, (progress) => {
+      // The map's coarse ground near the camera stays behind the photograph until it is well above it.
+      this.panorama?.setPresentationOpacity(1 - THREE.MathUtils.smoothstep(progress, 0.04, 0.22));
+      earth.setOpacity(THREE.MathUtils.smoothstep(progress, 0.06, 0.28));
+      if (progress > 0.22) this.sceneGraph?.setViewMode("ORBIT", this.state.debug);
+    }, () => {
+      earth.setOpacity(1);
+      this.panorama?.setVisible(false);
+      this.panorama?.setPresentationOpacity(1);
+      this.endNavigationTransition();
+    });
+  }
+
+  /** From one view above the space to another, bringing the map in or taking it away. */
+  private glideOverEarth(pose: CameraPose, show: boolean) {
+    const earth = this.earth!;
+    const start = earth.opacity;
+    this.isNavigating = true;
+    this.state.navigating = true;
+    this.controls.enabled = false;
+    this.flyArc(pose, EARTH_GLIDE_MS, (progress) => {
+      earth.setOpacity(show ? Math.max(start, THREE.MathUtils.smoothstep(progress, 0, 0.5)) : start * (1 - THREE.MathUtils.smoothstep(progress, 0.2, 0.8)));
+    }, () => {
+      earth.setOpacity(show ? 1 : 0);
+      this.endNavigationTransition();
+    });
+  }
+
+  /**
+   * Fly around the target instead of straight at it: the distance changes
+   * evenly in proportion, the way a map zooms, and the camera swings from one
+   * side to the other on the way.
+   */
+  private flyArc(pose: CameraPose, duration: number, onUpdate?: (progress: number) => void, onComplete?: () => void) {
+    const fromTarget = this.controls.target.clone();
+    const fromOffset = this.camera.position.clone().sub(fromTarget);
+    const toOffset = pose.position.clone().sub(pose.target);
+    // Shifted so the last meters near the ground go quickly.
+    const shift = 15 * (this.earthPlace()?.scale ?? 1);
+    const fromLog = Math.log(fromOffset.length() + shift);
+    const toLog = Math.log(toOffset.length() + shift);
+    const fromDirection = fromOffset.lengthSq() > 1e-10 ? fromOffset.normalize() : new THREE.Vector3(0, 0, 1);
+    const toDirection = toOffset.lengthSq() > 1e-10 ? toOffset.normalize() : new THREE.Vector3(0, 1, 0);
+    const turn = new THREE.Quaternion().setFromUnitVectors(fromDirection, toDirection);
+    const step = new THREE.Quaternion();
+    const identity = new THREE.Quaternion();
+    const direction = new THREE.Vector3();
+    const fromFov = this.camera.fov;
+    this.cameraTween?.cancel();
+    this.cameraTween = createTween({
+      duration,
+      easing: (value) => 0.5 - Math.cos(Math.PI * value) / 2,
+      onUpdate: (value) => {
+        step.slerpQuaternions(identity, turn, value);
+        direction.copy(fromDirection).applyQuaternion(step);
+        const distance = Math.max(0, Math.exp(fromLog + (toLog - fromLog) * value) - shift);
+        this.controls.target.lerpVectors(fromTarget, pose.target, value);
+        this.camera.position.copy(this.controls.target).addScaledVector(direction, Math.max(distance, 1e-3));
+        this.camera.fov = fromFov + (pose.fov - fromFov) * value;
+        this.camera.updateProjectionMatrix();
+        this.camera.lookAt(this.controls.target);
+        onUpdate?.(value);
+      },
+      onComplete: () => {
+        this.setCameraPose(pose);
+        onComplete?.();
+      }
     });
   }
 
@@ -1348,6 +1486,10 @@ export class SphrRuntime {
   }
 
   private poseForPoint(point: TourPoint | undefined, mode: "FPV" | "ORBIT"): CameraPose {
+    if (mode === "ORBIT" && point?.earth) {
+      const pose = this.earthPoseFor(point);
+      if (pose) return pose;
+    }
     if (point?.targetType === 'MODEL') {
       const bounds = this.sceneGraph?.getBounds(point.models);
       const target = bounds && !bounds.isEmpty() ? bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
@@ -1385,6 +1527,89 @@ export class SphrRuntime {
       point?.position ?? this.bootstrap.space.space_data.initialPosition ?? { x: 0, y: 1.5, z: 4 }
     );
     return this.poseForTarget(position, point?.rotation ?? this.bootstrap.space.space_data.initialRotation, point?.zoom, mode, point?.fov, point?.distance);
+  }
+
+  // ---- The 3D map under the space ----
+
+  /** Where the tour puts the space on the map; the place covers the opening space only. */
+  private earthPlace(): EarthPlace | null {
+    return this.state.activeSpaceIndex === 0 ? this.tour.place ?? null : null;
+  }
+
+  /** The floor at a panorama location, where the camera takes off for the map and lands. */
+  private floorOf(node: NodeData) {
+    if (this.nav) return node.floorPosition ? this.nav.getWorldFloorPosition(node) : this.nav.getWorldPosition(node).sub(new THREE.Vector3(0, 1.5, 0));
+    return vectorFromLike(node.floorPosition ?? node.position);
+  }
+
+  /** The location in the space that sits at the place's latitude and longitude. */
+  private placeAnchor(place: EarthPlace) {
+    const data = this.bootstrap.space.space_data;
+    const node = this.resolveNode(place.nodeId) ?? (data.noPanos ? null : this.resolveNode(data.initialNode) ?? this.getNodes()[0]);
+    return node ? this.floorOf(node) : new THREE.Vector3();
+  }
+
+  /** What a stop above the map looks down on: the floor at its location, or its target. */
+  private earthTarget(point: TourPoint) {
+    const node = this.resolveNode(point.nodeUUID);
+    if (node) return this.floorOf(node);
+    return vectorFromLike(point.position ?? this.bootstrap.space.space_data.initialPosition, this.getSpaceBounds().getCenter(new THREE.Vector3()));
+  }
+
+  private earthPoseFor(point: TourPoint): CameraPose | null {
+    const place = this.earthPlace();
+    if (!place || !point.earth) return null;
+    return earthPose(this.earthTarget(point), point.earth, point.rotation, place.scale ?? 1);
+  }
+
+  /**
+   * Load the map once a stop above it is next or current, and fetch it as seen
+   * from that stop. Until then the tour costs no map requests.
+   */
+  private prepareEarth(takeoff: NodeData | null) {
+    const place = this.earthPlace();
+    const points = this.tour.spaces[this.state.activeSpaceIndex]?.tourpoints ?? [];
+    const index = this.state.activePointIndex;
+    const upcoming = [points[index], points[index + 1]].find((point) => point?.earth);
+    if (!place || !upcoming) {
+      this.earth?.preload(null);
+      return;
+    }
+    const anchor = this.placeAnchor(place);
+    if (this.earth) this.earth.setPlace(place, anchor);
+    else this.earth = this.createEarth(place, anchor);
+    void this.earth.load();
+    // Above the map, fetch the ground where the tour lands next, so the dive meets detail.
+    const landing = upcoming === points[index] && points[index + 1] && !points[index + 1].earth ? points[index + 1] : null;
+    this.earth.preload(landing ? this.poseForPoint(landing, "FPV") : this.earthPoseFor(upcoming));
+    if (takeoff && !this.earth.visible) this.earth.setFocus(this.floorOf(takeoff));
+  }
+
+  private createEarth(place: EarthPlace, anchor: THREE.Vector3) {
+    const earth = new EarthLayer(this.scene, this.camera, this.renderer, place, anchor);
+    earth.setPath(this.getNodes().map((node) => this.floorOf(node)));
+    return earth;
+  }
+
+  private updateEarth(now: number) {
+    const earth = this.earth;
+    if (!earth) return;
+    earth.update();
+    // Over the map, the camera stays above the horizon.
+    const lowest = earth.visible ? THREE.MathUtils.degToRad(84) : Math.PI;
+    if (this.controls.maxPolarAngle !== lowest) this.controls.maxPolarAngle = lowest;
+    // Keep the map's depth steady from the ground to kilometers up.
+    const near = earth.visible ? earthNear(this.camera.position.distanceTo(this.controls.target)) : NEAR;
+    if (Math.abs(this.camera.near - near) > near * 0.05) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
+    if (now - this.lastEarthCredits < 1000) return;
+    this.lastEarthCredits = now;
+    const credits = earth.visible ? earth.credits() : "";
+    if ((this.state.earth?.credits ?? null) === (earth.visible ? credits : null)) return;
+    this.state.earth = earth.visible ? { credits } : undefined;
+    this.emitState();
   }
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {

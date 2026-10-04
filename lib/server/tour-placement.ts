@@ -80,7 +80,8 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
   // that spot was picked in a photo taken somewhere else.
   const stops = experience.stops.map((stop) => {
     const anchor = anchors.stops[stop.id];
-    const spot = anchor ? resolve(anchor) : null;
+    // A stop above the map keeps the angle the agent gave it.
+    const spot = anchor && !stop.view.earth ? resolve(anchor) : null;
     if (!spot) return stop;
     // In a space without panoramas, a stop stands where the view it was aimed in was drawn from.
     const drawnFrom = anchor?.view ? views.find((item) => item.id === anchor.view) : undefined;
@@ -124,7 +125,7 @@ export function frameStops(bootstrap: SphrBootstrap, experience: Experience, onl
     const node = stop.view.nodeId ? nodes.get(stop.view.nodeId) : undefined;
     const rotation = stop.view.rotation;
     const shown = stop.objects.filter((id) => !only || only.has(id)).map((id) => objects.get(id)).filter((object): object is NonNullable<typeof object> => Boolean(object));
-    if (!node || !rotation || !shown.length) return stop;
+    if (!node || !rotation || !shown.length || stop.view.earth) return stop;
     const eye = worldFromGroupedPoint(node.position, settings);
     const aims = shown.map((object) => {
       const point = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.3, 0));

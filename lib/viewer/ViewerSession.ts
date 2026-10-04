@@ -171,6 +171,7 @@ export class ViewerSession {
       data.effects = update.effects;
       data.finale = update.finale;
       data.look = update.look;
+      data.place = update.place;
       if (update.points.length) data.mode = 'guided';
     }
     if (segment) {
@@ -188,6 +189,7 @@ export class ViewerSession {
   setGizmoMode(mode: GizmoMode) { this.active?.three?.setGizmoMode(mode); }
   resolveAnchor(anchor: PixelAnchor) { return this.active?.three?.resolveAnchor(anchor) ?? null; }
   cameraView() { return this.active?.three?.cameraView() ?? null; }
+  showEarth(range?: number) { return this.active?.three?.showEarth(range) ?? Promise.resolve(false); }
   aimFrom(nodeId: string, point: [number, number, number]) { return this.active?.three?.aimFrom(nodeId, point) ?? null; }
   captureView() { return this.active?.three?.captureView() ?? null; }
   requestHint() { this.active?.three?.requestHint(); }

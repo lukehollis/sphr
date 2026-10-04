@@ -213,6 +213,8 @@ Models. Prefer a library model to a plain shape whenever one fits: an amphora, a
 
 Looks. A look restyles the whole frame, like a filter in a video editor: a line drawing, a blueprint, film noir, night vision and more. Set "style" on the tour for its overall look, or on a stop to change the look there, with a transition: cut, fade, dissolve, wipe, iris (opens from what the stop is about), sweep (opens through the space like a scan) or glitch, and a duration in seconds. A stop without "style" keeps the tour's look; give a stop {"look": "color"} to return to the capture itself. Use looks to mark moments and moods (a line drawing that sweeps into color, a blueprint for how a building was planned, noir for a mystery), not on every stop.
 
+The map. A stop can fly up out of the capture to a view from above over Google's photorealistic 3D map, then the next stop dives back down into its panorama or splat. Give such a stop "earth": {"range": meters from the ground to the camera} (300 to 800 for a single building or courtyard, 1000 to 3000 for a whole valley or city) and a "rotation" whose tilt (polar) looks down between -30 and -70, aimed with azimuth like any stop; its nodeId is the location the view centers on. Use it to open a tour by showing where the site sits in its landscape, to move between distant parts of a site, or to close by pulling back. One or two per tour is plenty. It only shows once the space is on the map: if the draft has no "place" and you know where this site is, give "place": {"lat", "lon"} in decimal degrees for the location the tour starts at, and a person will turn the map to line it up.
+
 Effects. Use effects to serve the story, not everywhere. A stop lists the effect IDs that run while it is shown; "always" effects run through free exploration too. Use the object target to attach an effect to a placed object. Hunt finds already burst with sparkles, so you do not need to add that. Use colors that suit the space.
 
 Sizes. Real objects should be life size. Hunt items are usually 0.15 to 0.5 m.
@@ -252,6 +254,7 @@ const WRITE_TOUR: Anthropic.Tool = {
       kind: { type: "string", enum: ["tour", "hunt"] },
       finale: { type: "string" },
       style: styleSchema,
+      place: { type: "object", properties: { lat: { type: "number" }, lon: { type: "number" } }, required: ["lat", "lon"] },
       objects: {
         type: "array",
         items: {
@@ -295,6 +298,7 @@ const WRITE_TOUR: Anthropic.Tool = {
             rotation: { type: "object", properties: { azimuth: { type: "number" }, polar: { type: "number" } } },
             position: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
             fov: { type: "number" },
+            earth: { anyOf: [{ type: "null" }, { type: "object", properties: { range: { type: "number" } }, required: ["range"] }] },
             style: styleSchema,
             objects: { type: "array", items: { type: "string" } },
             effects: { type: "array", items: { type: "string" } },
@@ -309,7 +313,7 @@ const WRITE_TOUR: Anthropic.Tool = {
 };
 
 export type RawDraft = {
-  reply?: unknown; kind?: unknown; finale?: unknown; style?: unknown;
+  reply?: unknown; kind?: unknown; finale?: unknown; style?: unknown; place?: unknown;
   objects?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>>; stops?: Array<Record<string, unknown>>;
 };
 
@@ -355,14 +359,18 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
     const rotation = stop.rotation && typeof stop.rotation === "object" ? stop.rotation : before?.view.rotation ?? { azimuth: 0, polar: 0 };
     return {
       id, title: stop.title, text: stop.text, detail: stop.detail,
-      view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}) },
+      view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}),
+        ...(stop.earth === undefined ? before?.view.earth ? { earth: before.view.earth } : {} : stop.earth ? { earth: stop.earth } : {}) },
       objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
       look: stop.style === undefined ? before?.look : stop.style,
       files: before?.files, sounds: before?.sounds, models: before?.models, annotations: before?.annotations
     };
   });
   const look = raw.style === undefined ? previous.look : raw.style;
-  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, look, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
+  // A place a person lined up stays; the agent only suggests where an unplaced space is.
+  const suggested = raw.place as { lat?: unknown; lon?: unknown } | undefined;
+  const place = previous.place ?? (suggested && typeof suggested === "object" ? { lat: suggested.lat, lon: suggested.lon, heading: 0 } : undefined);
+  const experience = parseExperience({ version: 1, kind: raw.kind, finale: raw.finale, look, place, objects, effects, stops }, { nodeIds: nodeIds.size ? nodeIds : undefined, lenient: true });
   const dropped = objects.length - experience.objects.length;
   const said = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
   const reply = dropped > 0 ? `${said} (${dropped === 1 ? "One object" : `${dropped} objects`} could not be placed because the model was not found in the library.)` : said;

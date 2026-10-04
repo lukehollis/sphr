@@ -306,6 +306,7 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
     effects: Array.isArray(tourData.effects) ? tourData.effects : [],
     finale: typeof tourData.finale === "string" ? tourData.finale : undefined,
     look: tourData.look && typeof tourData.look === "object" ? tourData.look : undefined,
+    place: tourData.place && typeof tourData.place === "object" ? tourData.place : bootstrap.space.space_data.geo,
     title: bootstrap.tour?.title ?? bootstrap.space.title,
     spaces: spaces.length ? spaces : [firstSpaceFallback],
     audio: tourData.audio ?? {},

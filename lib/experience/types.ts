@@ -44,12 +44,34 @@ export type EffectInstance = {
   always?: boolean;
 };
 
+/**
+ * Where the space sits on Google's photorealistic 3D map: the latitude and
+ * longitude of one location in it, and the compass bearing of its heading 0.
+ */
+export type EarthPlace = {
+  lat: number;
+  lon: number;
+  /** Degrees clockwise from north that a view at azimuth 0 faces. */
+  heading: number;
+  /** The panorama location at lat/lon. Without one, the space's origin. */
+  nodeId?: string;
+  /** Meters to raise the map after its ground is matched to the floor there. */
+  elevation?: number;
+  /** Space units per meter, for captures not measured in meters. */
+  scale?: number;
+};
+
+/** A stop seen from above over the 3D map, `range` meters back along its view. */
+export type StopEarth = { range: number };
+
 export type StopView = {
   nodeId?: string;
   position?: Vector3Like;
   rotation: CameraRotation;
   fov?: number;
   viewMode?: "FPV" | "ORBIT";
+  /** Fly up over the map at this stop, then back down into the next one. */
+  earth?: StopEarth;
 };
 
 /** A scavenger hunt step asks the visitor to find one placed object. */
@@ -103,7 +125,11 @@ export type Experience = {
   effects: EffectInstance[];
   /** The look for free exploration and for stops without their own. */
   look?: StopLook;
+  /** Where the space is on the 3D map, for stops seen from above. */
+  place?: EarthPlace;
 };
+
+export const EARTH_RANGE = { min: 30, max: 20000, default: 600 } as const;
 
 export const EXPERIENCE_LIMITS = {
   stops: 60,

@@ -160,6 +160,11 @@ export default function SphrApp({ configUrl, preview, edits, editor, chrome = !e
       />
 
       {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
+      {started && runtimeState.earth && <div className="earth-credit">
+        {/* Google asks for its logo and the map's data providers whenever its 3D map is in view. */}
+        <img src="https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png" alt="Google" width={59} height={18} />
+        {runtimeState.earth.credits && <span>{runtimeState.earth.credits}</span>}
+      </div>}
       {started && chrome && runtimeState.finished && (tour?.finale || hunt) && <TourFinale
         text={tour?.finale}
         hunt={hunt ? { found: runtimeState.hunt?.found.length ?? 0, steps: huntSteps.length } : undefined}

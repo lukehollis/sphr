@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Camera, Eye, Move3d, Play, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Eye, Globe, Move3d, Play, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
 import SphrApp from "./SphrApp";
 import type { SceneListing } from "@/lib/scene-types";
 import type { SceneEdits } from "@/lib/scene-edits";
@@ -11,7 +11,7 @@ import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
 import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, soundEntries } from "@/lib/experience/packs";
 import { resolveParams, type ParamSpec } from "@/lib/experience/registry";
-import { LOOK_TRANSITIONS, newId, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
+import { EARTH_RANGE, LOOK_TRANSITIONS, newId, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import { placeObjectAt } from "@/lib/experience/placement";
 import { matchModel, stem } from "@/lib/experience/library-search";
@@ -32,10 +32,10 @@ type Props = {
 
 type Turn = { prompt: string; reply: string };
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
-type Tab = "stops" | "objects" | "effects" | "look";
+type Tab = "stops" | "objects" | "effects" | "look" | "map";
 
 function updateFor(draft: Experience, standalone: boolean) {
-  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, standalone };
+  return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, place: draft.place, standalone };
 }
 
 export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api, tour }: Props) {
@@ -377,8 +377,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         </form>
 
         <div className="builder-tabs" role="tablist" aria-label="Tour parts">
-          {(["stops", "objects", "effects", "look"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
-            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : "Look"}
+          {(["stops", "objects", "effects", "look", "map"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
+            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : value === "look" ? "Look" : "Map"}
           </button>)}
         </div>
 
@@ -411,6 +411,17 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                 {draft.objects.length > 0 && <fieldset><legend>Objects shown here</legend><div className="builder-chips">
                   {draft.objects.filter((object) => !object.always).map((object) => <button type="button" key={object.id} aria-pressed={stop.objects.includes(object.id)} onClick={() => patchStop(stop.id, { objects: toggle(stop.objects, object.id) })}>{object.name}</button>)}
                 </div></fieldset>}
+                <fieldset><legend>From above</legend>
+                  <label className="builder-check"><input type="checkbox" checked={Boolean(stop.view.earth)} disabled={!draft.place}
+                    onChange={(event) => {
+                      patchStop(stop.id, { view: { ...stop.view, earth: event.target.checked ? { range: EARTH_RANGE.default } : undefined } });
+                      setTimeout(() => void session.current?.goToStop(index), 400);
+                    }} /> Fly up over the map at this stop</label>
+                  {!draft.place && <p className="editor-help">Put the space on the map first, in the Map tab.</p>}
+                  {stop.view.earth && <label>Height above the ground, {stop.view.earth.range} m<input type="range" min={100} max={5000} step={50} value={Math.min(5000, stop.view.earth.range)}
+                    onChange={(event) => patchStop(stop.id, { view: { ...stop.view, earth: { range: Number(event.target.value) } } })}
+                    onPointerUp={() => void session.current?.goToStop(index)} /></label>}
+                </fieldset>
                 {draft.effects.length > 0 && <fieldset><legend>Effects here</legend><div className="builder-chips">
                   {draft.effects.filter((effect) => !effect.always).map((effect) => <button type="button" key={effect.id} aria-pressed={stop.effects.includes(effect.id)} onClick={() => patchStop(stop.id, { effects: toggle(stop.effects, effect.id) })}>{effect.name || effectEntry(effect.type)?.label || effect.type}</button>)}
                 </div></fieldset>}
@@ -477,6 +488,12 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             else setDraft((current) => ({ ...current, look }));
           }} />}
 
+        {tab === "map" && <MapPanel place={draft.place} nodeId={state?.activeNodeId} ready={Boolean(canEdit)}
+          onChange={(place) => setDraft((current) => ({ ...current, place }), true)}
+          onShow={() => {
+            void session.current?.showEarth().then((shown) => { if (!shown) setError("The map could not load here. Check the coordinates, then try again."); });
+          }} />}
+
         {tab === "effects" && <div role="tabpanel" className="builder-list">
           <label className="builder-add-effect">Add an effect<select value="" disabled={!canEdit} onChange={(event) => { if (event.target.value) addEffect(event.target.value); }}>
             <option value="">Choose an effect</option>
@@ -499,6 +516,43 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         </div>
       </div>
     </aside>
+  </div>;
+}
+
+/** "30.3216, 35.4520" as copied from Google Maps, or two numbers in any common form. */
+function parseCoordinates(text: string) {
+  const numbers = text.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  if (numbers.length !== 2) return null;
+  const [lat, lon] = numbers;
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+}
+
+/**
+ * Where the space is on Google's 3D map: the coordinates of the panorama the
+ * builder stands at, and the turn that lines the capture up with the map.
+ */
+function MapPanel({ place, nodeId, ready, onChange, onShow }: {
+  place?: EarthPlace; nodeId?: string; ready: boolean;
+  onChange: (place: EarthPlace | undefined) => void; onShow: () => void;
+}) {
+  const [coordinates, setCoordinates] = useState(place ? `${place.lat}, ${place.lon}` : "");
+  const parsed = parseCoordinates(coordinates);
+  return <div role="tabpanel" className="builder-list">
+    <p className="editor-help">Put this space on Google&apos;s 3D map, and any stop can fly up to show the site from above, then dive back down into the next one.</p>
+    <label>Coordinates of where you are standing<input value={coordinates} inputMode="decimal" placeholder="30.3216, 35.4520" onChange={(event) => setCoordinates(event.target.value)} /></label>
+    <p className="editor-help">In Google Maps, right-click the same spot and click the numbers at the top of the menu to copy them.</p>
+    <button type="button" disabled={!parsed || !ready} onClick={() => parsed && onChange({ heading: 0, ...place, lat: parsed.lat, lon: parsed.lon, ...(nodeId ? { nodeId } : {}) })}>
+      <Globe size={16} aria-hidden="true" /> {place ? "Move it to these coordinates" : "Put it on the map here"}</button>
+    {place && <>
+      <div className="builder-row">
+        <button type="button" disabled={!ready} onClick={onShow}><Eye size={16} aria-hidden="true" /> See it from above</button>
+      </div>
+      <label>Turn the map, {place.heading}°<input type="range" min={0} max={359.5} step={0.5} value={place.heading} onChange={(event) => onChange({ ...place, heading: Number(event.target.value) })} /></label>
+      <label>Exact turn in degrees<input type="number" min={0} max={359.99} step={0.1} value={place.heading} onChange={(event) => onChange({ ...place, heading: Number(event.target.value) || 0 })} /></label>
+      <p className="editor-help">Seen from above, turn the map until the dots for the panoramas follow the paths and walls under them.</p>
+      <label>Raise or lower the map, in meters<input type="number" step={0.5} value={place.elevation ?? 0} onChange={(event) => onChange({ ...place, elevation: Number(event.target.value) || 0 })} /></label>
+      <button type="button" className="builder-danger" onClick={() => onChange(undefined)}><Trash2 size={16} aria-hidden="true" /> Take it off the map</button>
+    </>}
   </div>;
 }
 

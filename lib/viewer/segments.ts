@@ -36,6 +36,8 @@ export function tourSegment(bootstrap: SphrBootstrap, spaceIndex: number, pointI
         ...bootstrap.tour?.tour_data,
         mode: tour.hasGuidedTour ? 'guided' : 'explore',
         spaces: [segment], objects, effects,
+        // The tour's place on the map is the opening space's; other spaces use their own capture's.
+        place: model || spaceIndex !== 0 ? undefined : data?.place,
         sceneGraph: model ? activeSpace.space_data.sceneGraph : [...graph.values()],
         annotationGraph: model ? [] : tour.annotationGraph
       } }

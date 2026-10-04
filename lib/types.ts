@@ -1,4 +1,4 @@
-import type { EffectInstance, ExperienceKind, PlacedObject, StopFind, StopLook } from "@/lib/experience/types";
+import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopEarth, StopFind, StopLook } from "@/lib/experience/types";
 
 export type Vector3Like = {
   x: number;
@@ -102,6 +102,8 @@ export type TourPoint = {
   find?: StopFind;
   /** The frame's look at this stop (see TourData.look). */
   look?: StopLook;
+  /** Seen from above over the 3D map (see TourData.place). */
+  earth?: StopEarth;
   mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
@@ -152,6 +154,8 @@ export type TourData = {
   finale?: string;
   /** The frame's look in free exploration and at stops without their own. */
   look?: StopLook;
+  /** Where the space is on the 3D map; the capture's own `geo` when unset. */
+  place?: EarthPlace;
   audio?: Record<string, AudioConfig>;
   autoplay?: boolean;
   defaultShowText?: boolean;
@@ -257,6 +261,8 @@ export type SpaceData = {
   navigationTransition?: NavigationTransitionConfig;
   sceneGraph?: SceneGraphNode[];
   annotationGraph?: AnnotationConfig[];
+  /** Where the capture is on the 3D map, when its package knows. */
+  geo?: EarthPlace;
 };
 
 export type SphrSpace = {
@@ -346,6 +352,7 @@ export type NormalizedTour = {
   effects: EffectInstance[];
   finale?: string;
   look?: StopLook;
+  place?: EarthPlace;
   title: string;
   spaces: TourSpace[];
   audio: Record<string, AudioConfig>;
@@ -378,6 +385,8 @@ export type RuntimeState = {
   finished?: boolean;
   /** Scavenger hunt progress: IDs of found objects, and whether this step's object is found. */
   hunt?: { found: string[]; stepFound: boolean; hint: boolean };
+  /** The 3D map is in view; its data providers must be credited on screen. */
+  earth?: { credits: string };
 };
 
 export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };

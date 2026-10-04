@@ -1,8 +1,10 @@
 import { effectEntry, lookEntry, shapeEntry } from "@/lib/experience/packs";
 import { resolveParams } from "@/lib/experience/registry";
 import {
+  EARTH_RANGE,
   EXPERIENCE_LIMITS as LIMITS,
   LOOK_TRANSITIONS,
+  type EarthPlace,
   type EffectInstance,
   type EffectTarget,
   type Experience,
@@ -174,7 +176,41 @@ function view(value: unknown, label: string, nodeIds?: Set<string>): StopView {
   if (nodeIds?.size && !result.nodeId) fail(`${label} needs a location in the space.`);
   if (input.fov !== undefined) result.fov = Math.max(30, Math.min(110, finite(input.fov, `${label} zoom`, 180)));
   if (input.viewMode === "ORBIT") result.viewMode = "ORBIT";
+  const earth = input.earth as Record<string, unknown> | undefined;
+  if (earth && typeof earth === "object") {
+    const range = finite(earth.range ?? EARTH_RANGE.default, `${label} height above the map`);
+    result.earth = { range: Math.round(Math.max(EARTH_RANGE.min, Math.min(EARTH_RANGE.max, range))) };
+  }
   return result;
+}
+
+/** The space's spot on the 3D map; a bad one is dropped from older tours, or refused when strict. */
+function place(value: unknown, options: Options): EarthPlace | undefined {
+  if (value === undefined || value === null) return undefined;
+  try {
+    const input = value as Record<string, unknown>;
+    if (typeof input !== "object") fail("The map location is invalid.");
+    const result: EarthPlace = {
+      lat: finite(input.lat, "Latitude", 90),
+      lon: finite(input.lon, "Longitude", 180),
+      heading: Math.round((((finite(input.heading ?? 0, "Map heading", 36000) % 360) + 360) % 360) * 100) / 100
+    };
+    if (input.nodeId !== undefined && input.nodeId !== null && input.nodeId !== "") {
+      if (typeof input.nodeId !== "string" || input.nodeId.length > 128) fail("The map location has an invalid panorama.");
+      if (options.nodeIds && !options.nodeIds.has(input.nodeId)) fail("The map location stands on a panorama that is no longer in this space.");
+      result.nodeId = input.nodeId;
+    }
+    if (input.elevation !== undefined) result.elevation = Math.round(finite(input.elevation, "Map height", 2000) * 100) / 100;
+    if (input.scale !== undefined) {
+      const scale = finite(input.scale, "Map scale", 1000);
+      if (scale < 0.001) fail("Map scale is too small.");
+      if (scale !== 1) result.scale = scale;
+    }
+    return result;
+  } catch (error) {
+    if (options.lenient) return undefined;
+    throw error;
+  }
 }
 
 function strings(value: unknown, allowed: Set<string> | null, limit = 200) {
@@ -284,5 +320,6 @@ export function parseExperience(value: unknown, options: Options = {}): Experien
   const title = text(input.title, LIMITS.title, "Title").trim();
   const finale = text(input.finale, LIMITS.text, "Closing message").trim();
   const tourLook = look(input.look, "The tour", lenient);
-  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects, ...(tourLook ? { look: tourLook } : {}) };
+  const map = place(input.place, options);
+  return { version: 1, kind, ...(title ? { title } : {}), ...(finale ? { finale } : {}), stops, objects, effects, ...(tourLook ? { look: tourLook } : {}), ...(map ? { place: map } : {}) };
 }

@@ -112,6 +112,69 @@ test('applies an experience to the opening space only', () => {
   assert.equal(edited.space.title, 'New');
 });
 
+test('stops can fly up over the 3D map once the space is placed on it', () => {
+  const placed = { ...tour(), place: { lat: 30.3216, lon: 35.452, heading: 370, nodeId: 'a', elevation: 2.345, scale: 1 },
+    stops: [{ ...tour().stops[0], view: { ...view, earth: { range: 5 } } }, { ...tour().stops[0], id: 'two', view: { ...view, earth: { range: 50000 } } }] };
+  const result = parseExperience(placed, { nodeIds: new Set(['a', 'b']) });
+  assert.deepEqual(result.place, { lat: 30.3216, lon: 35.452, heading: 10, nodeId: 'a', elevation: 2.35 }, 'heading wraps and scale 1 is left out');
+  assert.equal(result.stops[0].view.earth.range, 30, 'too low a view is raised');
+  assert.equal(result.stops[1].view.earth.range, 20000, 'too high a view is lowered');
+  assert.throws(() => parseExperience({ ...placed, place: { lat: 91, lon: 0 } }), ExperienceError, 'latitude past the pole');
+  assert.throws(() => parseExperience({ ...placed, place: { ...placed.place, nodeId: 'gone' } }, { nodeIds: new Set(['a']) }), ExperienceError, 'a place on a removed panorama');
+  assert.equal(parseExperience({ ...placed, place: { lat: 'x' } }, { lenient: true }).place, undefined, 'older tours drop a bad place');
+
+  const applied = applyExperience(bootstrap(), result);
+  const point = applied.tour.tour_data.spaces[0].tourpoints[0];
+  assert.equal(point.viewMode, 'ORBIT', 'a stop above the map orbits it');
+  assert.deepEqual(point.earth, { range: 30 });
+  assert.equal(normalizeTour(applied).place.lat, 30.3216);
+  assert.equal(tourSegment(applied, 0, 0).bootstrap.tour.tour_data.place.lon, 35.452);
+  assert.equal(tourSegment(applied, 1, 0).bootstrap.tour.tour_data.place, undefined, 'the place never moves to another space');
+  const back = experienceFromBootstrap(applied);
+  assert.deepEqual(back.place, result.place);
+  assert.equal(back.stops[0].view.viewMode, undefined, 'turning the map off later leaves a plain stop');
+  assert.deepEqual(back.stops[0].view.earth, { range: 30 });
+
+  const geo = bootstrap();
+  geo.space.space_data.geo = { lat: 1, lon: 2, heading: 0 };
+  assert.equal(normalizeTour(geo).place.lat, 1, 'a capture that knows where it is needs no place in the tour');
+});
+
+test('the map turns so north lies where the place says', async () => {
+  const THREE = await import('three');
+  const { earthYaw, bearingOf, earthPose, earthRotation } = await import('../lib/three/earth.ts');
+  const { cameraDirection } = await import('../lib/three/math.ts');
+  // The map arrives with +Z north and +X west. Heading 90 means a view at azimuth 0 faces east.
+  const place = { heading: 90 };
+  const turn = new THREE.Matrix4().makeRotationY(earthYaw(place));
+  const east = new THREE.Vector3(-1, 0, 0).applyMatrix4(turn);
+  const facing = cameraDirection({ azimuth: 0, polar: 0 });
+  assert.ok(east.distanceTo(facing) < 1e-9, 'east on the map lies along azimuth 0');
+  const north = new THREE.Vector3(0, 0, 1).applyMatrix4(turn);
+  assert.ok(north.distanceTo(cameraDirection({ azimuth: 90, polar: 0 })) < 1e-9, 'north lies a quarter turn to the left');
+  assert.equal(bearingOf(place, 0), 90);
+  assert.equal(bearingOf(place, 90), 0);
+  assert.equal(earthRotation({ azimuth: 20, polar: 0 }).polar, -45, 'a level view tips down to see the ground');
+  const pose = earthPose(new THREE.Vector3(0, 0, 0), { range: 600 }, { azimuth: 0, polar: -90 }, 1);
+  assert.ok(Math.abs(pose.position.length() - 600) < 1e-6);
+  assert.ok(pose.position.y > 590, 'the camera stands above the target');
+});
+
+test('agent drafts keep the place a person lined up, and suggest one for an unplaced space', () => {
+  const previous = parseExperience({ ...tour(), place: { lat: 1, lon: 2, heading: 33 } });
+  const raw = { reply: 'ok', kind: 'tour', objects: [], effects: [], place: { lat: 9, lon: 9 },
+    stops: [{ id: 'one', title: 'From above', text: 'The valley.', nodeId: 'a', rotation: { azimuth: 0, polar: -50 }, earth: { range: 1500 } }] };
+  const kept = normalizeAgentDraft(raw, previous, new Set(['a'])).experience;
+  assert.deepEqual(kept.place, { lat: 1, lon: 2, heading: 33 });
+  assert.deepEqual(kept.stops[0].view.earth, { range: 1500 });
+  const suggested = normalizeAgentDraft(raw, parseExperience(tour()), new Set(['a'])).experience;
+  assert.deepEqual(suggested.place, { lat: 9, lon: 9, heading: 0 });
+  const removed = normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], earth: null }] }, kept, new Set(['a'])).experience;
+  assert.equal(removed.stops[0].view.earth, undefined, 'the agent can bring a stop back down');
+  const unchanged = normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], earth: undefined }] }, kept, new Set(['a'])).experience;
+  assert.deepEqual(unchanged.stops[0].view.earth, { range: 1500 }, 'a stop the agent leaves alone stays above the map');
+});
+
 test('older authored stops become editable plain text with their media', () => {
   const experience = experienceFromBootstrap(bootstrap());
   assert.equal(experience.stops.length, 1);
