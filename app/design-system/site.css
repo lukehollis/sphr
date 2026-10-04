@@ -206,7 +206,9 @@ textarea.site-input { resize: vertical; line-height: var(--leading-body); }
 a.site-card:hover .site-card-media img, .site-card-link:hover .site-card-media img { opacity: .82; }
 .site-card-link { display: block; color: inherit; text-decoration: none; }
 .site-card-letter { display: grid; place-items: center; height: 100%; color: var(--site-faint); font-size: 72px; font-weight: var(--weight-bold); line-height: 1; }
-.site-card-tag { position: absolute; top: 0; left: 0; padding: 8px 12px; background: var(--surface-page); }
+.site-card-tag { position: absolute; top: 0; left: 0; padding: 4px 8px; background: var(--surface-page); font-size: 11px; }
+.site-card-tag .site-status { gap: 6px; font-size: 11px; }
+.site-card-tag .site-status i { width: 6px; height: 6px; }
 .site-card-body { padding-top: 12px; }
 .site-card-body h3 { margin: 0 0 4px; color: var(--text-heading); font-size: 16px; line-height: var(--leading-heading); overflow-wrap: anywhere; }
 .site-card-kind { color: var(--text-heading); font-size: 12px; font-weight: var(--weight-bold); }
