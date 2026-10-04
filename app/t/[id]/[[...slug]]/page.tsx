@@ -4,7 +4,9 @@ import SphrApp from "@/components/SphrApp";
 import { emptyExperience } from "@/lib/experience/types";
 import { sceneTitleSlug } from "@/lib/scene-edits";
 import { readSceneEdits } from "@/lib/server/admin-store";
-import { loginPath } from "@/lib/server/accounts";
+import { currentUser, loginPath } from "@/lib/server/accounts";
+import { readSpaceInfo } from "@/lib/server/space-info";
+import { hasHeart, heartCount, profileCard } from "@/lib/server/profiles";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
@@ -35,7 +37,9 @@ export default async function TourPage({ params }: Props) {
   const scene = await tourScene(tour);
   if (!scene) notFound();
   if (slug?.length !== 1 || slug[0] !== sceneTitleSlug(tour.title)) redirect(tourPath(tour));
+  const user = await currentUser();
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl}
     edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants: await existingVariantsUrl(scene.sceneId) }}
-    preview={{ title: tour.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} />;
+    preview={{ title: tour.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} info={readSpaceInfo(scene.sceneId).info}
+    social={{ creator: profileCard(tour.userId), heart: { tourId: tour.id, count: heartCount(tour.id), hearted: hasHeart(user?.id, tour.id), signedIn: Boolean(user), loginPath: loginPath(tourPath(tour)) } }} />;
 }

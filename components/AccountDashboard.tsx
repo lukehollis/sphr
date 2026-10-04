@@ -13,6 +13,8 @@ import { formatBytes } from "@/lib/bytes";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
 import type { AgentToken } from "@/lib/server/accounts-store";
 import type { TourView } from "@/lib/server/user-tours";
+import { accountNav } from "@/lib/account-nav";
+import type { ProfileCard, SharedTour } from "@/lib/server/profiles";
 import type { Plan } from "@/lib/server/billing";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
@@ -33,10 +35,8 @@ export async function openPortal() {
 }
 
 /** The account's pages; the plan page is listed once there is billing to manage. */
-export function accountNav(account: AccountView, current: "spaces" | "plan" | "space") {
-  return [{ href: "/account", label: "Your spaces", current: current === "spaces" },
-    ...(account.billing && (account.subscription || current === "plan") ? [{ href: "/account/plan", label: "Plan", current: current === "plan" }] : [])];
-}
+/** The account pages' navigation, also used by server-rendered pages (it lives in a shared module). */
+export { accountNav };
 
 /** The status a space shows on its card. */
 export function spaceStatus(space: SpaceView) {
@@ -187,6 +187,24 @@ function TourCard({ tour, onDelete }: { tour: TourView; onDelete: (tour: TourVie
   </article>;
 }
 
+type FollowingTour = SharedTour & { by: ProfileCard };
+
+/** Tours lately shared by the people the customer follows. */
+function FollowingTours({ tours }: { tours: FollowingTour[] }) {
+  return <section className="tours following" aria-labelledby="following-title">
+    <div className="spaces-head tours-head"><div><h2 id="following-title">From people you follow</h2></div></div>
+    <div className="spaces-grid">{tours.map(tour => <article key={tour.id} className="space-card">
+      <a className="space-card-media" href={tour.path} aria-label={`Open ${tour.title}`}>
+        {tour.thumbnail ? <img src={tour.thumbnail} alt="" loading="lazy" width={960} height={640} /> : <span className="space-art" aria-hidden="true"><ConstructionDrawing /></span>}
+      </a>
+      <div className="space-card-body">
+        <h3><a href={tour.path}>{tour.title}</a></h3>
+        <p><a className="following-by" href={tour.by.path}>{tour.by.name}</a>{tour.space ? ` in ${tour.space}` : ""}</p>
+      </div>
+    </article>)}</div>
+  </section>;
+}
+
 /** Guided tours and scavenger hunts the customer built on their spaces or on Spacery's. */
 function Tours({ initial }: { initial: TourView[] }) {
   const [tours, setTours] = useState(initial);
@@ -229,8 +247,8 @@ function LinkedAgents({ initial }: { initial: AgentToken[] }) {
   </section>;
 }
 
-export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [], tours = [] }:
-  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[]; tours?: TourView[] }) {
+export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [], tours = [], following = [] }:
+  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[]; tours?: TourView[]; following?: FollowingTour[] }) {
   const [spaces, setSpaces] = useState(initial);
   const [account, setAccount] = useState(initialAccount);
   const [error, setError] = useState("");
@@ -380,6 +398,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
         </span>
       </button>}
       <Tours initial={tours} />
+      {following.length > 0 && <FollowingTours tours={following} />}
       <LinkedAgents initial={agents} />
     </main>
     <SiteFooter brand={brand} links={legalLinks} />

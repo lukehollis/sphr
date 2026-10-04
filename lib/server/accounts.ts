@@ -60,7 +60,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/plan|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour)?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12})?|[a-f0-9]{12})|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?)?$/;
+const returnPattern = /^\/(?:account(?:\/plan|\/profile|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour)?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12})?|[a-f0-9]{12})|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }

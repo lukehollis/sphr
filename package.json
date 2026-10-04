@@ -19,6 +19,7 @@
     "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-overview.mjs scripts/test-audio-autoplay.mjs && node --experimental-transform-types --test scripts/test-panorama-navigation.mjs",
     "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v",
     "test:accounts": "node --test scripts/test-accounts.mjs",
+    "test:social": "node --test scripts/test-social.mjs",
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
     "test:agents": "node scripts/test-agent-connector.mjs",
     "worker": "node scripts/worker/agent-runner.mjs",

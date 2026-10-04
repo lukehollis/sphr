@@ -6,6 +6,7 @@ import { applyCheckoutSession, billingEnabled, readPlans, syncQuantity, syncSubs
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { siteBrand } from "@/lib/server/brand";
 import { describeTours } from "@/lib/server/user-tours";
+import { followingTours } from "@/lib/server/profiles";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your spaces", robots: { index: false, follow: false } };
@@ -33,5 +34,6 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const fresh = readUser(user.id)!;
   const spaces = await Promise.all(listCustomerSpaces(fresh.id).map(describeSpace));
   return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} plans={await readPlans()} notice={notice}
-    fromCheckout={typeof params.checkout === "string"} agents={listAgentTokens(fresh.id)} tours={await describeTours(fresh.id)} />;
+    fromCheckout={typeof params.checkout === "string"} agents={listAgentTokens(fresh.id)} tours={await describeTours(fresh.id)}
+    following={await followingTours(fresh.id)} />;
 }

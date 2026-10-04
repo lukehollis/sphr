@@ -8,6 +8,7 @@ import { loginPath, sceneAccess } from "@/lib/server/accounts";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { existingVariantsUrl } from "@/lib/server/variants";
 import { buildOnPath } from "@/lib/server/user-tours";
+import { readSpaceInfo } from "@/lib/server/space-info";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string; slug?: string[] }> };
@@ -15,8 +16,8 @@ type Props = { params: Promise<{ id: string; slug?: string[] }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const scene = await findScene((await params).id);
   if (!scene) return { title: "Space not found", robots: { index: false, follow: false } };
-  const description = scene.legacy?.kind === 'tour' ? `Take a guided tour of ${scene.title}.`
-    : `Explore ${scene.title} in an interactive spatial viewer.`;
+  const description = readSpaceInfo(scene.sceneId).info.description?.slice(0, 300) || (scene.legacy?.kind === 'tour' ? `Take a guided tour of ${scene.title}.`
+    : `Explore ${scene.title} in an interactive spatial viewer.`);
   return {
     title: `${scene.title} · ${siteBrand()}`, description,
     ...(!isScenePublic(scene.sceneId) ? { robots: { index: false, follow: false } } : {}),
@@ -35,5 +36,5 @@ export default async function ScenePage({ params }: Props) {
   if (access === "login") redirect(loginPath(scene.scenePath));
   // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants: await existingVariantsUrl(id) }} preview={{ title: scene.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(id)} />;
+  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants: await existingVariantsUrl(id) }} preview={{ title: scene.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)} />;
 }

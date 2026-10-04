@@ -118,6 +118,29 @@ background (one draft per tour at a time; `GET` reports `draft.state`), and
 `POST /api/account/tours/<id>/models` adds a `.glb` of the customer's own. Deleting a tour stays with
 the browser session. Browser requests that change a tour must come from the site's own origin.
 
+## Space details
+
+The space edit page (`/admin/scenes/<id>` for the operator, `/account/spaces/<id>/edit` for the
+space's owner) shows the space in a smaller viewer beside two tabs: *Start view* (the opening view
+and thumbnail) and *Details* (title, description, location, who captured it and when, a contact,
+a website and credits). Details are kept by scene ID in `space_info` (`PUT
+/api/admin/scenes/<id>/details` with the revision last read) and appear in the viewer's panel under
+the space's title; the description also becomes the page's description for search and sharing.
+
+## Profiles, follows and hearts
+
+Every account has a public profile at `/u/<handle>`, edited at `/account/profile`: a name, a handle,
+a bio, a location, a website, a profile picture and a cover. A profile starts with a neutral handle
+(`member-…`) and no name, so nothing from the account (its email or the name a sign-in provider
+gave) is published until its owner fills it in. Pictures are cropped to shape (512 by 512 and 2400
+by 800), re-encoded as WebP without their metadata, and kept under `SPHR_STATE_DIR/profile-files/`.
+A profile lists its owner's shared tours and public hosted spaces, with follower counts, a follow
+button and a share button; one that has shared nothing is kept out of search results.
+
+Signed-in people follow each other (`PUT`/`DELETE /api/follows/<handle>`) and heart tours they can
+open (`PUT`/`DELETE /api/hearts/<tour id>`, the heart beside the guide switch on a tour's page, which
+also names who made it). *Your spaces* lists recent tours from the people the customer follows.
+
 ## Operator notifications
 
 With `SPHR_DISCORD_WEBHOOK_URL` set to a Discord channel webhook, the operator hears about new

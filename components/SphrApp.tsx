@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
 import { ViewerSession } from "@/lib/viewer/ViewerSession";
-import HudControls, { type SpaceDetails } from "@/components/HudControls";
+import HudControls, { type SpaceDetails, type TourHeart } from "@/components/HudControls";
+import type { SpaceInfo } from "@/lib/space-info";
+import type { ProfileCard } from "@/lib/server/profiles";
 import LoadingScreen from "@/components/LoadingScreen";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import type { ViewerHost } from "@/lib/host-link";
@@ -27,8 +29,12 @@ const initialRuntimeState: RuntimeState = {
 };
 
 type Props = { configUrl?: string; preview?: { title: string; image: string; added?: string };
-  /** The operator's site, named above the title and credited in a corner. */
+  /** The operator's site, credited in a corner. */
   host?: ViewerHost;
+  /** What the owner or operator wrote about the space (location, who captured it, contact). */
+  info?: SpaceInfo;
+  /** On a customer's tour: who made it, and its hearts. */
+  social?: { creator: ProfileCard; heart: TourHeart };
   /** Where visitors start their own tour or scavenger hunt on this space, when they may. */
   build?: string;
   edits?: ViewerEdits;
@@ -66,7 +72,7 @@ function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, stat
   return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
 }
 
-export default function SphrApp({ configUrl, preview, host, build, edits, editor, chrome = !editor, revision = 0 }: Props) {
+export default function SphrApp({ configUrl, preview, host, info, social, build, edits, editor, chrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -151,7 +157,9 @@ export default function SphrApp({ configUrl, preview, host, build, edits, editor
     if (!space) return undefined;
     const stops = tour?.hasGuidedTour ? tour.spaces.reduce((total, item) => total + item.tourpoints.length, 0) : 0;
     return {
-      description: space.description?.trim() || bootstrap?.tour?.description?.trim() || undefined,
+      description: info?.description || space.description?.trim() || bootstrap?.tour?.description?.trim() || undefined,
+      location: info?.location, capturedBy: info?.capturedBy, capturedOn: info?.capturedOn, contact: info?.contact, website: info?.website,
+      credits: info?.credits, creator: social?.creator,
       capture: captureKind(space),
       viewpoints: space.space_data.nodes?.length,
       stops: tour?.kind === "hunt" ? { count: huntSteps.length, label: "Hunt steps" } : stops ? { count: stops, label: "Tour stops" } : undefined,
@@ -159,7 +167,7 @@ export default function SphrApp({ configUrl, preview, host, build, edits, editor
       narration: hasAudio,
       added: monthOf(preview?.added)
     };
-  }, [bootstrap, tour, huntSteps.length, hasAudio, preview?.added]);
+  }, [bootstrap, tour, huntSteps.length, hasAudio, preview?.added, info, social?.creator]);
   const isLastPoint =
     Boolean(tour) &&
     runtimeState.activeSpaceIndex === (tour?.spaces.length ?? 1) - 1 &&
@@ -212,6 +220,7 @@ export default function SphrApp({ configUrl, preview, host, build, edits, editor
           <HudControls
             title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
             details={details}
+            heart={social?.heart}
             host={host}
             build={build}
             state={runtimeState}
