@@ -330,3 +330,33 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .builder-toolbar { top: 10px; left: 10px; }
   .builder-agent textarea { min-height: 110px; }
 }
+
+/* Stop text straight over the view on a soft gradient from its side, as in the original mused.com tours. */
+.tour-gradient::before { content: ""; position: absolute; z-index: -1; top: -104px; bottom: calc(var(--space-3) * -1); left: calc(var(--space-3) * -1); right: calc(var(--space-3) * -1); pointer-events: none;
+  background: linear-gradient(to right, rgba(0, 0, 0, .62), rgba(0, 0, 0, .34) 26%, rgba(0, 0, 0, 0) 52%); }
+.tour-gradient.tour-side-right { justify-content: flex-end; }
+.tour-gradient.tour-side-right::before { background: linear-gradient(to left, rgba(0, 0, 0, .62), rgba(0, 0, 0, .34) 26%, rgba(0, 0, 0, 0) 52%); }
+.tour-gradient.tour-side-center { justify-content: center; }
+.tour-gradient.tour-side-center::before { background: linear-gradient(to top, rgba(0, 0, 0, .6), rgba(0, 0, 0, .28) 24%, rgba(0, 0, 0, 0) 46%); }
+.tour-gradient .tour-copy { flex-basis: 440px; padding: 0 4px 12px; background: none; text-shadow: 0 1px 3px rgba(0, 0, 0, .55); }
+.tour-gradient.tour-side-center .tour-copy { flex-basis: 640px; text-align: center; }
+.tour-gradient .tour-main-text { font-size: 24px; line-height: 1.38; }
+.tour-gradient .tour-main-text a, .tour-gradient .tour-secondary-text a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.tour-gradient .tour-media { width: 210px; height: 210px; max-height: none; object-fit: cover; border-radius: 8px; margin-bottom: var(--space-2); box-shadow: 0 2px 12px rgba(0, 0, 0, .35); }
+.tour-gradient.tour-side-center .tour-media { margin-left: auto; margin-right: auto; }
+.tour-gradient .tour-next { min-width: 380px; height: 52px; background: rgba(28, 28, 28, .72); color: #ffffff; font-weight: var(--weight-bold); letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(6px); }
+.tour-gradient .tour-next:hover { background: rgba(48, 48, 48, .86); }
+.tour-gradient .tour-next svg { display: none; }
+.tour-gradient .tour-prev { width: auto; height: 52px; padding: 0 var(--space-2); background: none; color: #ffffff; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 1px 3px rgba(0, 0, 0, .55); }
+.tour-gradient .tour-prev:not(:disabled):hover { background: none; color: #ffffff; text-decoration: underline; }
+.tour-gradient .tour-prev:disabled { background: none; color: rgba(255, 255, 255, .45); }
+.tour-gradient .tour-prev .tour-button-label { display: inline; margin-left: 6px; }
+@media (max-width: 740px) {
+  .tour-gradient { background: linear-gradient(to top, rgba(0, 0, 0, .8), rgba(0, 0, 0, .5) 70%, rgba(0, 0, 0, 0)); }
+  .tour-gradient::before { display: none; }
+  .tour-gradient .tour-copy, .tour-gradient.tour-side-center .tour-copy { text-align: left; }
+  .tour-gradient .tour-main-text { font-size: 20px; }
+  .tour-gradient .tour-media { width: 140px; height: 140px; }
+  .tour-gradient.tour-side-center .tour-media { margin-left: 0; }
+  .tour-gradient .tour-next { min-width: 0; height: 64px; }
+}

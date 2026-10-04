@@ -425,8 +425,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                     onPointerUp={() => void session.current?.goToStop(index)} /></label>}
                 </fieldset>
                 {hasReconstruction && <fieldset><legend>Reconstruction</legend>
-                  {/* Unset, a stop keeps what shows: the reconstruction in the dollhouse, the photographs in first person. */}
-                  <label className="builder-check"><input type="checkbox" checked={stop.view.reconstruction ?? Boolean(stop.view.earth || stop.view.viewMode === "ORBIT")}
+                  {/* A guided tour shows it only at the stops that ask for it. */}
+                  <label className="builder-check"><input type="checkbox" checked={stop.view.reconstruction === true}
                     onChange={(event) => {
                       patchStop(stop.id, { view: { ...stop.view, reconstruction: event.target.checked } });
                       setTimeout(() => void session.current?.goToStop(index), 400);

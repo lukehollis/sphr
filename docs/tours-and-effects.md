@@ -281,12 +281,27 @@ shows: a double click in the dollhouse or a click in first person goes to the
 panorama nearest the spot, its walls hide placed objects behind them, and the
 location markers draw over it.
 
-In a guided tour or hunt, a stop sets `"reconstruction": true` to show the
-model in its view (first person or dollhouse), or `false` to show the capture;
-a stop without it keeps what was showing. The builder has **Show the
+In a guided tour or hunt the reconstruction shows only at stops that set
+`"reconstruction": true` (in first person or in the dollhouse), so a tour's own
+views, such as a cutaway of the capture or an authored model of the site, stay
+as written; every other stop shows the capture. Free exploration goes back to
+showing it in the dollhouse. The builder has **Show the
 reconstruction here** for spaces that have one, and the tour agent is told the
 model's title and landmarks. In a tour of several spaces the manifest belongs
 to the opening space.
+
+## Text style
+
+`tour_data.textStyle: "gradient"` sets a tour's stop text straight over the view
+on a soft gradient from the side its stop's `textPosition` names (left, right or
+center along the bottom), with images as small rounded cards and a wide Next
+button, the way the original guided tours on mused.com look. The default,
+`"panel"`, keeps the dark panel.
+
+A placed object can carry a `link` (an https address or a path on this site):
+clicking it opens the link, another page of the site in place and anything else
+in a new tab. With a `label` it reads as a portal, for example a sphere wrapped in
+a 360 photo of the next tour.
 
 ## Sound
 

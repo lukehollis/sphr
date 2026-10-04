@@ -17,6 +17,8 @@ type Props = {
   onNext: () => void;
   /** Scavenger hunt: step position, hint and restart. */
   hunt?: { step: number; steps: number; onHint: () => void };
+  /** Text in a dark panel, or straight over the view on a gradient from its side. */
+  textStyle?: "panel" | "gradient";
 };
 
 /** Text written in the tour builder is plain; older authored tours carry HTML. */
@@ -54,7 +56,7 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
     : image ? <a href={image} target="_blank" rel="noopener noreferrer"><img className="tour-media" src={image} alt={file.title ?? ''} /></a> : null;
 }
 
-export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt }: Props) {
+export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt, textStyle = "panel" }: Props) {
   const plain = point.format === "plain";
   const huntStep = hunt && point.find ? state.hunt : undefined;
   const found = Boolean(huntStep?.stepFound);
@@ -73,8 +75,11 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
     : hunt ? (isLastPoint ? "Finish" : "Next clue")
     : isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next";
 
+  const side = point.textPosition === "right" || point.textPosition === "center" ? point.textPosition : "left";
+  const styleClass = textStyle === "gradient" ? ` tour-gradient tour-side-${side}` : "";
+
   return (
-    <section className="tour-overlay" aria-live="polite">
+    <section className={`tour-overlay${styleClass}`} aria-live="polite">
       {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl || hunt) && (
         <div className={hunt ? "tour-copy tour-hunt" : "tour-copy"}>
           {hunt && <p className="tour-hunt-step">{found ? "Found" : `Clue ${hunt.step} of ${hunt.steps}`}{point.title ? <span>{point.title}</span> : null}</p>}

@@ -25,6 +25,8 @@ export type PlacedObject = {
   animation?: string;
   /** Short text shown when the pointer rests on the object. */
   label?: string;
+  /** An address the object opens when clicked, such as another tour (a portal). */
+  link?: string;
 };
 
 export type EffectTarget =

@@ -278,7 +278,7 @@ export class SphrRuntime {
     if (guided) {
       this.audio.updateForPoint(point);
       this.annotations?.show(point.annotations ?? point.overlays ?? []);
-      this.sceneGraph?.showOnly(point.models ?? []);
+      this.sceneGraph?.showOnly(this.stopModels(point));
     }
     if (!guided) {
       this.audio.updateForPoint();
@@ -286,8 +286,11 @@ export class SphrRuntime {
       this.sceneGraph?.hideAll();
     }
     this.applyExperienceForPoint(point);
-    if (guided && typeof point?.reconstruction === "boolean") {
-      this.setReconWanted(this.state.viewMode, point.reconstruction);
+    // A guided tour shows the reconstruction only at the stops that ask for it;
+    // free exploration goes back to the usual: in the dollhouse, not in panoramas.
+    if (this.reconstruction) {
+      if (guided) this.setReconWanted(this.state.viewMode, point?.reconstruction === true);
+      else { this.reconOrbit = true; this.reconFpv = false; if (this.state.viewMode === "ORBIT") void this.loadReconstruction(); }
       if (!this.isNavigating) this.settleReconstruction();
     }
     this.emitState();
@@ -350,8 +353,9 @@ export class SphrRuntime {
       if (this.disposed) return;
     }
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
-    // A guided stop can show the site's reconstruction in its view, or the capture.
-    if (typeof point.reconstruction === "boolean" && this.tourShowsStops()) this.setReconWanted(nextViewMode, point.reconstruction);
+    // In a guided tour the reconstruction shows only at stops that ask for it, so the
+    // tour's own views (a cutaway of the capture, an authored model) stay as written.
+    if (this.tourShowsStops()) this.setReconWanted(nextViewMode, point.reconstruction === true);
     else if (nextViewMode === "ORBIT" && this.reconWanted("ORBIT")) void this.loadReconstruction();
 
     this.state.activeSpaceIndex = spaceIndex;
@@ -369,7 +373,7 @@ export class SphrRuntime {
     this.applySkyboxMode(point.extra);
     this.applyAtmosphere(point.extra);
     this.annotations?.show(point.annotations ?? point.overlays ?? []);
-    this.sceneGraph?.showOnly(point.models ?? []);
+    this.sceneGraph?.showOnly(this.stopModels(point));
     this.sceneGraph?.setViewMode(this.state.viewMode, this.state.debug);
     this.hintShown = false;
     this.applyExperienceForPoint(point);
@@ -1071,7 +1075,8 @@ export class SphrRuntime {
   private isInteractive(id: string) {
     const point = this.getActivePoint();
     if (this.tour.kind === "hunt" && this.state.guided && point?.find?.objectId === id) return true;
-    return Boolean(this.objects?.getData(id)?.label) || this.tour.effects.some((effect) => effect.target.kind === "object" && effect.target.id === id);
+    const data = this.objects?.getData(id);
+    return Boolean(data?.label || data?.link) || this.tour.effects.some((effect) => effect.target.kind === "object" && effect.target.id === id);
   }
 
   /** The visible placed object under the pointer ray, unless a wall hides it. */
@@ -1107,7 +1112,18 @@ export class SphrRuntime {
     }
     if (!this.isInteractive(id)) return false;
     this.effects?.cue(id, "click");
+    const link = this.objects?.getData(id)?.link;
+    if (link) this.openLink(link);
     return true;
+  }
+
+  /** An object's link: another page of this site opens in place, anything else in a new tab. */
+  private openLink(link: string) {
+    try {
+      const url = new URL(link, window.location.href);
+      if (url.origin === window.location.origin) window.location.assign(url.toString());
+      else window.open(url.toString(), "_blank", "noopener");
+    } catch { /* an invalid address does nothing */ }
   }
 
   /** Hunt: show the step's hint and light up where the object is. */
@@ -1627,7 +1643,10 @@ export class SphrRuntime {
       return { position, target, fov: point.fov === undefined ? THREE.MathUtils.clamp(70 - (point.zoom ?? 0), 35, 85) : THREE.MathUtils.clamp(point.fov, 30, 110) };
     }
     if (mode === 'ORBIT' && point?.viewMode === 'ORBIT' && point.rotation) {
-      const bounds = this.sceneGraph?.getBounds(point.models);
+      // Like a dollhouse, the view frames the captured space; a large authored model
+      // around it (a whole plateau, say) is scenery and does not push the camera back.
+      const capture = (point.models ?? []).filter((id) => this.sceneGraph?.isCapture(id));
+      const bounds = this.sceneGraph?.getBounds(capture.length ? capture : point.models);
       if (bounds && !bounds.isEmpty()) {
         const pose = this.overviewPose(bounds);
         const distance = pose.position.distanceTo(pose.target);
@@ -1759,6 +1778,17 @@ export class SphrRuntime {
     if (mode === "ORBIT") this.reconOrbit = wanted;
     else this.reconFpv = wanted;
     if (wanted) void this.loadReconstruction();
+  }
+
+  /**
+   * The scene graph models a stop shows. Where a guided stop shows the site's
+   * reconstruction, it stands in for the tour's own models of the site (an
+   * authored plateau model, say) as well as the capture; they still frame the view.
+   */
+  private stopModels(point?: TourPoint) {
+    const models = point?.models ?? [];
+    if (point?.reconstruction !== true || !this.reconstruction || this.reconstruction.failed || !this.tourShowsStops()) return models;
+    return models.filter((id) => this.sceneGraph?.isCapture(id));
   }
 
   /** Stops change what shows only in a guided tour or hunt, or while the builder plays them. */

@@ -668,3 +668,19 @@ test('the tour agent hears of a reconstruction and its landmarks', async () => {
   assert.match(told.text, /"The Sanctuary about 440 BC", with Temple of Poseidon, Great Altar/);
   assert.match(told.text, /"reconstruction": true/);
 });
+
+test('objects can open a link, and tours can set their text over the view', () => {
+  const withLink = (link) => ({ ...tour(), objects: [{ id: 'portal', name: 'Portal', source: { kind: 'shape', shape: 'orb' }, position: [0, 1, 0], label: 'Go to the next tour', link }, ...tour().objects] });
+  const result = parseExperience(withLink('https://app.spacery.dev/s/ffa3cb6c9d16/explore-the-tomb-of-queen-meresankh-iii'), { nodeIds: new Set(['a', 'b']) });
+  assert.equal(result.objects[0].link, 'https://app.spacery.dev/s/ffa3cb6c9d16/explore-the-tomb-of-queen-meresankh-iii');
+  assert.equal(parseExperience(withLink('/s/ffa3cb6c9d16'), { nodeIds: new Set(['a', 'b']) }).objects[0].link, '/s/ffa3cb6c9d16');
+  assert.throws(() => parseExperience(withLink('javascript:alert(1)'), { nodeIds: new Set(['a', 'b']) }), ExperienceError);
+  assert.equal(parseExperience(withLink('javascript:alert(1)'), { lenient: true }).objects[0].link, undefined, 'a lenient draft drops a bad link and keeps the object');
+  const base = { space: { id: 's', title: 'Space', space_data: { nodes: [{ uuid: 'a', position: { x: 0, y: 1.6, z: 0 } }] } },
+    tour: { tour_data: { mode: 'guided', spaces: [{ id: 's', tourpoints: [{ nodeUUID: 'a', text: 'Hi' }] }] } } };
+  assert.equal(normalizeTour(base).textStyle, 'panel');
+  base.tour.tour_data.textStyle = 'gradient';
+  assert.equal(normalizeTour(base).textStyle, 'gradient');
+  base.tour.tour_data.textStyle = 'neon';
+  assert.equal(normalizeTour(base).textStyle, 'panel');
+});

@@ -105,6 +105,11 @@ function placedObject(value: unknown, index: number, lenient: boolean): PlacedOb
   const name = text(input.name, LIMITS.name, `${label} name`).trim() || `Object ${index + 1}`;
   const hover = text(input.label, 300, `${label} label`).trim();
   const animation = typeof input.animation === "string" ? input.animation.trim().slice(0, 60) : "";
+  let link = "";
+  if (input.link !== undefined && input.link !== null && input.link !== "") {
+    try { link = safeAssetUrl(input.link, `${label} link`); }
+    catch (error) { if (!lenient) throw error; }
+  }
   return {
     id: id(input.id, label),
     name,
@@ -115,7 +120,8 @@ function placedObject(value: unknown, index: number, lenient: boolean): PlacedOb
     ...(input.always === true ? { always: true } : {}),
     ...(idle !== "none" ? { idle } : {}),
     ...(animation ? { animation } : {}),
-    ...(hover ? { label: hover } : {})
+    ...(hover ? { label: hover } : {}),
+    ...(link ? { link } : {})
   };
 }
 

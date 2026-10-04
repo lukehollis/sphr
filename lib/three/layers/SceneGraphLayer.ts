@@ -136,6 +136,11 @@ export class SceneGraphLayer {
     this.applyVisibility();
   }
 
+  /** Whether a model is part of the capture (a raycast mesh) rather than something a tour added. */
+  isCapture(id: string) {
+    return Boolean(this.records.get(id)?.node.raycast);
+  }
+
   /** The reconstruction has taken the capture's place entirely. */
   get captureReplaced() {
     return this.captureOpacity === 0;

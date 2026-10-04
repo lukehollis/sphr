@@ -245,6 +245,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onPrevious={() => runtimeRef.current?.previous()}
             onNext={() => runtimeRef.current?.next()}
             hunt={hunt && activePoint.find ? { step: Math.max(1, huntStep), steps: huntSteps.length, onHint: () => runtimeRef.current?.requestHint() } : undefined}
+            textStyle={tour.textStyle}
           />}
         </>
       )}

@@ -165,6 +165,12 @@ export type TourData = {
   audio?: Record<string, AudioConfig>;
   autoplay?: boolean;
   defaultShowText?: boolean;
+  /**
+   * How stop text is set over the view: in a dark panel (the default), or
+   * straight over the view on a soft gradient from its side, with images as
+   * small rounded cards, the way the original guided tours on mused.com look.
+   */
+  textStyle?: "panel" | "gradient";
   sceneGraph?: SceneGraphNode[];
   annotationGraph?: AnnotationConfig[];
   spaces?: TourSpace[];
@@ -388,6 +394,7 @@ export type NormalizedTour = {
   audio: Record<string, AudioConfig>;
   autoplay: boolean;
   defaultShowText: boolean;
+  textStyle: "panel" | "gradient";
   sceneGraph: SceneGraphNode[];
   annotationGraph: AnnotationConfig[];
 };

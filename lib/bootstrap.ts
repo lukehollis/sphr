@@ -313,6 +313,7 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
     audio: tourData.audio ?? {},
     autoplay: hasGuidedTour && Boolean(tourData.autoplay),
     defaultShowText: hasGuidedTour && tourData.defaultShowText !== false,
+    textStyle: tourData.textStyle === "gradient" ? "gradient" : "panel",
     sceneGraph: tourData.sceneGraph ?? bootstrap.space.space_data.sceneGraph ?? [],
     annotationGraph: tourData.annotationGraph ?? bootstrap.space.space_data.annotationGraph ?? []
   };

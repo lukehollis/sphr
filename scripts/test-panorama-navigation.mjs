@@ -383,7 +383,7 @@ test('with the reconstruction in view, steps between scans fly without the proje
   dispose();
 });
 
-test('guided stops turn the reconstruction on or off, free exploration leaves it to the visitor', async t => {
+test('a guided tour shows the reconstruction only at stops that ask for it, free exploration leaves it to the visitor', async t => {
   let now = 0;
   t.mock.method(performance, 'now', () => now);
   const { runtime, dispose } = await runtimeHarness(true, 75);
@@ -406,7 +406,8 @@ test('guided stops turn the reconstruction on or off, free exploration leaves it
   assert.equal(runtime.panorama.getDebugSnapshot().veil, 1, 'the stop shows the model in place of the photograph');
   await runtime.goTo(0, 0);
   finish();
-  assert.equal(runtime.panorama.getDebugSnapshot().veil, 1, 'a stop that says nothing keeps it');
+  assert.equal(runtime.reconFpv, false, 'a stop that says nothing shows the capture');
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 0);
   await runtime.goTo(0, 2);
   finish();
   assert.equal(runtime.reconFpv, false);
