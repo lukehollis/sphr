@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as THREE from "three";
 import { normalizeTour } from "@/lib/bootstrap";
@@ -12,8 +13,8 @@ import type { SceneGraphNode, SphrBootstrap } from "@/lib/types";
  * read, from plain or Draco-compressed glTF binaries; textures are skipped.
  */
 
-const maxBytes = 160 * 1024 * 1024;
-const kept = 4;
+const maxBytes = 100 * 1024 * 1024;
+const kept = 3;
 const lifetime = 30 * 60 * 1000;
 const cache = new Map<string, { at: number; parts: Promise<MeshPart[]> }>();
 const surface = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
@@ -50,17 +51,81 @@ export async function captureMeshes(bootstrap: SphrBootstrap): Promise<THREE.Mes
   return meshes;
 }
 
+// One mesh is read at a time: decoding a large Draco mesh briefly takes ~150 MB.
+let reading: Promise<unknown> = Promise.resolve();
+
 function meshParts(url: string) {
   const now = Date.now();
   for (const [key, entry] of cache) if (now - entry.at > lifetime) cache.delete(key);
   let entry = cache.get(url);
   if (!entry) {
-    entry = { at: now, parts: download(url).then(parseGlb) };
+    const parts = reading.then(() => fromDisk(url)).then(async (saved) => saved ?? toDisk(url, await parseGlb(await download(url))));
+    reading = parts.catch(() => undefined);
+    entry = { at: now, parts };
     entry.parts.catch(() => cache.delete(url));
     cache.set(url, entry);
     while (cache.size > kept) cache.delete(cache.keys().next().value!);
   }
   return entry.parts;
+}
+
+/**
+ * Decoded meshes are kept under SPHR_STATE_DIR/capture-meshes as plain positions and
+ * indices, so each space's mesh is downloaded and decoded once, not after every restart.
+ * Format: part count, then per part a 4x4 matrix, positions and indices (little endian).
+ */
+const diskFile = (url: string) => process.env.SPHR_STATE_DIR
+  ? path.join(process.env.SPHR_STATE_DIR, "capture-meshes", `${createHash("sha256").update(url).digest("hex").slice(0, 24)}.bin`)
+  : null;
+
+async function fromDisk(url: string): Promise<MeshPart[] | null> {
+  const file = diskFile(url);
+  if (!file) return null;
+  let bytes: Buffer;
+  try { bytes = await readFile(file); } catch { return null; }
+  try {
+    const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let offset = 0;
+    const u32 = () => { const value = data.getUint32(offset, true); offset += 4; return value; };
+    const floats = (count: number) => { const out = new Float32Array(count); for (let i = 0; i < count; i++) { out[i] = data.getFloat32(offset, true); offset += 4; } return out; };
+    const parts: MeshPart[] = [];
+    for (let count = u32(), part = 0; part < count; part++) {
+      const matrix = new THREE.Matrix4().fromArray(floats(16));
+      const positions = floats(u32());
+      const indexCount = u32();
+      const indices = new Uint32Array(indexCount);
+      for (let i = 0; i < indexCount; i++) { indices[i] = data.getUint32(offset, true); offset += 4; }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      if (indexCount) geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      geometry.computeBoundingSphere();
+      geometry.computeBoundingBox();
+      parts.push({ geometry, matrix });
+    }
+    return parts;
+  } catch { return null; }
+}
+
+async function toDisk(url: string, parts: MeshPart[]) {
+  const file = diskFile(url);
+  if (!file) return parts;
+  const sizes = parts.map((part) => [part.geometry.attributes.position.array.length, part.geometry.index?.count ?? 0]);
+  const bytes = Buffer.alloc(4 + sizes.reduce((sum, [positions, indices]) => sum + 64 + 4 + positions * 4 + 4 + indices * 4, 0));
+  let offset = bytes.writeUInt32LE(parts.length, 0);
+  parts.forEach((part, index) => {
+    for (const value of part.matrix.elements) offset = bytes.writeFloatLE(value, offset);
+    offset = bytes.writeUInt32LE(sizes[index][0], offset);
+    for (const value of part.geometry.attributes.position.array as Float32Array) offset = bytes.writeFloatLE(value, offset);
+    offset = bytes.writeUInt32LE(sizes[index][1], offset);
+    const indices = part.geometry.index?.array;
+    if (indices) for (let i = 0; i < indices.length; i++) offset = bytes.writeUInt32LE(indices[i], offset);
+  });
+  try {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await writeFile(`${file}.tmp`, bytes, { mode: 0o600 });
+    await rename(`${file}.tmp`, file);
+  } catch (failure) { console.warn("Unable to keep a decoded capture mesh:", (failure as Error).message); }
+  return parts;
 }
 
 async function download(url: string) {
@@ -101,6 +166,8 @@ export async function parseGlb(bytes: Buffer): Promise<MeshPart[]> {
     return { bytes: bin!.subarray(entry.byteOffset ?? 0, (entry.byteOffset ?? 0) + entry.byteLength), stride: entry.byteStride };
   };
   const parts: MeshPart[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let draco: any = null;
   const walk = async (index: number, parent: THREE.Matrix4) => {
     const node = gltf!.nodes?.[index];
     if (!node) return;
@@ -110,10 +177,11 @@ export async function parseGlb(bytes: Buffer): Promise<MeshPart[]> {
     const matrix = parent.clone().multiply(local);
     for (const primitive of node.mesh === undefined ? [] : gltf!.meshes?.[node.mesh]?.primitives ?? []) {
       if ((primitive.mode ?? 4) !== 4) continue;
-      const draco = primitive.extensions?.KHR_draco_mesh_compression;
+      const compressed = primitive.extensions?.KHR_draco_mesh_compression;
       const geometry = new THREE.BufferGeometry();
-      if (draco) {
-        const decoded = await decodeDraco(view(draco.bufferView).bytes, draco.attributes.POSITION);
+      if (compressed) {
+        draco ??= await dracoDecoder();
+        const decoded = await decodeDraco(draco, view(compressed.bufferView).bytes, compressed.attributes.POSITION);
         geometry.setAttribute("position", new THREE.BufferAttribute(decoded.positions, 3));
         geometry.setIndex(new THREE.BufferAttribute(decoded.indices, 1));
       } else {
@@ -165,18 +233,21 @@ function readAccessor(gltf: Gltf, index: number, view: (index: number) => { byte
   return out;
 }
 
+/**
+ * A Draco decoder for one mesh. Its WebAssembly memory grows to the size of the largest
+ * mesh decoded and never shrinks, so each mesh gets its own decoder, dropped afterwards,
+ * rather than one kept for the life of the server.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let dracoModule: Promise<any> | null = null;
+async function dracoDecoder(): Promise<any> {
+  const draco3d = await import("draco3dgltf");
+  // Hand it the wasm directly: bundled servers do not always keep the package's own path.
+  const wasmBinary = await readFile(path.join(process.cwd(), "node_modules/draco3dgltf/draco_decoder_gltf.wasm")).catch(() => undefined);
+  return (draco3d.default ?? draco3d).createDecoderModule(wasmBinary ? { wasmBinary } : {});
+}
 
-async function decodeDraco(data: Buffer, positionId: number) {
-  dracoModule ??= (async () => {
-    const draco3d = await import("draco3dgltf");
-    // Hand it the wasm directly: bundled servers do not always keep the package's own path.
-    const wasmBinary = await readFile(path.join(process.cwd(), "node_modules/draco3dgltf/draco_decoder_gltf.wasm")).catch(() => undefined);
-    return (draco3d.default ?? draco3d).createDecoderModule(wasmBinary ? { wasmBinary } : {});
-  })();
-  dracoModule.catch(() => { dracoModule = null; });
-  const draco = await dracoModule;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function decodeDraco(draco: any, data: Buffer, positionId: number) {
   const decoder = new draco.Decoder();
   const buffer = new draco.DecoderBuffer();
   const mesh = new draco.Mesh();

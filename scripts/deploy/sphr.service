@@ -18,8 +18,10 @@ EnvironmentFile=-/etc/sphr/environment
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
-MemoryHigh=512M
-MemoryMax=768M
+# Drafting tours loads photos and capture meshes; above MemoryHigh the kernel throttles the
+# whole app, so leave room over its resting size (about 500 MB).
+MemoryHigh=1G
+MemoryMax=1536M
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
