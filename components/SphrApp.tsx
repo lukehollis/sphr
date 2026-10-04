@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
-import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from "@/lib/types";
+import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
 import { ViewerSession } from "@/lib/viewer/ViewerSession";
-import HudControls from "@/components/HudControls";
+import HudControls, { type SpaceDetails } from "@/components/HudControls";
 import LoadingScreen from "@/components/LoadingScreen";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import type { ViewerHost } from "@/lib/host-link";
@@ -26,7 +26,7 @@ const initialRuntimeState: RuntimeState = {
   navigating: false
 };
 
-type Props = { configUrl?: string; preview?: { title: string; image: string };
+type Props = { configUrl?: string; preview?: { title: string; image: string; added?: string };
   /** The operator's site, named above the title and credited in a corner. */
   host?: ViewerHost;
   /** Where visitors start their own tour or scavenger hunt on this space, when they may. */
@@ -45,6 +45,22 @@ type Props = { configUrl?: string; preview?: { title: string; image: string };
   /** Bumped by the tour builder after live edits so overlays re-read the tour. */
   revision?: number;
 };
+
+/** How the space was captured, in a visitor's words. */
+function captureKind(space: SphrSpace) {
+  const data = space.space_data;
+  if (/e57/i.test(space.space_custom ?? "")) return "E57 scan";
+  if (space.type === "splat" || data.splats?.length) return "3DGS";
+  if (space.type === "iiif" || data.iiif) return "Image";
+  if (space.type === "matterport") return "Matterport scan";
+  if (data.nodes?.length) return "360 photos";
+  return undefined;
+}
+
+function monthOf(value?: string) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : undefined;
+}
 
 function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, state: RuntimeState) {
   return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
@@ -129,6 +145,21 @@ export default function SphrApp({ configUrl, preview, host, build, edits, editor
   const activePoint = tour?.spaces[runtimeState.activeSpaceIndex]?.tourpoints[runtimeState.activePointIndex] ?? null;
   const activeSpace = tour?.spaces[runtimeState.activeSpaceIndex] ?? null;
   const viewerSpace = bootstrap?.orderedSpaces?.find(space => String(space.id) === String(activeSpace?.id)) ?? bootstrap?.space;
+  const hasAudio = Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim())) || Boolean(tour?.effects.some((effect) => effect.type === "sound" || effect.type === "music"));
+  const details = useMemo((): SpaceDetails | undefined => {
+    const space = bootstrap?.space;
+    if (!space) return undefined;
+    const stops = tour?.hasGuidedTour ? tour.spaces.reduce((total, item) => total + item.tourpoints.length, 0) : 0;
+    return {
+      description: space.description?.trim() || bootstrap?.tour?.description?.trim() || undefined,
+      capture: captureKind(space),
+      viewpoints: space.space_data.nodes?.length,
+      stops: tour?.kind === "hunt" ? { count: huntSteps.length, label: "Hunt steps" } : stops ? { count: stops, label: "Tour stops" } : undefined,
+      model: Boolean(space.mesh || space.space_data.dollhouse),
+      narration: hasAudio,
+      added: monthOf(preview?.added)
+    };
+  }, [bootstrap, tour, huntSteps.length, hasAudio, preview?.added]);
   const isLastPoint =
     Boolean(tour) &&
     runtimeState.activeSpaceIndex === (tour?.spaces.length ?? 1) - 1 &&
@@ -180,11 +211,12 @@ export default function SphrApp({ configUrl, preview, host, build, edits, editor
         <>
           <HudControls
             title={preview?.title ?? (tour?.hasGuidedTour ? tour.title : bootstrap?.space.title)}
+            details={details}
             host={host}
             build={build}
             state={runtimeState}
             hasGuidedTour={tour?.hasGuidedTour ?? false}
-            hasAudio={Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim())) || Boolean(tour?.effects.some((effect) => effect.type === "sound" || effect.type === "music"))}
+            hasAudio={hasAudio}
             canToggleView={!viewerSpace?.space_data.noPanos || Boolean(viewerSpace.space_data.clickNavigation || viewerSpace.space_data.splats?.length)}
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}

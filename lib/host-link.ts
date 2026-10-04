@@ -4,7 +4,7 @@ import { track } from "@/components/Analytics";
 export type ViewerHost = { name: string; href: string };
 
 /** The operator's address tagged with where in the viewer it was followed, so visits from it show as their own source. */
-export function hostHref(host: ViewerHost, placement: "eyebrow" | "badge") {
+export function hostHref(host: ViewerHost, placement: "badge") {
   try {
     const url = new URL(host.href);
     url.searchParams.set("utm_source", "viewer");

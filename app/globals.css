@@ -83,11 +83,19 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .scene-load-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-top: 24px; font-size: 14px; }
 .scene-load-recovery a { display: inline-flex; align-items: center; min-height: 44px; color: #f5f5f5; }
 .viewer-header { position: absolute; top: var(--space-3); left: var(--space-3); right: var(--space-3); z-index: 22; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); pointer-events: none; }
-.scene-heading { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: var(--space-1) var(--space-2); background: var(--surface-page); font-size: var(--size-caption); }
-.scene-title { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The site name above the title, in the pixel face of the wordmark. */
-.scene-host { color: var(--text-muted); font-size: 8px; line-height: 1; text-decoration: none; pointer-events: auto; }
-.scene-host:hover, .scene-host:focus-visible { color: var(--text-heading); }
+.scene-heading { position: relative; display: flex; min-width: 0; font-size: var(--size-caption); }
+.scene-heading > .scene-title { padding: var(--space-1) var(--space-2); background: var(--surface-page); }
+.scene-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The title opens what is known about the space. */
+.scene-title-button { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: var(--space-1) 12px var(--space-1) var(--space-2); border: 0; background: var(--surface-page); color: var(--text-heading); font: inherit; text-align: left; cursor: pointer; pointer-events: auto; }
+.scene-title-button svg { flex: none; color: var(--text-muted); }
+.scene-title-button:hover svg, .scene-title-button[aria-expanded="true"] svg { color: var(--text-heading); }
+.scene-details { position: absolute; top: 100%; left: 0; width: max(100%, 320px); max-width: calc(100vw - 2 * var(--space-3)); max-height: calc(100dvh - 160px); overflow: auto; overscroll-behavior: contain; padding: 20px; background: rgba(0, 0, 0, .9); color: var(--text-heading); pointer-events: auto; }
+.scene-details p { margin: 0 0 16px; font-size: var(--size-body); line-height: var(--leading-body); }
+.scene-details dl { display: grid; gap: 8px; margin: 0; }
+.scene-details dl > div { display: flex; justify-content: space-between; gap: var(--space-2); }
+.scene-details dt { color: var(--text-muted); }
+.scene-details dd { margin: 0; text-align: right; }
 /* Building on the space and the site credit share the bottom right corner. */
 .viewer-corner { position: absolute; z-index: 19; right: var(--space-3); bottom: var(--space-3); display: flex; gap: 1px; background: var(--rule-hair-color); }
 .viewer-build { display: inline-flex; align-items: center; padding: 6px 10px; background: var(--always-paper); color: #000000; font-size: var(--size-label); font-weight: var(--weight-bold); line-height: 1; text-decoration: none; }
@@ -134,6 +142,8 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .scene-load-title { margin-bottom: 28px; }
   .viewer-header { top: calc(16px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); flex-direction: column; align-items: stretch; gap: var(--space-1); }
   .scene-heading { font-size: var(--size-label); }
+  .scene-title-button { flex: 1; justify-content: space-between; min-height: 44px; }
+  .scene-details { width: 100%; max-width: none; }
   .hud-right { align-self: flex-end; }
   .hud-left { left: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
   .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: calc(100% - 128px - env(safe-area-inset-top)); padding: 0; flex-direction: column; align-items: stretch; gap: 0; background: rgba(0, 0, 0, .9); }

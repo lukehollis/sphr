@@ -35,5 +35,5 @@ export default async function ScenePage({ params }: Props) {
   if (access === "login") redirect(loginPath(scene.scenePath));
   // Resolve by ID. Old titles and ID-only links lead to the current canonical URL.
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(scene.scenePath);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants: await existingVariantsUrl(id) }} preview={{ title: scene.title, image: scene.thumbnail }} host={viewerHost()} build={await buildOnPath(id)} />;
+  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants: await existingVariantsUrl(id) }} preview={{ title: scene.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(id)} />;
 }
