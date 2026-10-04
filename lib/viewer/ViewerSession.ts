@@ -1,10 +1,12 @@
 import { normalizeTour } from '@/lib/bootstrap';
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from '@/lib/types';
-import { SphrRuntime, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
+import { SphrRuntime, type EntryView, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
 import { assertNativeBootstrap } from './native';
 import { nextTourLocation, tourSegment } from './segments';
 
 type Stage = { element: HTMLDivElement; key: string; spaceIndex: number; three?: SphrRuntime };
+/** Where a shared link opens a space: a tour stop (from 0), or a panorama and direction to look around from. */
+export type ViewerEntry = { stop?: number; view?: EntryView };
 
 /** Owns tour position across independent scene renderers; failed scene loads retain the last viewer. */
 export class ViewerSession {
@@ -23,9 +25,11 @@ export class ViewerSession {
       navigating: false, loading: { label: 'Loading', progress: 0, ready: false } };
   }
 
-  async init() {
+  async init(entry: ViewerEntry = {}) {
     assertNativeBootstrap(this.bootstrap);
-    await this.activate(0);
+    // A spot opens free to look around, without a tour stop's text over it.
+    if (entry.view) this.preferences.guided = false;
+    await this.activate(0, entry.view ? undefined : entry.stop, entry.view);
   }
 
   private emit() {
@@ -40,7 +44,7 @@ export class ViewerSession {
     stage?.element.remove();
   }
 
-  private async activate(spaceIndex: number, pointIndex?: number) {
+  private async activate(spaceIndex: number, pointIndex?: number, view?: EntryView) {
     const segment = tourSegment(this.bootstrap, spaceIndex, pointIndex ?? 0);
     const previous = this.active;
     const previousState = this.state;
@@ -72,7 +76,7 @@ export class ViewerSession {
       });
       if (this.editing) stage.three.setEditing(true);
       stage.three.setViewInset(this.viewInset);
-      await stage.three.init(pointIndex);
+      await stage.three.init(pointIndex, view);
       if (this.disposed) return;
       stage.three.start(this.preferences.guided);
       if (stage.three.getState().muted !== this.preferences.muted) stage.three.toggleMute();

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
-import { ViewerSession } from "@/lib/viewer/ViewerSession";
+import { ViewerSession, type ViewerEntry } from "@/lib/viewer/ViewerSession";
 import HudControls, { type SpaceDetails, type TourHeart } from "@/components/HudControls";
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
@@ -72,6 +72,27 @@ function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, stat
   return tour.spaces[state.activeSpaceIndex]?.tourpoints[state.activePointIndex] ?? null;
 }
 
+/**
+ * Where the page's link asks to open: ?stop=3 for the third tour stop, or ?at=pano-024&look=95,-19
+ * (heading and tilt in degrees, optionally &fov=60) to stand at a panorama looking that way.
+ */
+function linkEntry(data: SphrBootstrap): ViewerEntry {
+  if (typeof window === "undefined") return {};
+  const params = new URLSearchParams(window.location.search);
+  const at = params.get("at");
+  const nodes = data.space.space_data.nodes ?? data.space.space_data.navPoints ?? [];
+  if (at && nodes.some((node) => node.uuid === at)) {
+    const [azimuth, polar] = (params.get("look") ?? "").split(",").map(Number);
+    const fov = Number(params.get("fov"));
+    return { view: { nodeId: at,
+      rotation: { azimuth: Number.isFinite(azimuth) ? azimuth : 0, polar: Number.isFinite(polar) ? Math.max(-89, Math.min(89, polar)) : 0 },
+      ...(Number.isFinite(fov) && fov >= 30 && fov <= 110 ? { fov } : {}) } };
+  }
+  const stop = Number(params.get("stop"));
+  const stops = normalizeTour(data).spaces[0]?.tourpoints.length ?? 0;
+  return Number.isInteger(stop) && stop >= 1 && stop <= stops ? { stop: stop - 1 } : {};
+}
+
 export default function SphrApp({ configUrl, preview, host, info, social, build, edits, editor, chrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
@@ -109,9 +130,10 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__ = runtime;
         }
         if (tourEditor) runtime.setEditing(true);
-        await runtime.init();
+        const entry = editor ? {} : linkEntry(data);
+        await runtime.init(entry);
         if (cancelled) return;
-        runtime.start(normalizeTour(data).hasGuidedTour);
+        runtime.start(!entry.view && normalizeTour(data).hasGuidedTour);
         setStarted(true);
         editor?.onReady(runtime, issue);
       } catch (error) {

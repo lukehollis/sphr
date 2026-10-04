@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { activeTourPoint, normalizeTour } from "@/lib/bootstrap";
 import type {
+  CameraRotation,
   IiifConfig,
   LoadingState,
   NodeData,
@@ -74,6 +75,9 @@ function isTypingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
   return Boolean(element?.isContentEditable || element?.closest?.("input, textarea, select, [contenteditable]"));
 }
+
+/** A panorama and direction a link opens a space at. */
+export type EntryView = { nodeId: string; rotation: CameraRotation; fov?: number };
 
 export class SphrRuntime {
   readonly scene = new THREE.Scene();
@@ -184,7 +188,14 @@ export class SphrRuntime {
     };
   }
 
-  async init(initialPointIndex?: number) {
+  /** The spot a shared link opened at, used once while the camera first settles. */
+  private entryPoint?: TourPoint;
+
+  /**
+   * @param initialPointIndex the tour stop to open at
+   * @param startView a panorama and direction to open at instead, as a shared link asks (see ViewerEntry)
+   */
+  async init(initialPointIndex?: number, startView?: EntryView) {
     this.setupRendererSize();
     this.setupScene();
     this.setupControls();
@@ -199,7 +210,16 @@ export class SphrRuntime {
       || { spaceIndex: 0, pointIndex: 0 };
     this.state.activeSpaceIndex = initialLocation.spaceIndex;
     this.state.activePointIndex = initialLocation.pointIndex;
-    const initialPoint = activeTourPoint(this.tour, initialLocation.spaceIndex, initialLocation.pointIndex);
+    const entryNode = startView ? this.resolveNode(startView.nodeId) : null;
+    if (entryNode) {
+      const point = this.findTourPointForNode(entryNode.uuid);
+      if (point) { this.state.activeSpaceIndex = point.spaceIndex; this.state.activePointIndex = point.pointIndex; }
+    }
+    const tourPoint = activeTourPoint(this.tour, this.state.activeSpaceIndex, this.state.activePointIndex);
+    // A link to a spot opens there, looking where it says; the tour's own stops are left as they are.
+    const initialPoint = entryNode && startView
+      ? { ...tourPoint, nodeUUID: entryNode.uuid, rotation: startView.rotation, fov: startView.fov ?? tourPoint?.fov, targetType: 'NODE', viewMode: 'FPV' } as typeof tourPoint
+      : tourPoint;
     this.currentNode = this.resolveNode(initialPoint?.nodeUUID) ?? this.resolveInitialNode();
     // Spaces without panoramas (splats, point clouds, models) may open orbiting their subject.
     if (this.bootstrap.space.space_data.noPanos && initialPoint?.viewMode === "ORBIT") {
@@ -260,7 +280,11 @@ export class SphrRuntime {
     await this.setupExperience();
     if (this.disposed) return;
 
-    await this.goTo(initialLocation.spaceIndex, initialLocation.pointIndex, true);
+    // A link's spot stands in for the stop at that location while the camera settles there.
+    this.entryPoint = entryNode ? initialPoint : undefined;
+    if (entryNode) await this.goTo(this.state.activeSpaceIndex, this.state.activePointIndex, true);
+    else await this.goTo(initialLocation.spaceIndex, initialLocation.pointIndex, true);
+    this.entryPoint = undefined;
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
@@ -328,7 +352,7 @@ export class SphrRuntime {
 
   async goTo(spaceIndex: number, pointIndex: number, instant = false, preserveHeading = false, forceFirstPerson = false) {
     const outgoingPoint = this.getActivePoint();
-    const point = activeTourPoint(this.tour, spaceIndex, pointIndex);
+    const point = this.entryPoint ?? activeTourPoint(this.tour, spaceIndex, pointIndex);
     if (!point) return;
     if (this.isNavigating && !instant) return;
 
