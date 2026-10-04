@@ -10,7 +10,7 @@ import type { ViewerSession } from "@/lib/viewer/ViewerSession";
 import type { GizmoMode, ViewCamera } from "@/lib/three/SphrRuntime";
 import { stopToTourPoint } from "@/lib/experience/apply";
 import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shapeEntry, skyEntries, skyEntry, soundEntries } from "@/lib/experience/packs";
-import { resolveParams, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
+import { resolveParams, skyTurnToward, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
 import { EARTH_RANGE, LOOK_TRANSITIONS, newId, SKY_RANGES, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type StopSky, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
 import { placeObjectAt } from "@/lib/experience/placement";
@@ -489,6 +489,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           }} />}
 
         {tab === "sky" && <SkyPanel draft={draft} stop={activeStop ?? null} ready={Boolean(canEdit)} upload={tour ? `${api}/skies` : null}
+          heading={() => session.current?.cameraView()?.rotation.azimuth ?? null}
           support={() => session.current?.skySupport() ?? Promise.resolve({ panoramas: false, outlines: false })} onError={setError}
           onChange={(sky, stopId) => {
             if (stopId) patchStop(stopId, { sky });
@@ -651,8 +652,8 @@ function SkySwatch({ sky }: { sky: SkyMeta }) {
  * a sky from the packs, or the customer's own 360 image; how it turns, how bright it
  * is and how much of its light the space takes on.
  */
-function SkyPanel({ draft, stop, ready, upload, support, onChange, onError }: {
-  draft: Experience; stop: ExperienceStop | null; ready: boolean; upload: string | null;
+function SkyPanel({ draft, stop, ready, upload, heading, support, onChange, onError }: {
+  draft: Experience; stop: ExperienceStop | null; ready: boolean; upload: string | null; heading: () => number | null;
   support: () => Promise<{ panoramas: boolean; outlines: boolean }>;
   onChange: (sky: StopSky | undefined, stopId: string | null) => void; onError: (message: string) => void;
 }) {
@@ -727,6 +728,8 @@ function SkyPanel({ draft, stop, ready, upload, support, onChange, onError }: {
     {current && current.sky !== "none" && <>
       {entry && <p className="editor-help">{entry.description}{entry.place ? ` ${entry.place}.` : ""}{entry.credit ? ` From ${entry.credit}.` : ""}</p>}
       {current.sky === "custom" && <p className="editor-help">Your own sky.</p>}
+      {entry?.sun && <button type="button" className="builder-quiet" onClick={() => { const facing = heading(); if (facing !== null) patch({ turn: skyTurnToward(entry, facing) }); }}>
+        Put its {entry.kind === "night" ? "moon" : "sun"} where I am looking</button>}
       <label>Turn the sky<input type="range" min={SKY_RANGES.turn.min} max={SKY_RANGES.turn.max} step={1} value={current.turn ?? 0} onChange={(event) => patch({ turn: Number(event.target.value) })} /></label>
       <label>Sky brightness<input type="range" min={SKY_RANGES.brightness.min} max={SKY_RANGES.brightness.max} step={0.05} value={current.brightness ?? 1} onChange={(event) => patch({ brightness: Number(event.target.value) })} /></label>
       <label>Light on the space<input type="range" min={0} max={1} step={0.05} value={current.light ?? 1} onChange={(event) => patch({ light: Number(event.target.value) })} /></label>

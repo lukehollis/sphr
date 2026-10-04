@@ -311,6 +311,21 @@ test('skies are validated for the tour and each stop, reach the viewer, and agen
   assert.equal(normalizeAgentDraft({ reply: 'ok', kind: 'tour', objects: [], effects: [], stops: [] }, parsed, new Set(['a'])).experience.sky.sky, 'drawn-night', 'the tour keeps its sky when the agent does not mention one');
 });
 
+test('a sky turns to put its sun where a stop looks', async () => {
+  const { skySunHeading, skyTurnToward } = await import('../lib/experience/registry.ts');
+  const { cameraDirection } = await import('../lib/three/math.ts');
+  const { skyImageDirection } = await import('../lib/three/layers/TourSkyLayer.ts');
+  const sky = { sun: [0.6034, 0.4924] };
+  for (const heading of [-150, -40, 0, 75, 170]) {
+    const turn = skyTurnToward(sky, heading);
+    const sun = skyImageDirection(sky.sun[0], sky.sun[1], turn);
+    const view = cameraDirection({ azimuth: heading, polar: 0 });
+    assert.ok(Math.hypot(sun.x - view.x, sun.z - view.z) < 0.03, `the sun faces heading ${heading}`);
+  }
+  assert.deepEqual(skySunHeading({ sun: [0.5, 0.25] }), { heading: -90, height: 45 });
+  assert.equal(skySunHeading({}), null);
+});
+
 test('an agent draft keeps going when a model it names is not in the library', () => {
   const result = normalizeAgentDraft({ reply: 'Placed a temple.', kind: 'tour', objects: [
     { id: 'temple', name: 'Temple', source: { kind: 'model' } },

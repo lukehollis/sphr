@@ -198,6 +198,22 @@ export type SkyMeta = {
 };
 export type SkyEntry = SkyMeta;
 
+/**
+ * Where a sky's sun or moon is, as a stop's heading (azimuth, degrees) and height above
+ * the horizon, before the sky is turned; turning a sky by T moves it to heading + T.
+ */
+export function skySunHeading(sky: Pick<SkyMeta, "sun">) {
+  if (!sky.sun) return null;
+  const heading = ((-(sky.sun[0] - 0.5) * 360 - 90) % 360 + 540) % 360 - 180;
+  return { heading: Math.round(heading), height: Math.round((0.5 - sky.sun[1]) * 180) };
+}
+
+/** The turn that puts a sky's sun or moon at a heading, from -180 to 180. */
+export function skyTurnToward(sky: Pick<SkyMeta, "sun">, heading: number) {
+  const sun = skySunHeading(sky);
+  return sun ? Math.round(((heading - sun.heading) % 360 + 540) % 360 - 180) : 0;
+}
+
 export type Pack = {
   id: string;
   label: string;

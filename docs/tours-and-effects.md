@@ -163,7 +163,8 @@ A tour can put another sky behind its space, and a stop can change to a
 different one: a sunset, a storm, stars over a temple. The space takes on the
 sky's light, so a night sky turns a sunny capture into night and a sunset warms
 it. In the builder's **Sky** tab, choose one for the whole tour or for the stop
-in view, turn it to put its sun or moon somewhere else, and set how bright it is
+in view, turn it to put its sun or moon somewhere else (**Put its sun where I am
+looking** turns it into the view), and set how bright it is
 and how much of its light the space takes on. A customer can upload a 360 sky of
 their own (an equirectangular JPEG, PNG or WebP twice as wide as tall, 1024 to
 8192 pixels wide, up to 20 MB; `POST /api/account/tours/<id>/skies`), or give
@@ -178,7 +179,9 @@ the address of one.
 `{ "sky": "custom", "url": ... }`. `turn` is degrees around the vertical,
 `brightness` (0.2 to 2.5) is the sky's own, `light` (0 to 1) is how much the
 space takes on its light, and `duration` the seconds the change takes (2 by
-default). A stop without `sky` keeps the tour's.
+default). A stop without `sky` keeps the tour's. `skySunHeading()` gives where a
+sky's sun is as a stop heading, and `skyTurnToward()` the turn that brings it to one;
+the tour agent is told both.
 
 The sky is drawn on a sphere at the far plane behind everything
 (`lib/three/layers/TourSkyLayer.ts`), faded from one sky to the next. Splats and
