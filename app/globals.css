@@ -87,7 +87,7 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .scene-heading > .scene-title { padding: var(--space-1) var(--space-2); background: var(--surface-page); }
 .scene-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The title opens what is known about the space. */
-.scene-title-button { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: var(--space-1) 12px var(--space-1) var(--space-2); border: 0; background: var(--surface-page); color: var(--text-heading); font: inherit; text-align: left; cursor: pointer; pointer-events: auto; }
+.scene-title-button { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: var(--space-1) var(--space-2) var(--space-1) 12px; border: 0; background: var(--surface-page); color: var(--text-heading); font: inherit; text-align: left; cursor: pointer; pointer-events: auto; }
 .scene-title-button svg { flex: none; color: var(--text-muted); }
 .scene-title-button:hover svg, .scene-title-button[aria-expanded="true"] svg { color: var(--text-heading); }
 .scene-details { position: absolute; top: 100%; left: 0; width: max(100%, 320px); max-width: calc(100vw - 2 * var(--space-3)); max-height: calc(100dvh - 160px); overflow: auto; overscroll-behavior: contain; padding: 20px; background: rgba(0, 0, 0, .9); color: var(--text-heading); pointer-events: auto; }
@@ -140,7 +140,7 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
   .scene-load-title { margin-bottom: 28px; }
   .viewer-header { top: calc(16px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); flex-direction: column; align-items: stretch; gap: var(--space-1); }
   .scene-heading { font-size: var(--size-label); }
-  .scene-title-button { flex: 1; justify-content: space-between; min-height: 44px; }
+  .scene-title-button { flex: 1; min-height: 44px; }
   .scene-details { width: 100%; max-width: none; }
   .hud-right { align-self: flex-end; }
   .hud-left { left: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }

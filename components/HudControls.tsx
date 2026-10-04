@@ -114,8 +114,8 @@ function SceneHeading({ title, details }: { title?: string; details?: SpaceDetai
     <div className="scene-heading" ref={root}>
       <button className="scene-title-button" type="button" aria-expanded={open} aria-controls="scene-details"
         title={open ? "Hide details" : "About this space"} onClick={() => setOpen(value => !value)}>
-        <span className="scene-title">{title}</span>
         {open ? <X size={16} aria-hidden="true" /> : <Menu size={16} aria-hidden="true" />}
+        <span className="scene-title">{title}</span>
       </button>
       {open && <div className="scene-details" id="scene-details">
         {details.description && <p>{details.description}</p>}
