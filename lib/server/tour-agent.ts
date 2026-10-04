@@ -152,7 +152,10 @@ export function resolveLibraryCodes(raw: RawDraft, codes: Map<string, string>, l
   return raw;
 }
 
-export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "", drawn: string[] = [], spaceViews: SpaceView[] = []) {
+/** A space's reconstruction as the agent hears of it: its title and the names of its landmarks. */
+export type ReconstructionSummary = { title?: string; landmarks: string[] };
+
+export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experience, views: ClientView[], origin: string, team = false, prompt = "", drawn: string[] = [], spaceViews: SpaceView[] = [], reconstruction: ReconstructionSummary | null = null) {
   const space = bootstrap.space;
   const data = space.space_data;
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
@@ -196,6 +199,9 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
     `Skies for "sky" (the ID, "none" for the capture's own sky, or {"sky": "custom", "url": an https equirectangular image}). ${nodes.length
       ? outlines ? "This space's 360 photos have sky outlines, so a new sky shows wherever they see sky." : "This space's 360 photos have no sky outlines yet, so a new sky only changes their light (a night sky darkens them, a sunset warms them) and cannot show through them; say so if the person asks for a different sky."
       : "This space has no 360 photos, so a new sky shows everywhere the capture leaves empty, behind the splat or model."} Where a sky has a sun or moon, its heading is given as a stop's azimuth before turning; to put it in front of a stop that looks at azimuth A, set "turn" to A minus that heading.\n${skyEntries().map((entry) => { const sun = skySunHeading(entry); return `${entry.id} (${entry.label}, ${entry.kind}${entry.place ? `, ${entry.place}` : ""}): ${entry.description}${sun ? ` Sun or moon at heading ${sun.heading}, ${sun.height} degrees up.` : ""}`; }).join("\n")}`,
+    reconstruction
+      ? `Reconstruction: this space has a stylized 3D model of how the site once looked${reconstruction.title ? `, "${reconstruction.title}"` : ""}${reconstruction.landmarks.length ? `, with ${reconstruction.landmarks.slice(0, 40).join(", ")}` : ""}. It shows in the dollhouse, and in a panorama when a stop asks for it: give a stop "reconstruction": true to show the model from that stop's location instead of the photographs (a stop that explains what the place looked like, standing where a building stood), and "reconstruction": false on a later stop to return to the photographs. One to three stops is plenty.`
+      : "",
     `Looks for "style" (the ID as look, "color" for the capture as it is; transitions ${LOOK_TRANSITIONS.join(", ")}):\n${lookEntries().map((entry) => `${entry.id} (${entry.label}): ${entry.description}${entry.requires === "splats" ? " Gaussian splat spaces only." : ""}${entry.params.length ? ` Params ${entry.params.map(paramSummary).join(", ")}.` : ""}`).join("\n")}`,
     `Shapes you can place (source {"kind":"shape","shape":...,"color":"#rrggbb","text":...}):\n${shapeEntries().map((entry) => `${entry.shape}: ${entry.description} About ${entry.size} m tall at scale 1, default color ${entry.color}.${entry.text ? " Shows its text." : ""}`).join("\n")}`,
     library.length ? `Library models you can place (source {"kind":"model","url":"<code>"} with the code before each model, or a model ID from search_models when you have that tool). The library holds ${library.length} models (${picked.counts.map(([category, count]) => `${category} ${count}`).join(", ")}); listed are those matching the request and a few of each category, and search_models finds the rest:\n${picked.listed.map((model, index) => `lib${index + 1} ${model.name}, ${model.category}, about ${round(model.height)} m tall at scale 1${model.tags?.length ? `, ${model.tags.join(" ")}` : ""}${model.animations?.length ? `, animated: ${model.animations.join(", ")}` : ""}`).join("\n")}` : "",
@@ -315,6 +321,7 @@ const WRITE_TOUR: Anthropic.Tool = {
             position: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
             fov: { type: "number" },
             earth: { anyOf: [{ type: "null" }, { type: "object", properties: { range: { type: "number" } }, required: ["range"] }] },
+            reconstruction: { anyOf: [{ type: "null" }, { type: "boolean" }] },
             style: styleSchema,
             sky: skySchema,
             objects: { type: "array", items: { type: "string" } },
@@ -377,7 +384,9 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
     return {
       id, title: stop.title, text: stop.text, detail: stop.detail,
       view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}),
-        ...(stop.earth === undefined ? before?.view.earth ? { earth: before.view.earth } : {} : stop.earth ? { earth: stop.earth } : {}) },
+        ...(stop.earth === undefined ? before?.view.earth ? { earth: before.view.earth } : {} : stop.earth ? { earth: stop.earth } : {}),
+        ...(stop.reconstruction === undefined ? typeof before?.view.reconstruction === "boolean" ? { reconstruction: before.view.reconstruction } : {}
+          : typeof stop.reconstruction === "boolean" ? { reconstruction: stop.reconstruction } : {}) },
       objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
       look: stop.style === undefined ? before?.look : stop.style,
       sky: stop.sky === undefined ? before?.sky : stop.sky,
@@ -556,11 +565,13 @@ export async function composeTour(options: {
   drawn?: string[];
   /** Views drawn on the server of a space without panoramas (see space-views.ts). */
   spaceViews?: SpaceView[];
+  /** The space's reconstruction, when it has one (see reconstructions.ts). */
+  reconstruction?: ReconstructionSummary | null;
 }): Promise<AgentResult & { library: LibraryModel[] }> {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
-  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews);
+  const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews, options.reconstruction);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
   const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()

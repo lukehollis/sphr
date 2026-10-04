@@ -7,6 +7,7 @@ import { libraryModels } from "@/lib/server/library";
 import { tourAgentConfigured } from "@/lib/server/tour-agent";
 import { canBuildOn, readUserTour, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
+import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Tour builder", robots: { index: false, follow: false } };
@@ -21,7 +22,8 @@ export default async function CustomerTourPage({ params }: { params: Promise<{ i
   if (!tour || tour.userId !== user.id) notFound();
   const scene = await tourScene(tour);
   if (!scene || !canBuildOn(user.id, scene)) notFound();
-  const edits = { title: scene.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, variants: await existingVariantsUrl(scene.sceneId) };
+  const [variants, reconstruction] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId)]);
+  const edits = { title: scene.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, variants, reconstruction };
   return <TourBuilder scene={scene} edits={edits} initial={tour.experience ?? emptyExperience(tour.kind)} saved={{ experience: tour.experience, revision: tour.revision }}
     library={await libraryModels(false)} agentReady={tourAgentConfigured()} back={{ href: "/account", label: "Your spaces" }} api={`/api/account/tours/${tour.id}`}
     tour={{ id: tour.id, title: tour.title, public: tour.public, path: tourPath(tour), spaceTitle: scene.title }} />;

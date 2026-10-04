@@ -178,6 +178,7 @@ function view(value: unknown, label: string, nodeIds?: Set<string>): StopView {
   if (nodeIds?.size && !result.nodeId) fail(`${label} needs a location in the space.`);
   if (input.fov !== undefined) result.fov = Math.max(30, Math.min(110, finite(input.fov, `${label} zoom`, 180)));
   if (input.viewMode === "ORBIT") result.viewMode = "ORBIT";
+  if (typeof input.reconstruction === "boolean") result.reconstruction = input.reconstruction;
   const earth = input.earth as Record<string, unknown> | undefined;
   if (earth && typeof earth === "object") {
     const range = finite(earth.range ?? EARTH_RANGE.default, `${label} height above the map`);

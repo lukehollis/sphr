@@ -19,7 +19,7 @@ import type { LibraryModel } from "@/lib/experience/library";
 
 type Props = {
   scene: SceneListing;
-  edits: Pick<SceneEdits, "title" | "startView"> & { variants?: string | null };
+  edits: Pick<SceneEdits, "title" | "startView"> & { variants?: string | null; reconstruction?: string | null };
   initial: Experience;
   saved: { experience: Experience | null; revision: number };
   library: LibraryModel[];
@@ -68,6 +68,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   draftRef.current = draft;
 
   const standalone = Boolean(tour);
+  // Stops can show the site's reconstruction once the space has one that loads.
+  const hasReconstruction = Boolean(state?.reconstruction ? state.reconstruction.available : edits.reconstruction);
   const viewerEdits = useMemo(() => ({ ...edits, experience: initial, standalone }), [edits, initial, standalone]);
   const editor = useMemo(() => ({
     mode: "tour" as const,
@@ -422,6 +424,14 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                     onChange={(event) => patchStop(stop.id, { view: { ...stop.view, earth: { range: Number(event.target.value) } } })}
                     onPointerUp={() => void session.current?.goToStop(index)} /></label>}
                 </fieldset>
+                {hasReconstruction && <fieldset><legend>Reconstruction</legend>
+                  {/* Unset, a stop keeps what shows: the reconstruction in the dollhouse, the photographs in first person. */}
+                  <label className="builder-check"><input type="checkbox" checked={stop.view.reconstruction ?? Boolean(stop.view.earth || stop.view.viewMode === "ORBIT")}
+                    onChange={(event) => {
+                      patchStop(stop.id, { view: { ...stop.view, reconstruction: event.target.checked } });
+                      setTimeout(() => void session.current?.goToStop(index), 400);
+                    }} /> Show the reconstruction here</label>
+                </fieldset>}
                 {draft.effects.length > 0 && <fieldset><legend>Effects here</legend><div className="builder-chips">
                   {draft.effects.filter((effect) => !effect.always).map((effect) => <button type="button" key={effect.id} aria-pressed={stop.effects.includes(effect.id)} onClick={() => patchStop(stop.id, { effects: toggle(stop.effects, effect.id) })}>{effect.name || effectEntry(effect.type)?.label || effect.type}</button>)}
                 </div></fieldset>}

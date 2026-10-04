@@ -25,6 +25,7 @@ import { ExperienceAudio } from "@/lib/experience/audio";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
 import { TourSkyLayer } from "@/lib/three/layers/TourSkyLayer";
 import { EarthLayer } from "@/lib/three/layers/EarthLayer";
+import { ReconstructionLayer } from "@/lib/three/layers/ReconstructionLayer";
 import { earthNear, earthPose } from "@/lib/three/earth";
 import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { LookPass, lookKey, type LookHost } from "@/lib/three/looks/LookPass";
@@ -51,12 +52,22 @@ type CameraPose = {
   fov: number;
 };
 
+type ViewMode = "FPV" | "ORBIT";
+/** How the reconstruction shows: the model, the sky behind it, the photographs it hides and the capture it replaces. */
+type ReconstructionDisplay = { model: number; sky: number; veil: number; capture: number };
+
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const NEAR = 0.02;
 // Flights up to the map and back down take longer than a step between panoramas.
 const EARTH_CLIMB_MS = 4200;
 const EARTH_DIVE_MS = 3800;
 const EARTH_GLIDE_MS = 3000;
+// The reconstruction fades in or out when the visitor turns it on or off.
+const RECONSTRUCTION_FADE_MS = 700;
+// It loads this long after the space opens, so the dollhouse already has it.
+const RECONSTRUCTION_DELAY_MS = 1500;
+// With a model in view, the near plane moves out a little for depth precision kilometers away.
+const RECONSTRUCTION_NEAR = 0.1;
 const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
 
 function isTypingTarget(target: EventTarget | null) {
@@ -96,6 +107,14 @@ export class SphrRuntime {
   private readonly sunLight = new THREE.DirectionalLight(0xfff2cf, 3.2);
   private earth: EarthLayer | null = null;
   private lastEarthCredits = 0;
+  private reconstruction: ReconstructionLayer | null = null;
+  /** The reconstruction shows in the dollhouse unless turned off, and in first person when turned on. */
+  private reconOrbit = true;
+  private reconFpv = false;
+  /** How far the reconstruction has come in for the current view mode, 0 to 1. */
+  private reconAmount = 0;
+  private reconTween: Tween | null = null;
+  private reconTimer: ReturnType<typeof setTimeout> | null = null;
   private sceneGraph: SceneGraphLayer | null = null;
   private cursor: CursorLayer | null = null;
   private annotations: AnnotationLayer | null = null;
@@ -206,6 +225,11 @@ export class SphrRuntime {
     }
     this.tourSky = new TourSkyLayer(this.scene, this.renderer.capabilities.maxTextureSize);
 
+    const reconstruction = this.bootstrap.space.space_data.reconstruction;
+    if (reconstruction && (typeof reconstruction === "string" || typeof reconstruction === "object")) {
+      this.reconstruction = new ReconstructionLayer(this.scene, reconstruction);
+    }
+
     const splatConfigs = this.getSplatConfigs();
     if (splatConfigs.length) {
       this.splats = new SparkSplatLayer(this.scene, this.renderer, splatConfigs, (loaded, total, label) => {
@@ -240,6 +264,10 @@ export class SphrRuntime {
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
+    // The reconstruction waits until the space is showing, then loads for the dollhouse.
+    if (this.reconstruction && !this.reconstruction.busy && !this.reconstruction.ready) {
+      this.reconTimer = setTimeout(() => void this.loadReconstruction(), RECONSTRUCTION_DELAY_MS);
+    }
   }
 
   start(guided: boolean) {
@@ -258,6 +286,10 @@ export class SphrRuntime {
       this.sceneGraph?.hideAll();
     }
     this.applyExperienceForPoint(point);
+    if (guided && typeof point?.reconstruction === "boolean") {
+      this.setReconWanted(this.state.viewMode, point.reconstruction);
+      if (!this.isNavigating) this.settleReconstruction();
+    }
     this.emitState();
   }
 
@@ -318,6 +350,9 @@ export class SphrRuntime {
       if (this.disposed) return;
     }
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
+    // A guided stop can show the site's reconstruction in its view, or the capture.
+    if (typeof point.reconstruction === "boolean" && this.tourShowsStops()) this.setReconWanted(nextViewMode, point.reconstruction);
+    else if (nextViewMode === "ORBIT" && this.reconWanted("ORBIT")) void this.loadReconstruction();
 
     this.state.activeSpaceIndex = spaceIndex;
     this.state.activePointIndex = pointIndex;
@@ -343,7 +378,8 @@ export class SphrRuntime {
     // Moves the visitor chose are always in sight; only tour steps between unlinked scans cut.
     const teleport = nodeChanged && !fromOverview && !preserveHeading && Boolean(outgoingNode && this.nav && !this.nav.canFlyTo(node!.uuid));
     const navigationMs = teleport ? 700 : this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
-    const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV"
+    // With the reconstruction in view the camera simply flies there; the photographs load behind it.
+    const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV" && !this.reconstructionMove()
       ? this.beginNavigationTransition(outgoingNode)
       : null;
 
@@ -372,7 +408,8 @@ export class SphrRuntime {
     else if (earth && !instant && (earthPoint || earth.visible)) this.glideOverEarth(pose, earthPoint);
     else {
       if (instant) earth?.setOpacity(earthPoint ? 1 : 0);
-      this.flyTo(pose, instant || teleport);
+      const reconstruction = this.reconFlight(fromOverview ? "ORBIT" : "FPV", nextViewMode);
+      this.flyTo(pose, instant || teleport, reconstruction?.done, reconstruction?.update);
       if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationMs);
       else if (this.isNavigating) this.endNavigationTransition();
     }
@@ -393,11 +430,25 @@ export class SphrRuntime {
     this.sceneGraph?.setViewMode(newMode, this.state.debug);
     if (newMode === "FPV") this.flyFromOverview(pose);
     else {
+      if (this.reconWanted("ORBIT")) void this.loadReconstruction();
+      // The reconstruction takes the capture's place on the way up.
+      const reconstruction = this.reconFlight("FPV", "ORBIT");
       this.isNavigating = true;
       this.state.navigating = true;
       this.controls.enabled = false;
-      this.flyTo(pose, false, () => this.endNavigationTransition());
+      this.flyTo(pose, false, () => { reconstruction?.done(); this.endNavigationTransition(); }, reconstruction?.update);
     }
+    this.emitState();
+  }
+
+  /** Show the site's reconstruction in place of the capture in the current view, or the capture again. */
+  toggleReconstruction() {
+    const reconstruction = this.reconstruction;
+    if (!reconstruction || reconstruction.failed) return;
+    const mode = this.state.viewMode;
+    this.setReconWanted(mode, !this.reconWanted(mode));
+    // During a flight the new choice takes over when it lands.
+    if (!this.isNavigating) this.settleReconstruction();
     this.emitState();
   }
 
@@ -430,7 +481,7 @@ export class SphrRuntime {
   }
 
   getState() {
-    return { ...this.state, activeNodeId: this.currentNode?.uuid, loading: { ...this.state.loading } };
+    return { ...this.state, activeNodeId: this.currentNode?.uuid, loading: { ...this.state.loading }, reconstruction: this.reconstructionState() };
   }
 
   getDebugSnapshot() {
@@ -450,6 +501,12 @@ export class SphrRuntime {
       },
       skybox: this.skybox?.getDebugSnapshot() ?? null,
       tourSky: this.tourSky?.getDebugSnapshot() ?? null,
+      reconstruction: this.reconstruction ? {
+        ...this.reconstruction.getDebugSnapshot(),
+        wanted: { FPV: this.reconWanted("FPV"), ORBIT: this.reconWanted("ORBIT") },
+        amount: this.reconAmount ?? 0,
+        fading: Boolean(this.reconTween)
+      } : null,
       experience: {
         kind: this.tour.kind,
         objects: this.tour.objects.length,
@@ -485,10 +542,15 @@ export class SphrRuntime {
     this.transitionMeshTween = null;
     this.navigationReleaseTween?.cancel();
     this.navigationReleaseTween = null;
+    this.reconTween?.cancel();
+    this.reconTween = null;
+    if (this.reconTimer) clearTimeout(this.reconTimer);
+    this.reconTimer = null;
     this.audio.dispose();
     this.skybox?.dispose();
     this.tourSky?.dispose();
     this.earth?.dispose();
+    this.reconstruction?.dispose();
     this.splats?.dispose();
     this.panorama?.dispose();
     this.iiif?.dispose();
@@ -672,7 +734,7 @@ export class SphrRuntime {
     if (this.hoverExperience(event)) return;
     const hoveredNode = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     this.nav?.setHovered(hoveredNode && hoveredNode.uuid !== this.currentNode?.uuid ? hoveredNode.uuid : null);
-    const targets = this.sceneGraph?.getRaycastObjects() ?? [];
+    const targets = this.surfaceTargets();
     if (!targets.length) { this.canvas.style.cursor = hoveredNode ? "pointer" : ""; return; }
     const canNavigate = Boolean(hoveredNode || this.findPanoramaNavigationNode());
     this.canvas.style.cursor = canNavigate ? "pointer" : "grab";
@@ -738,7 +800,7 @@ export class SphrRuntime {
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     ), this.camera);
-    const hit = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+    const hit = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
     let node = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     // Markers behind the visible surface must not select a different room or floor.
     if (node && hit && this.nav && this.camera.position.distanceTo(this.nav.getWorldFloorPosition(node)) > hit.distance + 0.2) node = null;
@@ -870,7 +932,7 @@ export class SphrRuntime {
     }
     if (this.disposed) return;
     const direction = this.camera.getWorldDirection(new THREE.Vector3());
-    const transition = fromOverview ? null : this.beginNavigationTransition(this.currentNode);
+    const transition = fromOverview || this.reconstructionMove() ? null : this.beginNavigationTransition(this.currentNode);
     const navigationMs = this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
     this.nav?.beginTransition();
     this.currentNode = node;
@@ -888,7 +950,8 @@ export class SphrRuntime {
     }
     if (fromOverview) this.flyFromOverview(pose);
     else {
-      this.flyTo(pose);
+      const reconstruction = this.reconFlight("FPV", "FPV");
+      this.flyTo(pose, false, reconstruction?.done, reconstruction?.update);
       this.scheduleNavigationTransitionEnd(navigationMs);
     }
     this.emitState();
@@ -1016,7 +1079,7 @@ export class SphrRuntime {
     const picked = this.objects?.pick(this.raycaster);
     if (!picked) return null;
     if (this.state.viewMode === "FPV") {
-      const wall = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+      const wall = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
       if (wall && wall.distance < picked.distance - 0.15) return null;
     }
     return picked.id;
@@ -1251,7 +1314,9 @@ export class SphrRuntime {
       fov: Math.round(this.camera.fov),
       ...(this.state.viewMode === "ORBIT" ? { viewMode: "ORBIT" as const } : {}),
       ...(this.state.viewMode === "ORBIT" && this.earth?.visible
-        ? { earth: { range: Math.round(this.camera.position.distanceTo(this.controls.target) / (this.earthPlace()?.scale ?? 1)) } } : {})
+        ? { earth: { range: Math.round(this.camera.position.distanceTo(this.controls.target) / (this.earthPlace()?.scale ?? 1)) } } : {}),
+      // A stop taken from the view keeps the reconstruction, or the capture, that is showing.
+      ...(this.reconstruction && !this.reconstruction.failed ? { reconstruction: this.reconWanted(this.state.viewMode) } : {})
     };
   }
 
@@ -1272,6 +1337,7 @@ export class SphrRuntime {
     this.state.viewMode = "ORBIT";
     this.updateControlsForViewMode();
     this.nav?.setOrbit(true);
+    if (this.reconWanted("ORBIT")) void this.loadReconstruction();
     if (fromOverview) this.glideOverEarth(pose, true);
     else {
       this.panorama?.setVisible(true);
@@ -1335,7 +1401,7 @@ export class SphrRuntime {
     const nav = this.nav;
     const currentNode = this.currentNode;
     if (this.state.viewMode !== "FPV" || !currentNode || !nav) return null;
-    const hit = this.raycaster.intersectObjects(this.sceneGraph?.getRaycastObjects() ?? [], true)[0];
+    const hit = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
     let floorHit: THREE.Vector3 | null = null;
     if (hit?.face) {
       const normal = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
@@ -1370,17 +1436,20 @@ export class SphrRuntime {
       if (this.cameraTween && !this.cameraTween.update(now)) this.cameraTween = null;
       if (this.transitionMeshTween && !this.transitionMeshTween.update(now)) this.transitionMeshTween = null;
       if (this.navigationReleaseTween && !this.navigationReleaseTween.update(now)) this.navigationReleaseTween = null;
+      if (this.reconTween && !this.reconTween.update(now)) this.reconTween = null;
       // OrbitControls clamps FPV distance to 0.1m. It must not rewrite an in-flight pose.
       if (!this.cameraTween) this.controls.update();
       this.skybox?.update(this.camera);
       if (this.tourSky?.update(this.camera, elapsed)) this.applySkyLight();
       this.panorama?.update(this.camera);
+      this.reconstruction?.update(this.camera);
       this.nav?.update(this.camera, this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);
       this.effects?.update(now / 1000, elapsed);
       this.looks?.update(elapsed);
       this.splats?.update();
       this.updateEarth(now);
+      this.updateNearPlane();
       this.cursor?.update(now);
       if (this.looks) this.looks.render(this.scene, this.camera, now / 1000);
       else this.renderer.render(this.scene, this.camera);
@@ -1395,12 +1464,15 @@ export class SphrRuntime {
     this.panorama?.setVisible(true);
     this.panorama?.setPresentationOpacity(0);
     this.sceneGraph?.setOverviewReturnBlend(0);
+    // The reconstruction gives way to the photograph with the same blend, or stays in its place.
+    const reconstruction = this.reconFlight("ORBIT", "FPV");
     // Diving from the map, the map gives way to the photograph just above the ground.
     const earth = this.earth?.visible ? this.earth : null;
     const done = () => {
       earth?.setOpacity(0);
       this.panorama?.setPresentationOpacity(1);
       this.sceneGraph?.setOverviewReturnBlend(null);
+      reconstruction?.done();
       this.endNavigationTransition();
     };
     const update = (progress: number) => {
@@ -1408,6 +1480,7 @@ export class SphrRuntime {
       const blend = THREE.MathUtils.smoothstep(progress, earth ? 0.78 : 0.85, earth ? 0.98 : 1);
       this.panorama?.setPresentationOpacity(blend);
       this.sceneGraph?.setOverviewReturnBlend(blend);
+      reconstruction?.update(blend);
       earth?.setOpacity(1 - THREE.MathUtils.smoothstep(progress, 0.72, 0.93));
     };
     if (earth) this.flyArc(pose, EARTH_DIVE_MS, update, done);
@@ -1421,15 +1494,18 @@ export class SphrRuntime {
     this.state.navigating = true;
     this.controls.enabled = false;
     this.sceneGraph?.setViewMode("FPV", this.state.debug);
+    const reconstruction = this.reconFlight("FPV", "ORBIT", true);
     this.flyArc(pose, EARTH_CLIMB_MS, (progress) => {
       // The map's coarse ground near the camera stays behind the photograph until it is well above it.
       this.panorama?.setPresentationOpacity(1 - THREE.MathUtils.smoothstep(progress, 0.04, 0.22));
       earth.setOpacity(THREE.MathUtils.smoothstep(progress, 0.06, 0.28));
       if (progress > 0.22) this.sceneGraph?.setViewMode("ORBIT", this.state.debug);
+      reconstruction?.update(progress);
     }, () => {
       earth.setOpacity(1);
       this.panorama?.setVisible(false);
       this.panorama?.setPresentationOpacity(1);
+      reconstruction?.done();
       this.endNavigationTransition();
     });
   }
@@ -1441,10 +1517,13 @@ export class SphrRuntime {
     this.isNavigating = true;
     this.state.navigating = true;
     this.controls.enabled = false;
+    const reconstruction = this.reconFlight("ORBIT", "ORBIT");
     this.flyArc(pose, EARTH_GLIDE_MS, (progress) => {
       earth.setOpacity(show ? Math.max(start, THREE.MathUtils.smoothstep(progress, 0, 0.5)) : start * (1 - THREE.MathUtils.smoothstep(progress, 0.2, 0.8)));
+      reconstruction?.update(progress);
     }, () => {
       earth.setOpacity(show ? 1 : 0);
+      reconstruction?.done();
       this.endNavigationTransition();
     });
   }
@@ -1640,18 +1719,180 @@ export class SphrRuntime {
     // Over the map, the camera stays above the horizon.
     const lowest = earth.visible ? THREE.MathUtils.degToRad(84) : Math.PI;
     if (this.controls.maxPolarAngle !== lowest) this.controls.maxPolarAngle = lowest;
-    // Keep the map's depth steady from the ground to kilometers up.
-    const near = earth.visible ? earthNear(this.camera.position.distanceTo(this.controls.target)) : NEAR;
-    if (Math.abs(this.camera.near - near) > near * 0.05) {
-      this.camera.near = near;
-      this.camera.updateProjectionMatrix();
-    }
     if (now - this.lastEarthCredits < 1000) return;
     this.lastEarthCredits = now;
     const credits = earth.visible ? earth.credits() : "";
     if ((this.state.earth?.credits ?? null) === (earth.visible ? credits : null)) return;
     this.state.earth = earth.visible ? { credits } : undefined;
     this.emitState();
+  }
+
+  /**
+   * Keep depth steady for what is in view: the map from the ground to
+   * kilometers up, and a reconstruction's sea and distant scenery several
+   * kilometers out. Otherwise near enough for things right at the eye.
+   */
+  private updateNearPlane() {
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const near = this.earth?.visible ? earthNear(distance)
+      : this.reconstruction?.visible ? THREE.MathUtils.clamp(distance * 0.002, RECONSTRUCTION_NEAR, 2) : NEAR;
+    if (Math.abs(this.camera.near - near) > near * 0.05) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  // ---- The site's reconstruction ----
+
+  /** Whether the reconstruction is wanted in a view mode: in the dollhouse unless turned off, in first person when turned on. */
+  private reconWanted(mode: ViewMode) {
+    return mode === "ORBIT" ? this.reconOrbit !== false : this.reconFpv === true;
+  }
+
+  /** How much of the reconstruction a view mode should show: wanted, and loaded. */
+  private reconTarget(mode: ViewMode) {
+    return this.reconstruction?.ready && this.reconWanted(mode) ? 1 : 0;
+  }
+
+  private setReconWanted(mode: ViewMode, wanted: boolean) {
+    if (!this.reconstruction) return;
+    if (mode === "ORBIT") this.reconOrbit = wanted;
+    else this.reconFpv = wanted;
+    if (wanted) void this.loadReconstruction();
+  }
+
+  /** Stops change what shows only in a guided tour or hunt, or while the builder plays them. */
+  private tourShowsStops() {
+    return this.state.guided || (this.editing && this.tour.hasGuidedTour);
+  }
+
+  /** A step between panoramas with the reconstruction in view, before or after it. */
+  private reconstructionMove() {
+    return Boolean(this.reconstruction?.ready) && ((this.reconAmount ?? 0) > 0 || this.reconTarget("FPV") > 0);
+  }
+
+  /**
+   * What clicks and walls are tested against: the surfaces in view. The
+   * reconstruction while it shows, with the capture until it has fully taken
+   * its place, so nothing unseen catches a click or hides a placed object.
+   */
+  private surfaceTargets() {
+    const capture = this.sceneGraph?.getRaycastObjects() ?? [];
+    const model = this.reconstruction?.getRaycastObjects() ?? [];
+    if (!model.length) return capture;
+    return this.sceneGraph?.captureReplaced ? model : [...model, ...capture];
+  }
+
+  /** Load the reconstruction now (once), then bring it in if the current view wants it. */
+  private async loadReconstruction() {
+    const reconstruction = this.reconstruction;
+    if (!reconstruction || reconstruction.ready || reconstruction.failed) return;
+    if (this.reconTimer) clearTimeout(this.reconTimer);
+    this.reconTimer = null;
+    if (reconstruction.busy) return;
+    const loading = reconstruction.load();
+    this.emitState();
+    await loading;
+    if (this.disposed || this.reconstruction !== reconstruction) return;
+    if (!this.isNavigating) this.settleReconstruction();
+    this.emitState();
+  }
+
+  /** The reconstruction at rest in a view mode, `amount` of the way in. */
+  private reconDisplay(mode: ViewMode, amount: number): ReconstructionDisplay {
+    // In first person the model stays solid and the photographs fade over it, a clean crossfade.
+    if (mode === "FPV") return { model: amount > 0 ? 1 : 0, sky: amount > 0 ? 1 : 0, veil: amount, capture: amount > 0 ? 0 : 1 };
+    // In the dollhouse it trades places with the capture mesh.
+    return { model: amount, sky: 0, veil: 0, capture: 1 - amount };
+  }
+
+  private showReconstruction(display: ReconstructionDisplay) {
+    const reconstruction = this.reconstruction;
+    if (!reconstruction?.ready) return;
+    reconstruction.setOpacity(display.model);
+    reconstruction.setSky(display.sky);
+    this.panorama?.setVeil(display.veil);
+    this.sceneGraph?.setCaptureOpacity(display.capture);
+    this.nav?.setOverlay(display.model > 0);
+  }
+
+  /** Fade the reconstruction in or out to what the current view wants. */
+  private settleReconstruction(duration = RECONSTRUCTION_FADE_MS) {
+    if (!this.reconstruction?.ready) return;
+    const mode = this.state.viewMode;
+    const target = this.reconTarget(mode);
+    const start = this.reconAmount ?? 0;
+    this.reconTween?.cancel();
+    this.reconTween = null;
+    if (Math.abs(target - start) < 1e-3) {
+      this.reconAmount = target;
+      this.showReconstruction(this.reconDisplay(mode, target));
+      return;
+    }
+    this.reconTween = createTween({
+      duration: duration * Math.abs(target - start),
+      easing: (value) => THREE.MathUtils.smootherstep(value, 0, 1),
+      onUpdate: (value) => {
+        this.reconAmount = start + (target - start) * value;
+        this.showReconstruction(this.reconDisplay(mode, this.reconAmount));
+      }
+    });
+  }
+
+  /**
+   * The reconstruction through a flight from one view mode to another: an
+   * update for each frame of the flight and the state it lands in. In first
+   * person the model stays solid while the photographs fade over it; in the
+   * dollhouse it crossfades with the capture mesh. Nothing to do until it loads.
+   */
+  private reconFlight(from: ViewMode, to: ViewMode, climb = false) {
+    this.reconTween?.cancel();
+    this.reconTween = null;
+    if (!this.reconstruction?.ready) return null;
+    const start = this.reconAmount ?? 0;
+    const end = this.reconTarget(to);
+    this.reconAmount = end;
+    if (!start && !end) return null;
+    const smooth = THREE.MathUtils.smoothstep;
+    const between = (progress: number) => start + (end - start) * progress;
+    let update: (progress: number) => void;
+    if (from === "FPV" && to === "FPV") {
+      // Between panoramas, the photographs go early in the step, or come back as the camera arrives.
+      update = (progress) => this.showReconstruction({ model: 1, sky: 1, capture: 0,
+        veil: between(end > start ? smooth(progress, 0, 0.3) : smooth(progress, 0.65, 1)) });
+    } else if (from === "ORBIT" && to === "ORBIT") {
+      update = (progress) => this.showReconstruction(this.reconDisplay("ORBIT", between(smooth(progress, 0.15, 0.85))));
+    } else if (from === "ORBIT") {
+      // Into a panorama, `progress` is the flight's blend toward the photograph, which comes up over a solid model.
+      update = (blend) => this.showReconstruction({ model: end >= start ? between(blend) : start, sky: end * blend, veil: end, capture: 1 - start });
+    } else if (climb) {
+      // Up to the map, the photograph fades by 22% of the climb, where the dollhouse takes over.
+      update = (progress) => this.showReconstruction({
+        model: end >= start ? 1 : between(smooth(progress, 0.22, 0.4)),
+        sky: start * (1 - smooth(progress, 0.06, 0.28)),
+        veil: start,
+        capture: progress > 0.22 ? 1 - end : 1 - start
+      });
+    } else {
+      // Up to the dollhouse, the photograph is gone at once and the capture and the model trade places on the way.
+      update = (progress) => this.showReconstruction({ ...this.reconDisplay("ORBIT", between(smooth(progress, 0.1, 0.6))), sky: start * (1 - smooth(progress, 0, 0.3)) });
+    }
+    update(0);
+    return { update, done: () => this.showReconstruction(this.reconDisplay(to, end)) };
+  }
+
+  private reconstructionState(): RuntimeState["reconstruction"] {
+    const reconstruction = this.reconstruction;
+    if (!reconstruction) return undefined;
+    // Its title and credit show once it can be seen.
+    const { title, credit } = reconstruction.ready ? reconstruction.info : {};
+    return {
+      available: !reconstruction.failed,
+      visible: !reconstruction.failed && this.reconWanted(this.state.viewMode),
+      loading: reconstruction.busy,
+      ...(title ? { title } : {}),
+      ...(credit ? { credit } : {})
+    };
   }
 
   private poseForNode(node: NodeData, mode: "FPV" | "ORBIT", point?: TourPoint): CameraPose {
@@ -1777,6 +2018,8 @@ export class SphrRuntime {
     this.isNavigating = false;
     this.state.navigating = false;
     this.controls.enabled = true;
+    // A reconstruction turned on or off, or loaded, during the flight comes in now.
+    this.settleReconstruction();
     this.emitState();
   }
 

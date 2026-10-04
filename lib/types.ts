@@ -106,6 +106,8 @@ export type TourPoint = {
   sky?: StopSky;
   /** Seen from above over the 3D map (see TourData.place). */
   earth?: StopEarth;
+  /** Show the site's reconstruction at this stop, or the capture; unset keeps what shows. */
+  reconstruction?: boolean;
   mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
@@ -267,6 +269,29 @@ export type SpaceData = {
   annotationGraph?: AnnotationConfig[];
   /** Where the capture is on the 3D map, when its package knows. */
   geo?: EarthPlace;
+  /** A stylized model of what the site once looked like: its manifest's address, or the manifest. */
+  reconstruction?: string | ReconstructionConfig;
+};
+
+/**
+ * A reconstruction of a site, built offline as one GLB (Y up, in meters) and
+ * placed in the space's world coordinates, where the capture mesh and the
+ * panorama locations are. See docs/tours-and-effects.md.
+ */
+export type ReconstructionConfig = {
+  version: 1;
+  /** What it shows, such as "The Sanctuary of Poseidon about 440 BC". */
+  title?: string;
+  /** The GLB, absolute or relative to the manifest. */
+  model: string;
+  position?: [number, number, number];
+  quaternion?: [number, number, number, number];
+  scale?: number;
+  credit?: string;
+  /** Named places in the model's own coordinates. */
+  landmarks?: { name: string; position: [number, number, number] }[];
+  /** The sky behind it in first person, as #rrggbb colors overhead and at the horizon. */
+  sky?: { zenith?: string; horizon?: string };
 };
 
 export type SphrSpace = {
@@ -392,6 +417,11 @@ export type RuntimeState = {
   hunt?: { found: string[]; stepFound: boolean; hint: boolean };
   /** The 3D map is in view; its data providers must be credited on screen. */
   earth?: { credits: string };
+  /**
+   * The space has a reconstruction: whether it can still show (it has not failed to load),
+   * whether it is shown in the current view, whether it is loading, and its title and credit.
+   */
+  reconstruction?: { available: boolean; visible: boolean; loading: boolean; title?: string; credit?: string };
 };
 
 export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };

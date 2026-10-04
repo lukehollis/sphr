@@ -43,6 +43,7 @@ type Props = {
   onToggleView: () => void;
   onToggleMute: () => void;
   onToggleGuide: () => void;
+  onToggleReconstruction?: () => void;
 };
 
 export default function HudControls({
@@ -57,8 +58,10 @@ export default function HudControls({
   canToggleView = true,
   onToggleView,
   onToggleMute,
-  onToggleGuide
+  onToggleGuide,
+  onToggleReconstruction
 }: Props) {
+  const reconstruction = state.reconstruction?.available && onToggleReconstruction ? state.reconstruction : null;
   return (
     <>
       {!state.guided && canToggleView && <div className="hud-left" aria-label="Scene controls">
@@ -68,8 +71,12 @@ export default function HudControls({
       </div>}
       <header className="viewer-header">
         <SceneHeading title={title} details={details} />
-        {(hasGuidedTour || hasAudio || heart) && <div className="hud-right" aria-label="Viewer settings">
+        {(hasGuidedTour || hasAudio || heart || reconstruction) && <div className="hud-right" aria-label="Viewer settings">
           {heart && <HeartButton heart={heart} />}
+          {/* Guided tours set it per stop; the visitor can still compare the site then and now. */}
+          {reconstruction && <ControlButton label={reconstruction.visible ? "Show the capture" : "Show the reconstruction"} active={reconstruction.visible} onClick={onToggleReconstruction!}>
+            <TempleIcon />
+          </ControlButton>}
           {hasGuidedTour && <button className="guide-toggle" type="button" role="switch" aria-label="Guide" aria-checked={state.guided} title={state.guided ? "Switch to free exploration" : "Switch to guided tour"} onClick={onToggleGuide}>
             <span className="guide-switch" aria-hidden="true" />
             <span>Guide</span>
@@ -86,6 +93,17 @@ export default function HudControls({
           title={`Hosted on ${host.name}`} onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>{host.name}</a>}
       </div>}
     </>
+  );
+}
+
+/** A temple front, a pediment over columns, drawn like the other control icons. */
+function TempleIcon() {
+  return (
+    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9h18L12 4Z" />
+      <path d="M6 12v6M10 12v6M14 12v6M18 12v6" />
+      <path d="M3 21h18" />
+    </svg>
   );
 }
 

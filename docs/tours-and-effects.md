@@ -243,6 +243,51 @@ that stop, and Google's logo and data credits show while it is in view. The
 browser key comes from `SPHR_GOOGLE_TILES_KEY` through `/api/earth`; restrict
 it to the site's addresses and the Map Tiles API in the Google Cloud console.
 
+## Reconstructions
+
+A site can have a stylized model of how it once looked, built offline in
+Blender as one GLB (Y up, in meters). The viewer shows it in the dollhouse in
+place of the capture mesh, and in first person when the visitor presses the
+temple button in the header: the photograph fades out and the model shows from
+the same eye position, with a plain sky behind it. Moving between panoramas
+keeps working (the camera flies between them while the photographs keep
+loading, so turning the model off shows the right one). Its title and credit
+show in the corner while it is in view. The model loads about 1.5 seconds after
+the space opens, or at once when a visitor or a stop asks for it; one that
+cannot load leaves the viewer as it was.
+
+The manifest is `<sceneId>/index.json` under `SPHR_RECONSTRUCTIONS_BASE_URL`
+(the pages check it exists, like drawn versions, and remember the answer for ten
+minutes), or a capture package can carry it, or its address, as
+`space_data.reconstruction`:
+
+```json
+{ "version": 1, "title": "The Sanctuary of Poseidon about 440 BC", "model": "site.glb",
+  "position": [12.5, -1.82, -130], "quaternion": [0, 0.279, 0, 0.960], "scale": 1,
+  "credit": "Stylized reconstruction",
+  "landmarks": [{ "name": "Temple of Poseidon", "position": [0, 5, 0] }] }
+```
+
+`model` is absolute (https) or relative to the manifest. `position`,
+`quaternion` and `scale` place the model's origin in the space's world
+coordinates, the ones the capture mesh and the panorama locations use; landmark
+positions are in the model's own coordinates. An optional
+`"sky": { "zenith": "#5f95cf", "horizon": "#dfe8ef" }` colors the sky behind it
+in first person (the dollhouse keeps the viewer's background). The camera sees
+about 20 km and moves its near plane out a little while a model is in view, so
+a sea or plain out to a kilometer or more stays steady. The model keeps its own
+materials (vertex colors times a base color texture). Clicks use it while it
+shows: a double click in the dollhouse or a click in first person goes to the
+panorama nearest the spot, its walls hide placed objects behind them, and the
+location markers draw over it.
+
+In a guided tour or hunt, a stop sets `"reconstruction": true` to show the
+model in its view (first person or dollhouse), or `false` to show the capture;
+a stop without it keeps what was showing. The builder has **Show the
+reconstruction here** for spaces that have one, and the tour agent is told the
+model's title and landmarks. In a tour of several spaces the manifest belongs
+to the opening space.
+
 ## Sound
 
 Two effects make sound. `sound` plays a clip when a stop opens, loops it

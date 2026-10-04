@@ -18,6 +18,7 @@ export function stopToTourPoint(stop: ExperienceStop): TourPoint {
     // A stop above the map orbits it like the overview, and lands in the next one.
     viewMode: stop.view.earth ? "ORBIT" : stop.view.viewMode ?? "FPV",
     ...(stop.view.earth ? { earth: stop.view.earth } : {}),
+    ...(typeof stop.view.reconstruction === "boolean" ? { reconstruction: stop.view.reconstruction } : {}),
     ...(stop.view.position ? { position: stop.view.position } : {}),
     rotation: stop.view.rotation,
     ...(stop.view.fov ? { fov: stop.view.fov } : {}),
@@ -100,7 +101,8 @@ export function experienceFromBootstrap(bootstrap: SphrBootstrap): Experience {
         rotation: point.rotation ?? { azimuth: 0, polar: 0 },
         fov: point.fov,
         viewMode: point.viewMode === "ORBIT" && !point.earth ? "ORBIT" : "FPV",
-        earth: point.earth
+        earth: point.earth,
+        reconstruction: point.reconstruction
       },
       objects: point.objects ?? [],
       effects: point.effects ?? [],

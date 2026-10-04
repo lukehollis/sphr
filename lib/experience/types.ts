@@ -72,6 +72,8 @@ export type StopView = {
   viewMode?: "FPV" | "ORBIT";
   /** Fly up over the map at this stop, then back down into the next one. */
   earth?: StopEarth;
+  /** Show the site's reconstruction (true) or the capture (false) in this stop's view; unset keeps what shows. */
+  reconstruction?: boolean;
 };
 
 /** A scavenger hunt step asks the visitor to find one placed object. */

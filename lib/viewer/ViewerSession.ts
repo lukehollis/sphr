@@ -150,6 +150,9 @@ export class ViewerSession {
     this.active?.three?.toggleViewMode();
   }
 
+  /** The site's reconstruction in place of the capture in the current view, or the capture again. */
+  toggleReconstruction() { this.active?.three?.toggleReconstruction(); }
+
   /** Close the closing card after a tour or hunt ends. */
   dismissFinale() { this.state = { ...this.state, finished: false }; this.emit(); }
 

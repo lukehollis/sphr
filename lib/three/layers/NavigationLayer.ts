@@ -10,6 +10,7 @@ export class NavigationLayer {
   private transitionVisibleIds: Set<string> | null = null;
   private occluders: THREE.Object3D[] = [];
   private orbit = false;
+  private overlay = false;
   private hoveredNodeId: string | null = null;
   private readonly occlusionRay = new THREE.Raycaster();
   // Capture sightlines, made two-way. Empty when the space has no navigation graph.
@@ -148,6 +149,19 @@ export class NavigationLayer {
 
   setVisible(visible: boolean) {
     this.group.visible = visible;
+  }
+
+  /**
+   * Over a reconstruction the pucks draw on top: its ground and walls are not
+   * the capture's, so they must not bury the floor where each scan was taken.
+   */
+  setOverlay(overlay: boolean) {
+    if (this.overlay === overlay) return;
+    this.overlay = overlay;
+    this.group.traverse((child) => {
+      const material = (child as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined;
+      if (material?.userData?.puck) material.depthTest = !overlay;
+    });
   }
 
   getWorldPosition(node: NodeData) {

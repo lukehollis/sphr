@@ -43,6 +43,8 @@ export class SceneGraphLayer {
   private debug = false;
   private overviewReturnBlend: number | null = null;
   private occluding = false;
+  /** How much of the capture shows while a reconstruction stands in for it (1 as captured). */
+  private captureOpacity = 1;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -119,6 +121,24 @@ export class SceneGraphLayer {
     if (this.occluding === occluding) return;
     this.occluding = occluding;
     this.applyVisibility();
+  }
+
+  /**
+   * A reconstruction stands in for the capture: scales the opacity of the
+   * capture's meshes (the raycast models), which stay raycastable. Hidden
+   * entirely, they also stop hiding placed objects in first person, since the
+   * reconstruction's own walls do that.
+   */
+  setCaptureOpacity(opacity: number) {
+    const value = THREE.MathUtils.clamp(opacity, 0, 1);
+    if (Math.abs(value - this.captureOpacity) < 1e-4) return;
+    this.captureOpacity = value;
+    this.applyVisibility();
+  }
+
+  /** The reconstruction has taken the capture's place entirely. */
+  get captureReplaced() {
+    return this.captureOpacity === 0;
   }
 
   hasNavigationTransitionMeshes() {
@@ -382,10 +402,13 @@ export class SceneGraphLayer {
         : this.viewMode === "ORBIT"
           ? node.orbitOpacity ?? 1
           : node.fpvOpacity ?? 1;
-    const effectiveOpacity = active ? opacity : 0;
     const visibleForRaycast = Boolean(node.raycast);
-    const occluder = this.occluding && visibleForRaycast && effectiveOpacity === 0 && this.viewMode === "FPV" && !this.debug && this.overviewReturnBlend === null;
-    record.meshes.forEach((mesh) => { mesh.renderOrder = occluder ? 30 : 0; });
+    const capture = visibleForRaycast ? this.captureOpacity : 1;
+    const effectiveOpacity = (active ? opacity : 0) * capture;
+    const occluder = this.occluding && visibleForRaycast && effectiveOpacity === 0 && this.viewMode === "FPV" && !this.debug && this.overviewReturnBlend === null && capture > 0.999;
+    // Fully replaced by a reconstruction, the capture is not drawn at all; rays still find it.
+    const replaced = visibleForRaycast && capture === 0 && !occluder;
+    record.meshes.forEach((mesh) => { mesh.renderOrder = occluder ? 30 : 0; mesh.visible = !replaced; });
 
     record.object.visible = active || visibleForRaycast;
     for (const material of record.materials) {

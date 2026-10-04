@@ -222,6 +222,8 @@ export class PanoramaLayer {
   private transitionScene: THREE.Scene | null = null;
   private visible = true;
   private presentationOpacity = 1;
+  /** How much a reconstruction in front of the photographs hides them. */
+  private veil = 0;
   private disposed = false;
   private fade: { start: number; duration: number; fadeStart: number } | null = null;
 
@@ -266,7 +268,7 @@ export class PanoramaLayer {
       this.outgoing = null;
     }
     this.active = this.createPano(node, options.replaceImmediately ? 1 : 0);
-    this.active.group.visible = this.visible;
+    this.active.group.visible = this.shown();
     this.scene.add(this.active.group);
     this.fade = options.replaceImmediately ? null : {
       start: performance.now(), duration: Math.max(1, duration),
@@ -289,7 +291,8 @@ export class PanoramaLayer {
   getDebugSnapshot() {
     return {
       activeNode: this.active?.node.uuid, outgoingNode: this.outgoing?.node.uuid,
-      fading: Boolean(this.fade), visible: this.visible, incomingOpacity: this.fadeProgress() * this.presentationOpacity
+      fading: Boolean(this.fade), visible: this.visible, incomingOpacity: this.fadeProgress() * this.presentationOpacity * (1 - this.veil),
+      veil: this.veil
     };
   }
 
@@ -322,8 +325,24 @@ export class PanoramaLayer {
 
   setVisible(visible: boolean) {
     this.visible = visible;
-    if (this.active) this.active.group.visible = visible;
-    if (this.outgoing) this.outgoing.group.visible = visible;
+    if (this.active) this.active.group.visible = this.shown();
+    if (this.outgoing) this.outgoing.group.visible = this.shown();
+  }
+
+  /**
+   * A reconstruction shown in place of the photographs: they keep loading and
+   * moving with the camera, so taking the veil away shows the right photograph.
+   */
+  setVeil(amount: number) {
+    const veil = THREE.MathUtils.clamp(amount, 0, 1);
+    if (veil === this.veil) return;
+    this.veil = veil;
+    this.setVisible(this.visible);
+    this.setPresentationOpacity(this.presentationOpacity);
+  }
+
+  private shown() {
+    return this.visible && this.veil < 1;
   }
 
   setPresentationOpacity(opacity: number) {
@@ -401,8 +420,7 @@ export class PanoramaLayer {
   private setOpacity(object: PanoObject | null, opacity: number) {
     object?.materials.forEach((material) => {
       if ("opacity" in material) {
-        material.opacity = opacity * this.presentationOpacity;
-
+        material.opacity = opacity * this.presentationOpacity * (1 - this.veil);
       }
     });
   }

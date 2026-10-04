@@ -209,6 +209,10 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         <img src="https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png" alt="Google" width={59} height={18} />
         {runtimeState.earth.credits && <span>{runtimeState.earth.credits}</span>}
       </div>}
+      {started && runtimeState.reconstruction?.visible && (runtimeState.reconstruction.title || runtimeState.reconstruction.credit) && <div className="reconstruction-credit">
+        {runtimeState.reconstruction.title && <span className="reconstruction-title">{runtimeState.reconstruction.title}</span>}
+        {runtimeState.reconstruction.credit && <span>{runtimeState.reconstruction.credit}</span>}
+      </div>}
       {started && chrome && runtimeState.finished && (tour?.finale || hunt) && <TourFinale
         text={tour?.finale}
         hunt={hunt ? { found: runtimeState.hunt?.found.length ?? 0, steps: huntSteps.length } : undefined}
@@ -230,6 +234,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onToggleView={() => runtimeRef.current?.toggleViewMode()}
             onToggleMute={() => runtimeRef.current?.toggleMute()}
             onToggleGuide={() => runtimeRef.current?.start(!runtimeState.guided)}
+            onToggleReconstruction={() => runtimeRef.current?.toggleReconstruction()}
           />
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}

@@ -326,3 +326,90 @@ test('arrow keys walk forward and back along the heading and turn the view', asy
   assert.equal(runtime.currentNode.uuid, 'middle', 'nothing lies that way, so the camera stays');
   dispose();
 });
+
+// A loaded reconstruction stand-in that records what the runtime shows.
+function fakeReconstruction() {
+  return { ready: true, failed: false, busy: false, opacity: 0, sky: 0, info: {},
+    get visible() { return this.opacity > 0; },
+    setOpacity(value) { this.opacity = value; }, setSky(value) { this.sky = value; }, getRaycastObjects: () => [], update() {} };
+}
+
+test('with the reconstruction in view, steps between scans fly without the projected photo and keep loading panoramas', async t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const { runtime, dispose } = await runtimeHarness(false, 75);
+  runtime.bootstrap.space.space_data.navigationTransition.enabled = true;
+  runtime.cubeScene = new THREE.Scene();
+  runtime.cubeRenderTarget = { texture: new THREE.CubeTexture() };
+  runtime.cubeCamera = { position: new THREE.Vector3(), update() {} };
+  let projected = 0;
+  runtime.sceneGraph = { showNavigationTransition: () => { projected += 1; return null; }, setViewMode() {}, restoreNavigationTransition() {},
+    getRaycastObjects: () => [], capture: 1, setCaptureOpacity(value) { this.capture = value; }, get captureReplaced() { return this.capture === 0; } };
+  runtime.reconstruction = fakeReconstruction();
+  const pucks = () => { const states = []; runtime.nav.group.traverse((child) => { if (child.material?.userData?.puck) states.push(child.material.depthTest); }); return states; };
+
+  runtime.toggleReconstruction();
+  now = 350;
+  runtime.reconTween.update(now);
+  const halfway = runtime.panorama.getDebugSnapshot().veil;
+  assert.equal(runtime.reconstruction.opacity, 1, 'in first person the model is solid while the photograph fades over it');
+  assert.ok(halfway > 0.2 && halfway < 0.8);
+  now = 700;
+  runtime.reconTween.update(now);
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 1);
+  assert.equal(runtime.reconstruction.sky, 1);
+  assert.equal(runtime.sceneGraph.capture, 0, 'the capture stops hiding placed objects');
+  assert.ok(pucks().every((depthTest) => depthTest === false), 'location markers draw over the model');
+
+  await runtime.navigateToNode(nodes[1]);
+  assert.equal(projected, 0, 'no projected photo while the model is in view');
+  assert.equal(runtime.panorama.getDebugSnapshot().activeNode, 'middle', 'the photographs keep loading behind it');
+  for (now of [1000, 2000, 2700]) {
+    runtime.cameraTween?.update(now);
+    runtime.navigationReleaseTween?.update(now);
+    assert.equal(runtime.panorama.getDebugSnapshot().veil, 1);
+  }
+  assert.deepEqual(runtime.camera.position.toArray(), [2, 1.6, 0]);
+  assert.equal(runtime.state.navigating, false);
+
+  runtime.toggleReconstruction();
+  now = 3500;
+  runtime.reconTween.update(now);
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 0, 'turned off, the new scan\'s photograph shows');
+  assert.equal(runtime.reconstruction.opacity, 0);
+  assert.equal(runtime.sceneGraph.capture, 1);
+  assert.ok(pucks().every((depthTest) => depthTest === true));
+  runtime.cubeRenderTarget.texture.dispose();
+  dispose();
+});
+
+test('guided stops turn the reconstruction on or off, free exploration leaves it to the visitor', async t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const { runtime, dispose } = await runtimeHarness(true, 75);
+  runtime.tour.spaces[0].tourpoints[1].reconstruction = true;
+  runtime.tour.spaces[0].tourpoints[2].reconstruction = false;
+  runtime.reconstruction = fakeReconstruction();
+  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
+  runtime.annotations = { show() {} };
+  runtime.applyExperienceForPoint = () => {};
+  const finish = () => { for (now of [now + 2500, now + 5000]) { runtime.cameraTween?.update(now); runtime.navigationReleaseTween?.update(now); runtime.reconTween?.update(now); } };
+  await runtime.goTo(0, 1);
+  finish();
+  assert.equal(runtime.reconFpv ?? false, false, 'free exploration ignores the stop');
+  runtime.state.guided = true;
+  await runtime.goTo(0, 0);
+  finish();
+  await runtime.goTo(0, 1);
+  finish();
+  assert.equal(runtime.reconFpv, true);
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 1, 'the stop shows the model in place of the photograph');
+  await runtime.goTo(0, 0);
+  finish();
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 1, 'a stop that says nothing keeps it');
+  await runtime.goTo(0, 2);
+  finish();
+  assert.equal(runtime.reconFpv, false);
+  assert.equal(runtime.panorama.getDebugSnapshot().veil, 0);
+  dispose();
+});

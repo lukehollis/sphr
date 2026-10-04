@@ -561,3 +561,86 @@ test('capture meshes are read from plain and Draco-compressed glTF binaries', as
     assert.ok(hit && Math.abs(hit.point.y - 2) < 1e-4, `${label}: a ray finds the ground where its node put it`);
   }
 });
+
+test('stops can show the site reconstruction or the capture, and keep what shows when they say nothing', () => {
+  const stops = [
+    { ...tour().stops[0], id: 'then', view: { ...view, reconstruction: true } },
+    { ...tour().stops[0], id: 'now', view: { ...view, reconstruction: false } },
+    { ...tour().stops[0], id: 'same', view: { ...view, reconstruction: 'yes' } }
+  ];
+  const result = parseExperience({ ...tour(), stops }, { nodeIds: new Set(['a', 'b']) });
+  assert.equal(result.stops[0].view.reconstruction, true);
+  assert.equal(result.stops[1].view.reconstruction, false, 'false is kept, so a stop can bring the capture back');
+  assert.equal('reconstruction' in result.stops[2].view, false, 'anything but true or false is dropped');
+
+  const applied = applyExperience(bootstrap(), result);
+  const points = applied.tour.tour_data.spaces[0].tourpoints;
+  assert.deepEqual(points.map((point) => point.reconstruction), [true, false, undefined]);
+  assert.equal('reconstruction' in points[2], false);
+  const back = experienceFromBootstrap(applied);
+  assert.deepEqual(back.stops.map((stop) => stop.view.reconstruction), [true, false, undefined]);
+
+  const previous = parseExperience({ ...tour(), stops: [stops[0]] });
+  const raw = { reply: 'ok', kind: 'tour', objects: [], effects: [], stops: [{ id: 'then', title: 'Then', text: 'Painted.', nodeId: 'a' }] };
+  assert.equal(normalizeAgentDraft(raw, previous, new Set(['a'])).experience.stops[0].view.reconstruction, true, 'a stop the agent leaves alone keeps it');
+  assert.equal(normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], reconstruction: false }] }, previous, new Set(['a'])).experience.stops[0].view.reconstruction, false);
+  assert.equal(normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], reconstruction: null }] }, previous, new Set(['a'])).experience.stops[0].view.reconstruction, undefined, 'null takes the choice away');
+  assert.equal(normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], id: 'new', reconstruction: true }] }, previous, new Set(['a'])).experience.stops[0].view.reconstruction, true);
+});
+
+test('a reconstruction manifest is found beside the capture and given to the opening space only', async () => {
+  const { reconstructionUrl } = await import('../lib/server/reconstructions.ts');
+  const before = process.env.SPHR_RECONSTRUCTIONS_BASE_URL;
+  process.env.SPHR_RECONSTRUCTIONS_BASE_URL = 'https://static.example/reconstructions/';
+  try {
+    assert.equal(reconstructionUrl('0123456789ab'), 'https://static.example/reconstructions/0123456789ab/index.json');
+    assert.equal(reconstructionUrl('../etc/passwd'), null, 'only scene IDs make an address');
+  } finally {
+    if (before === undefined) delete process.env.SPHR_RECONSTRUCTIONS_BASE_URL; else process.env.SPHR_RECONSTRUCTIONS_BASE_URL = before;
+  }
+  delete process.env.SPHR_RECONSTRUCTIONS_BASE_URL;
+  assert.equal(reconstructionUrl('0123456789ab'), null, 'without the setting, spaces show only their capture');
+  if (before !== undefined) process.env.SPHR_RECONSTRUCTIONS_BASE_URL = before;
+
+  const url = 'https://static.example/reconstructions/0123456789ab/index.json';
+  const edited = applySceneEdits(bootstrap(), { title: null, startView: null, reconstruction: url });
+  assert.equal(edited.space.space_data.reconstruction, url);
+  assert.equal(edited.orderedSpaces.find((space) => space.id === 'space').space_data.reconstruction, url);
+  assert.equal(edited.orderedSpaces.find((space) => space.id === 'other').space_data.reconstruction, undefined, 'other spaces have their own coordinates');
+  assert.equal(tourSegment(edited, 0, 0).bootstrap.space.space_data.reconstruction, url);
+  const own = bootstrap();
+  own.orderedSpaces[0].space_data.reconstruction = 'https://package.example/own.json';
+  assert.equal(applySceneEdits(own, { title: null, startView: null, reconstruction: url }).space.space_data.reconstruction, 'https://package.example/own.json', 'a package keeps its own');
+  assert.equal(applySceneEdits(bootstrap(), { title: null, startView: null, reconstruction: null }).space.space_data.reconstruction, undefined);
+});
+
+test('reconstruction manifests are checked before the viewer loads them', async () => {
+  const { parseReconstruction, reconstructionModelUrl } = await import('../lib/reconstruction.ts');
+  const manifest = { version: 1, title: '  The Sanctuary\nof Poseidon  ', model: 'site.glb', position: [1, 2, 3], quaternion: [0, 0, 0, 1], scale: 1, credit: 'Stylized',
+    landmarks: [{ name: 'Temple', position: [0, 5, 0] }, { name: '', position: [0, 0, 0] }, { name: 'Altar', position: [0, 'x', 0] }] };
+  const parsed = parseReconstruction(manifest);
+  assert.equal(parsed.title, 'The Sanctuary of Poseidon');
+  assert.deepEqual(parsed.landmarks, [{ name: 'Temple', position: [0, 5, 0] }], 'unnamed or misplaced landmarks are dropped');
+  assert.equal(parseReconstruction({ ...manifest, version: 2 }), null);
+  assert.equal(parseReconstruction({ ...manifest, model: '' }), null);
+  assert.equal(parseReconstruction({ ...manifest, position: [1, 2] }), null, 'a bad placement makes it unusable');
+  assert.equal(parseReconstruction({ ...manifest, quaternion: [0, 0, 0, 0] }), null);
+  assert.equal(parseReconstruction({ ...manifest, scale: -1 }), null);
+  assert.equal(parsed.sky, undefined, 'without sky colors the viewer uses its own');
+  assert.deepEqual(parseReconstruction({ ...manifest, sky: { zenith: '#5F95CF', horizon: 'blue' } }).sky, { zenith: '#5f95cf' }, 'only #rrggbb colors are kept');
+  const page = 'https://app.example/s/0123456789ab/site';
+  assert.equal(reconstructionModelUrl(parsed, 'https://static.example/r/0123456789ab/index.json', page), 'https://static.example/r/0123456789ab/site.glb', 'relative to the manifest');
+  assert.equal(reconstructionModelUrl({ ...parsed, model: 'javascript:alert(1)' }, null, page), null);
+  assert.equal(reconstructionModelUrl({ ...parsed, model: 'http://evil.example/site.glb' }, null, page), null, 'plain http only on this computer');
+  assert.equal(reconstructionModelUrl(parsed, 'http://localhost:3083/reconstructions-test/0123456789ab/index.json', 'http://localhost:3083/s/x'), 'http://localhost:3083/reconstructions-test/0123456789ab/site.glb');
+});
+
+test('the tour agent hears of a reconstruction and its landmarks', async () => {
+  const { buildAgentContext } = await import('../lib/server/tour-agent.ts');
+  const space = { space: { id: 'space', title: 'Sanctuary', type: 'model', space_data: { noPanos: true } } };
+  const without = await buildAgentContext(space, parseExperience(tour()), [], 'http://localhost');
+  assert.doesNotMatch(without.text, /Reconstruction/);
+  const told = await buildAgentContext(space, parseExperience(tour()), [], 'http://localhost', false, '', [], [], { title: 'The Sanctuary about 440 BC', landmarks: ['Temple of Poseidon', 'Great Altar'] });
+  assert.match(told.text, /"The Sanctuary about 440 BC", with Temple of Poseidon, Great Altar/);
+  assert.match(told.text, /"reconstruction": true/);
+});

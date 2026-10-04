@@ -8,6 +8,7 @@ import { placeOnServer } from "./tour-placement";
 import { captureMeshes } from "./capture-mesh";
 import { spaceViews } from "./space-views";
 import { variantsUrl } from "./variants";
+import { describeReconstruction } from "./reconstructions";
 
 /**
  * The drawn versions of a space the looks can use (its line-drawing manifest's styles and
@@ -55,10 +56,13 @@ export async function draftFromRequest(scene: SceneListing, body: Record<string,
       nodeId: typeof item.nodeId === "string" ? item.nodeId : undefined,
       rotation: item.rotation as ClientView["rotation"], fov: typeof item.fov === "number" ? item.fov : undefined }] : [];
   }) : [];
-  const drawn = await drawnVersions(scene, space.space_data.splats as { role?: string }[] | undefined);
+  const [drawn, reconstruction] = await Promise.all([
+    drawnVersions(scene, space.space_data.splats as { role?: string }[] | undefined),
+    describeReconstruction(scene.sceneId, space.space_data.reconstruction)
+  ]);
   // A space without panoramas (a splat or a model) is shown to the agent in views drawn here.
   const drawnViews = await spaceViews(bootstrap, scene.sceneId).catch((failure) => { console.warn("Drafting without drawn views:", (failure as Error).message); return null; }) ?? [];
-  const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn, spaceViews: drawnViews });
+  const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn, spaceViews: drawnViews, reconstruction });
   if (place) {
     // Placed against the capture mesh like the builder does; without it, against each location's floor.
     const meshes = await captureMeshes(bootstrap).catch((failure) => { console.warn("Placing without the capture mesh:", (failure as Error).message); return []; });
