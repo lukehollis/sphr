@@ -65,7 +65,8 @@ export default function AccountAuth({ mode: initialMode, providers: allProviders
   }
   const next = returnPath === "/account" ? "" : `?next=${encodeURIComponent(returnPath)}`;
   const heading = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Sign in";
-  const lede = mode === "signup" ? "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : "Welcome back.";
+  const building = returnPath.startsWith("/account/tours/new");
+  const lede = mode === "signup" ? building ? "Then build a guided tour or a scavenger hunt from a few words, or with your own agent." : "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : "Welcome back.";
   return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces." facts={customerFacts}>
     <div className="site-auth-form">
       <div className="site-auth-heading"><span className="site-code">{mode === "signup" ? "A.1" : mode === "forgot" ? "A.3" : "A.2"}</span><h2>{heading}</h2><p>{lede}</p></div>

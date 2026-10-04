@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { accountRequest } from "./AccountAuth";
 import { accountNav, legalLinks, openPortal } from "./AccountDashboard";
-import PlanPicker, { currentPlan, hostingActive, OpenSourceNote, periodTotal } from "./PlanPicker";
+import PlanPicker, { currentPlan, EnterpriseNote, hostingActive, OpenSourceNote, periodTotal } from "./PlanPicker";
 import SiteHeader from "./site/SiteHeader";
 import { SiteFooter } from "./site/Chrome";
 import type { Plan } from "@/lib/server/billing";
@@ -19,9 +19,10 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
 
 /**
  * Choosing how hosting is paid for. Before hosting starts this leads to Checkout on the
- * chosen plan; afterwards it switches the subscription between plans.
+ * chosen plan; afterwards it switches the subscription between plans. On the way to building
+ * a tour (`build`), it comes before any space: pay as you go only saves a card then.
  */
-export default function PlanPage({ account: initial, plans, brand }: { account: AccountView; plans: Plan[]; brand: string }) {
+export default function PlanPage({ account: initial, plans, brand, build }: { account: AccountView; plans: Plan[]; brand: string; build?: string }) {
   const [account, setAccount] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -39,7 +40,7 @@ export default function PlanPage({ account: initial, plans, brand }: { account: 
     try { await work(); } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
   }
   const pay = () => run(async () => {
-    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id });
+    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...build ? { build } : {} });
     // Without a link, a payment made earlier was just applied.
     window.location.assign(result.url ?? "/account");
   });
@@ -52,14 +53,18 @@ export default function PlanPage({ account: initial, plans, brand }: { account: 
   const portal = () => run(openPortal);
 
   const total = active && subscription ? periodTotal(subscription) : undefined;
+  const building = Boolean(build) && !active && !paused;
+  const perSpace = plans.find(plan => plan.spaces === null);
+  const saveCard = building && spaces === 0 && selected?.spaces === null;
   let lead: string;
-  if (active && current) {
+  if (building) {
+    lead = `Tours and scavenger hunts are free on every plan.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
+  } else if (active && current) {
     lead = current.spaces === null ? `You're on pay as you go with ${spaces} ${spaces === 1 ? "space" : "spaces"}${total ? `, ${total}` : ""}.`
       : `You're on ${current.name} at ${price(current)}, which covers up to ${current.spaces} spaces. You have ${spaces}.`;
   } else if (active) lead = "Your plan is not offered any more. You can keep it or choose another below.";
   else if (paused) lead = "Hosting is paused until a payment goes through. Update your payment method to change plans.";
   else {
-    const perSpace = plans.find(plan => plan.spaces === null);
     lead = perSpace ? `You're on pay as you go, so each space you upload adds ${price(perSpace)}.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}`
       : "Plans could not be loaded. Try again in a moment.";
   }
@@ -68,7 +73,7 @@ export default function PlanPage({ account: initial, plans, brand }: { account: 
     <main className="site-main">
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
-        <div><h1>{active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
+        <div><h1>{building ? "Choose a plan to start building" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
         {active && subscription?.periodEnd ? <p>{subscription.cancelAtPeriodEnd ? "Hosting ends" : "Renews"} {formatDate(subscription.periodEnd)}</p> : null}
       </div>
       <p className="plan-lead">{lead}</p>
@@ -87,13 +92,16 @@ export default function PlanPage({ account: initial, plans, brand }: { account: 
             <button type="button" className="site-button" disabled={busy || !selected || selected.id === current?.id} onClick={change}>
               {busy ? "Changing plans…" : selected && selected.id !== current?.id ? `Switch to ${planLabel(selected)}` : "Choose another plan"}</button>
             <button type="button" className="site-link" disabled={busy} onClick={portal}>Billing and invoices</button>
-          </> : spaces > 0 ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
-            {busy ? "Opening payment…" : "Continue to payment"}<span aria-hidden="true">→</span></button>
+          </> : spaces > 0 || building ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
+            {busy ? "Opening payment…" : saveCard ? "Add a card" : "Continue to payment"}<span aria-hidden="true">→</span></button>
           : <a className="site-button" href="/account">Add a space<span aria-hidden="true">→</span></a>}
         </div>
         <p className="site-hint plan-hint">{active ? "A change applies now, and your next invoice is prorated for the rest of this period."
+          : saveCard ? "Your card is saved on a secure page and nothing is charged today. Then you go straight to building."
+          : building ? "You pay on a secure checkout page and can cancel any time. Then you go straight to building."
           : spaces > 0 ? "You pay on a secure checkout page and can cancel any time."
           : "You pay once you add your first space."}</p>
+        <EnterpriseNote email={account.salesEmail} />
         <OpenSourceNote brand={brand} sourceUrl={account.sourceUrl} />
       </>}
     </main>

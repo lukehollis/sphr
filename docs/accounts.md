@@ -21,7 +21,8 @@ The flow for a customer:
    plan with room. Prices appear in the sheet, on the plan page (`/account/plan`) and, for
    subscribers, above their spaces. Sign-in, sign-up and an account without spaces leave
    them out, because many visitors sign in only to open a space. When `SPHR_SOURCE_URL`
-   is set, the plan choice notes that the service is open source and links to its code.
+   is set, the plan choice notes that the service is open source and links to its code, and
+   when `SPHR_SALES_EMAIL` is set it offers larger customers an enterprise plan by email.
 3. Capture files of any kind upload from the sheet: Matterport or other E57 exports, Gaussian
    splats, 360 photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers
    upload directly to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted
@@ -98,7 +99,13 @@ space's page, and only while it is public and hosted; such spaces are reached fr
 never listed in the picker, and closing one takes the tours others built on it offline (the
 `builders` table in the state database holds each choice). Each tour is its own
 record (`user_tours` in the state database) pointing at a space; the space itself never changes,
-and a tour does not count as a space for billing. Tours start private and get their own link,
+and a tour does not count as a space for billing. Tours are free, but with billing on, the first
+one needs a plan: visitors from *Build on this space* make an account, then choose a plan on
+`/account/plan?build=<scene>` before the builder opens. A plan with a price subscribes as usual;
+pay as you go before any space opens Checkout in setup mode, which only saves a card (made the
+customer's default, so hosting a space later reuses it) and records `users.card_saved`. Creating a
+tour without either answers 402 with the plan page's address, which agents relay. Accounts that
+made tours before plans were required keep building. Tours start private and get their own link,
 `/t/<id>/<title>`, which the customer can share with anyone; tour pages are never indexed. A
 shared tour of a private space opens that space for the link's visitors, which is the customer's
 choice. When the space stops being available (the operator makes it private, the customer deletes

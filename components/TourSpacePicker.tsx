@@ -28,8 +28,9 @@ function SpaceChoice({ space, busy, onChoose }: { space: PickerSpace; busy: stri
 }
 
 /** Choose what to make and the space to build it on: one of the customer's own, or one of Spacery's. */
-export default function TourSpacePicker({ brand, account, own, spacery, chosen, kind: initialKind }:
-  { brand: string; account: AccountView; own: PickerSpace[]; spacery: PickerSpace[]; chosen: PickerSpace | null; kind: Kind }) {
+export default function TourSpacePicker({ brand, account, own, spacery, chosen, kind: initialKind, paid = false, agentsUrl }:
+  { brand: string; account: AccountView; own: PickerSpace[]; spacery: PickerSpace[]; chosen: PickerSpace | null; kind: Kind;
+    /** Back from choosing a plan. */ paid?: boolean; /** Where customers learn to connect their own agents. */ agentsUrl?: string }) {
   const [kind, setKind] = useState<Kind>(initialKind);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -57,14 +58,18 @@ export default function TourSpacePicker({ brand, account, own, spacery, chosen, 
           <p>Choose a space to build on. Use one of your own or any of ours, and only you can open it until you share its link.</p>
         </div>
       </div>
-      <div className="site-feedback" aria-live="polite">{error && <p className="site-alert" role="alert">{error}</p>}</div>
+      <div className="site-feedback" aria-live="polite">
+        {paid && !error && <p className="site-note" role="status">You're all set. Tours and scavenger hunts are included in your plan.</p>}
+        {error && <p className="site-alert" role="alert">{error}</p>}
+      </div>
       {!account.emailVerified && <div className="site-callout"><p>Confirm your email address to make tours. We sent a link to <strong>{account.email}</strong>, and it may be in spam or junk.</p></div>}
 
       {chosenSpace && <section className="tour-chosen" aria-labelledby="chosen-title">
         <img src={chosenSpace.thumbnail} alt="" width={960} height={640} />
         <div>
           <h2 id="chosen-title">{chosenSpace.title}</h2>
-          <p>Build a guided tour or a scavenger hunt on this space. The space itself stays as it is.</p>
+          <p>Build a guided tour or a scavenger hunt on this space. Describe it in a few words and the builder drafts every stop for you to edit{agentsUrl
+            ? <>, or let <a href={agentsUrl}>your own agent</a> build it</> : null}. The space itself stays as it is.</p>
           <div className="tour-chosen-actions">
             <button type="button" className="site-button site-button-accent" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "tour")}>Make a guided tour</button>
             <button type="button" className="site-button site-button-secondary" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "hunt")}>Make a scavenger hunt</button>

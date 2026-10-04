@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 import { accountRequest } from "./AccountAuth";
 import { reportError, track } from "./Analytics";
 import { ConstructionDrawing } from "./site/Chrome";
-import PlanPicker, { OpenSourceNote } from "./PlanPicker";
+import PlanPicker, { EnterpriseNote, OpenSourceNote } from "./PlanPicker";
 import { formatBytes } from "@/lib/bytes";
 import { formatMoney, formatPeriod } from "@/lib/price";
 import { fromList, getJson, keepCaptures, readDrop, titleFromFiles, uploadFile, type PickedFile, type Transfer } from "./uploads";
@@ -413,6 +413,7 @@ export type PlanChoice = {
   spaces: number;
   brand: string;
   sourceUrl: string | null;
+  salesEmail: string | null;
 };
 
 export default function UploadModal({ open, onClose, uploads, batchKey, onBatch, existing, maxBytes, priceHint, billing }: {
@@ -613,6 +614,7 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
         : `${plan.name} covers up to ${plan.spaces} spaces for ${price}.`}</p>}
       {plans.length > 1 && <PlanPicker plans={plans} selected={plan?.id ?? null} needed={billing?.spaces || 1} name={`plan-${batch.key}`}
         label="How you pay" disabled={batch.preparing} onSelect={id => void uploads.choosePlan(batch.key, id)} />}
+      {billing && <EnterpriseNote email={billing.salesEmail} />}
       {billing && <OpenSourceNote brand={billing.brand} sourceUrl={billing.sourceUrl} />}
       {batch.error && <p className="site-alert" role="alert">{batch.error}</p>}
       <div className="site-actions">

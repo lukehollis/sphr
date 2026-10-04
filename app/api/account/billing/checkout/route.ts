@@ -2,6 +2,7 @@ import { AccountError, hostingStatuses, payableSpaceCount, readSubscription } fr
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout } from "@/lib/server/billing";
 import { recordEvent } from "@/lib/server/analytics";
+import { buildReturnPath } from "@/lib/server/user-tours";
 import { reportProblem } from "@/lib/server/error-report";
 
 /**
@@ -15,10 +16,12 @@ export async function POST(request: Request) {
   if (!billingEnabled()) return accountResponse({ error: "Billing is unavailable." }, 404);
   const subscription = readSubscription(user.id);
   if (subscription && hostingStatuses.has(subscription.status)) return accountResponse({ error: "Billing is already active." }, 409);
-  if (!payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
+  // Choosing a plan to build tours comes before any space; payment then leads back to building.
+  const build = body?.build === undefined ? undefined : buildReturnPath(body.build);
+  if (!build && !payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
   try {
-    const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent);
-    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web" } });
+    const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent, build);
+    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web", ...build ? { for: "tours" } : {} } });
     return accountResponse({ ok: true, ..."url" in next ? { url: next.url, plan: next.plan } : "portal" in next ? { url: next.portal } : { paid: true } });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);

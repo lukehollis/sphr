@@ -197,6 +197,7 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
 .plan-note { max-width: 680px; margin: 0; padding-top: 12px; border-top: var(--rule-hair); color: var(--site-muted); font-size: 14px; line-height: var(--leading-body); }
 .plan-note a { color: var(--text-heading); text-decoration-color: var(--site-faint); text-underline-offset: 4px; }
 .plan-note a:hover { text-decoration-color: var(--accent); }
+.plan-enterprise + .plan-note { margin-top: 8px; padding-top: 0; border-top: 0; }
 .upload-status-plans { gap: 14px; }
 .upload-status-plans .plan-picker { margin: 4px 0; }
 

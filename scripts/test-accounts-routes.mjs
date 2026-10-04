@@ -54,7 +54,7 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_APPLE_PRIVATE_KEY: apple.privateKey.export({ format: 'pem', type: 'pkcs8' }).replace(/\n/g, '\\n'),
   SPHR_LINKEDIN_CLIENT_ID: clients.linkedin.id, SPHR_LINKEDIN_CLIENT_SECRET: clients.linkedin.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
-  SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr',
+  SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr', SPHR_SALES_EMAIL: 'hello@example.com',
   NEXT_PUBLIC_SPHR_ANALYTICS: '1', SPHR_ANALYTICS_ORIGINS: 'https://home.example',
   SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '',
   SPHR_LIBRARY_FILE: path.join(state, 'library.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
@@ -360,7 +360,34 @@ try {
   assert.equal((await anonymous.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 401);
   assert.equal((await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 403, 'unconfirmed accounts cannot make tours');
   database().prepare("UPDATE users SET email_verified=1 WHERE email='bob@example.com'").run();
-  let tourPage = (await (await alice.get('/account/tours/new')).text()).replaceAll('<!-- -->', '');
+  // "Build on this space" sends visitors to make an account, then to choose a plan before building.
+  assert.equal(location(await anonymous.get('/account/tours/new?scene=0a0a0a0a0a01')), `/account/signup?next=${encodeURIComponent('/account/tours/new?scene=0a0a0a0a0a01')}`);
+  const signupPage = (await (await anonymous.get(`/account/signup?next=${encodeURIComponent('/account/tours/new?scene=0a0a0a0a0a01')}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(signupPage.includes('build a guided tour or a scavenger hunt'), 'sign-up speaks of building');
+  assert.ok(!signupPage.includes(' a month'), 'and shows no prices');
+  response = await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' });
+  assert.equal(response.status, 402, 'a plan comes before the first tour');
+  assert.equal((await response.json()).plan, `${base}/account/plan?build=0a0a0a0a0a01`, 'agents are told where to choose one');
+  assert.equal(location(await bob.get('/account/tours/new?scene=0a0a0a0a0a01')), '/account/plan?build=0a0a0a0a0a01');
+  const planPage = (await (await bob.get('/account/plan?build=0a0a0a0a0a01')).text()).replaceAll('<!-- -->', '');
+  assert.ok(planPage.includes('Choose a plan to start building') && planPage.includes('Pay as you go') && planPage.includes('Enterprise'));
+  assert.ok(planPage.includes('mailto:hello@example.com'), 'larger customers are offered an enterprise plan by email');
+  assert.ok(planPage.includes('Add a card'), 'pay as you go only saves a card before any space');
+  // Pay as you go costs nothing before a space, so Checkout only saves the card.
+  response = await bob.post('/api/account/billing/checkout', { build: '0a0a0a0a0a01' });
+  assert.equal(response.status, 200);
+  const cardSession = [...stripeFake.state.sessions.values()].find(item => item.mode === 'setup');
+  assert.ok(cardSession, 'a setup Checkout opens');
+  assert.equal(cardSession.success_url, `${base}/account/tours/new?scene=0a0a0a0a0a01&checkout={CHECKOUT_SESSION_ID}`);
+  assert.equal(cardSession.cancel_url, `${base}/account/plan?build=0a0a0a0a0a01`);
+  assert.equal(cardSession.currency, 'usd');
+  stripeFake.state.saveCard(cardSession.id);
+  let tourPage = (await (await bob.get(`/account/tours/new?scene=0a0a0a0a0a01&checkout=${cardSession.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(tourPage.includes('all set. Tours and scavenger hunts are included') && tourPage.includes('Make a guided tour'), 'back from Checkout, building starts');
+  assert.ok(stripeFake.state.customers.get(cardSession.customer).invoice_settings.default_payment_method.startsWith('pm_'), 'the saved card pays for hosting later');
+  assert.equal(location(await bob.get('/account/plan?build=0a0a0a0a0a01')), '/account/tours/new?scene=0a0a0a0a0a01', 'the plan step is done once');
+  assert.equal([...stripeFake.state.subscriptions.values()].filter(item => item.metadata.sphr_user === cardSession.client_reference_id).length, 0, 'nothing is billed for tours');
+  tourPage = (await (await alice.get('/account/tours/new')).text()).replaceAll('<!-- -->', '');
   for (const title of ['Operator hall', 'Riverside studio, 2nd floor']) assert.ok(tourPage.includes(title), `${title} is offered`);
   for (const title of ['Private hall', 'Embedded hall', 'Explore the Operator Hall']) assert.ok(!tourPage.includes(title), `${title} is not offered`);
   assert.ok(!(await (await bob.get('/account/tours/new')).text()).includes('Riverside studio'), "another customer's space is never offered, even a public one");

@@ -20,7 +20,7 @@ export const fakePrices = {
 // A small stand-in for the Stripe API, keeping just enough state for billing flows.
 // Checkout links point at `checkoutBase`, so a local page can stand in for Checkout.
 export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
-  const state = { customers: new Map(), sessions: new Map(), subscriptions: new Map(), updates: [], planChanges: [], counter: 0 };
+  const state = { customers: new Map(), sessions: new Map(), subscriptions: new Map(), setupIntents: new Map(), updates: [], planChanges: [], counter: 0 };
   const id = prefix => `${prefix}_test${++state.counter}`;
   const price = (priceId, expand) => {
     const known = fakePrices[priceId] ?? { unit_amount: 100, product: { id: 'prod_other', name: 'Other' }, metadata: {} };
@@ -36,16 +36,27 @@ export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
     const send = (value, status = 200) => { response.statusCode = status; response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(value)); };
     const parts = url.pathname.split('/').filter(Boolean);
     if (request.method === 'GET' && parts[1] === 'prices') return send(price(parts[2], [...url.searchParams].some(([key, value]) => key.startsWith('expand') && value === 'product')));
-    if (request.method === 'POST' && parts[1] === 'customers') {
+    if (request.method === 'POST' && parts[1] === 'customers' && parts.length === 2) {
       const customer = { id: id('cus'), object: 'customer', email: form.get('email'), metadata: { sphr_user: form.get('metadata[sphr_user]') } };
       state.customers.set(customer.id, customer);
       return send(customer);
+    }
+    if (request.method === 'POST' && parts[1] === 'customers' && parts[2]) {
+      const customer = state.customers.get(parts[2]);
+      if (!customer) return send({ error: { message: 'No such customer', type: 'invalid_request_error' } }, 404);
+      if (form.has('invoice_settings[default_payment_method]')) customer.invoice_settings = { default_payment_method: form.get('invoice_settings[default_payment_method]') };
+      return send(customer);
+    }
+    if (request.method === 'GET' && parts[1] === 'setup_intents') {
+      const intent = state.setupIntents.get(parts[2]);
+      return intent ? send(intent) : send({ error: { message: 'No such setup intent', type: 'invalid_request_error' } }, 404);
     }
     if (parts[1] === 'checkout' && parts[2] === 'sessions') {
       if (request.method === 'POST' && parts.length === 3) {
         const session = { id: id('cs'), object: 'checkout.session', mode: form.get('mode'), status: 'open', customer: form.get('customer'),
           client_reference_id: form.get('client_reference_id'), url: `${checkoutBase}/${state.counter}`, subscription: null,
-          quantity: Number(form.get('line_items[0][quantity]')), price: form.get('line_items[0][price]'), success_url: form.get('success_url') };
+          quantity: Number(form.get('line_items[0][quantity]')), price: form.get('line_items[0][price]'), success_url: form.get('success_url'),
+          cancel_url: form.get('cancel_url'), currency: form.get('currency'), setup_intent: null };
         state.sessions.set(session.id, session);
         return send(session);
       }
@@ -94,6 +105,14 @@ export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
     state.subscriptions.set(subscription.id, subscription);
     Object.assign(session, { status: 'complete', subscription: subscription.id });
     return subscription;
+  };
+  // Simulates a customer saving a card in a setup-mode Checkout.
+  state.saveCard = sessionId => {
+    const session = state.sessions.get(sessionId);
+    const intent = { id: id('seti'), object: 'setup_intent', status: 'succeeded', customer: session.customer, payment_method: id('pm') };
+    state.setupIntents.set(intent.id, intent);
+    Object.assign(session, { status: 'complete', setup_intent: intent.id });
+    return intent;
   };
   return { state, handler };
 }

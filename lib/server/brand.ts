@@ -15,6 +15,12 @@ export function viewerHost() {
   return href ? { name: siteBrand(), href } : undefined;
 }
 
+/** Where larger customers write to arrange an enterprise plan. The plan choice offers it when set. */
+export function salesEmail() {
+  const value = process.env.SPHR_SALES_EMAIL?.trim();
+  return value && /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(value) ? value : undefined;
+}
+
 /** Where the source code this deployment runs is published. The plan choice links to it when set. */
 export function sourceUrl() {
   const value = process.env.SPHR_SOURCE_URL?.trim();

@@ -404,6 +404,6 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
     <SiteFooter brand={brand} links={legalLinks} />
     <UploadModal open={modal} onClose={() => setModal(false)} uploads={uploads} batchKey={current ? batchKey : null}
       onBatch={key => setBatchKey(key)} maxBytes={account.maxSpaceBytes} priceHint={priceHint}
-      billing={account.billing ? { plans, current: active ? plan?.id ?? null : null, spaces: account.spaceCount, brand, sourceUrl: account.sourceUrl } : undefined} />
+      billing={account.billing ? { plans, current: active ? plan?.id ?? null : null, spaces: account.spaceCount, brand, sourceUrl: account.sourceUrl, salesEmail: account.salesEmail } : undefined} />
   </div></div>;
 }

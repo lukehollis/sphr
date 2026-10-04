@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { db, EditConflict, isScenePublic, sceneBuildersChoice } from "./admin-store";
-import { spaceForScene } from "./accounts-store";
+import { hostingActive, readUser, spaceForScene } from "./accounts-store";
+import { billingEnabled } from "./billing";
 import { accountRequest, accountResponse, accountsEnabled, bearerToken, currentUser, requestUser, sameOrigin, spaceHosted } from "./accounts";
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -96,6 +97,23 @@ export function deleteUserTour(id: string) {
 }
 
 export class TourLimitError extends Error {}
+
+/** Accounts that made tours before a plan was needed keep building without one. */
+const plansRequiredFrom = "2026-10-05T00:00:00.000Z";
+
+/**
+ * Tours are free, but making one needs a plan first: hosting that is paid for, or a card
+ * saved on pay as you go, which costs nothing until the customer hosts a space.
+ */
+export function readyToBuild(userId: string) {
+  if (!billingEnabled() || hostingActive(userId) || readUser(userId)?.cardSaved) return true;
+  return Boolean(store().prepare("SELECT 1 FROM user_tours WHERE user_id=? AND created<? LIMIT 1").get(userId, plansRequiredFrom));
+}
+
+/** Where choosing a plan leads back to: the picker, with the space chosen when there is one. */
+export function buildReturnPath(scene: unknown) {
+  return typeof scene === "string" && /^[a-f0-9]{12}$/.test(scene) ? `/account/tours/new?scene=${scene}` : "/account/tours/new";
+}
 
 export function tourPath(tour: Pick<UserTour, "id" | "title">) {
   return `/t/${tour.id}/${sceneTitleSlug(tour.title)}`;

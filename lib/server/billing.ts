@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses, payableSpaceCount, readSubscription, readUser,
-  saveSubscription, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
+  saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
 import { saveEvent } from "./analytics-store";
@@ -111,12 +111,37 @@ export type CheckoutStart = { url: string; plan: string } | { paid: true } | { p
  * is sent to the billing portal instead, so a customer is never subscribed twice. Without
  * a plan named, an open session keeps its plan while that plan still covers every space.
  */
-export function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false): Promise<CheckoutStart> {
+export function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string): Promise<CheckoutStart> {
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
     const count = payableSpaceCount(current.id);
-    if (!count) throw new AccountError("Add a space before paying.");
+    if (!count && !build) throw new AccountError("Add a space before paying.");
     const customer = await ensureCustomer(current);
+    // Someone choosing a plan to build tours, before any space of their own. Pay as you go
+    // costs nothing yet, so Checkout only saves a card; a plan starts its subscription now.
+    const back = build && `${origin}${build}${build.includes("?") ? "&" : "?"}checkout={CHECKOUT_SESSION_ID}`;
+    if (!count && build) {
+      const plan = await resolvePlan(planId);
+      if (plan.spaces === null) {
+        const session = await stripe().checkout.sessions.create({
+          mode: "setup", customer, client_reference_id: user.id, currency: plan.currency,
+          setup_intent_data: { metadata: { sphr_user: user.id } },
+          success_url: back!, cancel_url: `${origin}${planPath(build)}`
+        });
+        return { url: session.url!, plan: plan.id };
+      }
+      if ((await stripe().subscriptions.list({ customer, status: "all", limit: 20 })).data.some(item => liveStatuses.has(item.status))) {
+        return { portal: await portalUrl(current, origin) };
+      }
+      const session = await stripe().checkout.sessions.create({
+        mode: "subscription", customer, client_reference_id: user.id,
+        line_items: [{ price: plan.id, quantity: 1 }],
+        subscription_data: { metadata: { sphr_user: user.id } },
+        success_url: back!, cancel_url: `${origin}${planPath(build)}`,
+        ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
+      });
+      return { url: session.url!, plan: plan.id };
+    }
     const previous = current.checkoutSession
       ? await stripe().checkout.sessions.retrieve(current.checkoutSession, { expand: ["line_items"] }).catch(() => undefined) : undefined;
     if (previous?.status === "complete") {
@@ -144,7 +169,7 @@ export function startCheckout(user: User, origin: string, planId?: unknown, from
       line_items: [{ price: plan.id, quantity }],
       subscription_data: { metadata: { sphr_user: user.id } },
       // An agent is waiting to upload; the page tells the customer to go back to it.
-      success_url: `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`,
+      success_url: back || `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`,
       cancel_url: `${origin}/account`,
       ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
     });
@@ -164,6 +189,7 @@ export async function applyCheckoutSession(id: string, expectedUser?: string) {
   if (!/^cs_[A-Za-z0-9_]+$/.test(id)) return;
   const session = await stripe().checkout.sessions.retrieve(id);
   const userId = session.client_reference_id;
+  if (session.mode === "setup") return applySavedCard(session, expectedUser);
   if (session.mode !== "subscription" || session.status !== "complete" || !userId || (expectedUser && expectedUser !== userId)) return;
   const user = readUser(userId);
   const customer = typeof session.customer === "string" ? session.customer : session.customer?.id;
@@ -171,6 +197,30 @@ export async function applyCheckoutSession(id: string, expectedUser?: string) {
   const subscription = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
   if (subscription) await syncSubscription(subscription);
   if (user.checkoutSession === id) setCheckoutSession(user.id, null);
+}
+
+/** A card saved to build tours on pay as you go becomes the customer's default, so hosting a space later reuses it. */
+async function applySavedCard(session: Stripe.Checkout.Session, expectedUser?: string) {
+  const userId = session.client_reference_id;
+  if (session.status !== "complete" || !userId || (expectedUser && expectedUser !== userId)) return;
+  const user = readUser(userId);
+  const customer = typeof session.customer === "string" ? session.customer : session.customer?.id;
+  if (!user || !customer || user.stripeCustomer !== customer) return;
+  if (user.cardSaved) return;
+  const intentId = typeof session.setup_intent === "string" ? session.setup_intent : session.setup_intent?.id;
+  const intent = intentId ? await stripe().setupIntents.retrieve(intentId) : undefined;
+  const method = typeof intent?.payment_method === "string" ? intent.payment_method : intent?.payment_method?.id;
+  if (intent?.status !== "succeeded" || !method) return;
+  await stripe().customers.update(customer, { invoice_settings: { default_payment_method: method } });
+  setCardSaved(user.id);
+  saveEvent("card_saved", { userId: user.id, props: { for: "tours" } });
+  void notifyTeam({ title: "Card saved to build tours", tone: "money", fields: [["Account", user.email]] });
+}
+
+/** The plan page that leads back to building, for a Checkout left early. */
+function planPath(build: string) {
+  const scene = /[?&]scene=([a-f0-9]{12})/.exec(build)?.[1];
+  return `/account/plan?build=${scene ?? "1"}`;
 }
 
 /** Copies Stripe's current subscription state; event payloads may arrive out of order, so they are never trusted directly. */

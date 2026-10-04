@@ -67,6 +67,15 @@ export default function PlanPicker({ plans, selected, onSelect, needed, current,
   </fieldset>;
 }
 
+/** Where people choose how to pay, an offer to arrange a larger plan by email, when the deployment takes those. */
+export function EnterpriseNote({ email }: { email: string | null }) {
+  if (!email) return null;
+  return <p className="plan-note plan-enterprise">
+    Running tours for a museum, school or company at a larger scale? Email <a href={`mailto:${email}?subject=${encodeURIComponent("Enterprise plan")}`}>{email}</a> and
+    we'll set you up with an enterprise plan.
+  </p>;
+}
+
 /** Shown where people choose how to pay, when the deployment publishes its source. */
 export function OpenSourceNote({ brand, sourceUrl }: { brand: string; sourceUrl: string | null }) {
   if (!sourceUrl) return null;

@@ -50,6 +50,10 @@ function store() {
   if (!(connection.prepare("PRAGMA table_info(customer_spaces)").all() as { name: string }[]).some(column => column.name === "output")) {
     connection.exec("ALTER TABLE customer_spaces ADD COLUMN output TEXT");
   }
+  // When a customer saved a card without hosting anything yet, which is enough to build tours.
+  if (!(connection.prepare("PRAGMA table_info(users)").all() as { name: string }[]).some(column => column.name === "card_saved")) {
+    connection.exec("ALTER TABLE users ADD COLUMN card_saved TEXT");
+  }
   prepared = true;
   return connection;
 }
@@ -88,15 +92,15 @@ export function validPassword(value: unknown): value is string {
 }
 
 type UserRow = { id: string; email: string; email_verified: number; name: string | null; password: string | null;
-  stripe_customer: string | null; checkout_session: string | null; created: string };
+  stripe_customer: string | null; checkout_session: string | null; card_saved: string | null; created: string };
 export type User = { id: string; email: string; emailVerified: boolean; name: string | null; hasPassword: boolean;
-  providers: string[]; stripeCustomer: string | null; checkoutSession: string | null; created: string };
+  providers: string[]; stripeCustomer: string | null; checkoutSession: string | null; cardSaved: boolean; created: string };
 
 function toUser(row: UserRow): User {
   const providers = (store().prepare("SELECT provider FROM identities WHERE user_id=? ORDER BY provider").all(row.id) as { provider: string }[])
     .map(item => item.provider);
   return { id: row.id, email: row.email, emailVerified: row.email_verified === 1, name: row.name, hasPassword: Boolean(row.password),
-    providers, stripeCustomer: row.stripe_customer, checkoutSession: row.checkout_session, created: row.created };
+    providers, stripeCustomer: row.stripe_customer, checkoutSession: row.checkout_session, cardSaved: Boolean(row.card_saved), created: row.created };
 }
 
 export function readUser(id: string) {
@@ -386,6 +390,11 @@ export function setStripeCustomer(userId: string, customer: string) {
 
 export function userIdForCustomer(customer: string) {
   return (store().prepare("SELECT id FROM users WHERE stripe_customer=?").get(customer) as { id: string } | undefined)?.id;
+}
+
+/** Records a card saved on pay as you go before any space, so the customer can build tours. */
+export function setCardSaved(userId: string) {
+  store().prepare("UPDATE users SET card_saved=? WHERE id=?").run(now(), userId);
 }
 
 export function setCheckoutSession(userId: string, session: string | null) {

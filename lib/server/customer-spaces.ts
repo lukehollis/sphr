@@ -3,7 +3,7 @@ import { isScenePublic, sceneBuildersChoice } from "./admin-store";
 import { latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
-import { sourceUrl } from "./brand";
+import { salesEmail, sourceUrl } from "./brand";
 import { maxSpaceBytes } from "./uploads";
 import { readSourceScenes } from "../scene-catalog";
 import { editedListing, tourNamedListing } from "../scene-edits";
@@ -29,7 +29,7 @@ export function describeAccount(user: User) {
   const subscription = billingEnabled() ? readSubscription(user.id) : undefined;
   return {
     email: user.email, name: user.name, emailVerified: user.emailVerified, hasPassword: user.hasPassword, providers: user.providers,
-    billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null,
+    billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null, salesEmail: salesEmail() ?? null,
     /** Spaces that count toward a plan: every space not deleted. */
     spaceCount: payableSpaceCount(user.id),
     subscription: subscription ? { status: subscription.status, quantity: subscription.quantity, periodEnd: subscription.periodEnd,
