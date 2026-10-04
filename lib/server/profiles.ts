@@ -208,9 +208,12 @@ export function operatorAccount() {
   return user?.emailVerified ? user.id : undefined;
 }
 
+/** Work titled as a test ("[test] …", "(E57 test)") stays off profiles, though its link still opens. */
+const testTitle = (title: string) => /\[test\]|\btest\)/i.test(title);
+
 /** The site's own public spaces that open in the viewer (Matterport embeds without a capture do not). */
 async function operatorScenes() {
-  return (await readAllScenes()).filter(scene => isOperatorScene(scene.sceneId) && isScenePublic(scene.sceneId)
+  return (await readAllScenes()).filter(scene => isOperatorScene(scene.sceneId) && isScenePublic(scene.sceneId) && !testTitle(scene.title)
     && !((scene.sourceType === "matterport" || scene.sourceType === "spaces") && scene.nodeCount === 0));
 }
 
@@ -228,7 +231,7 @@ export async function sharedTours(userId: string): Promise<SharedTour[]> {
   const scenes = new Map((await readAllScenes()).map(scene => [scene.sceneId, scene]));
   const own = listUserTours(userId).flatMap(tour => {
     const scene = scenes.get(tour.sceneId);
-    if (!tour.public || !scene || !canBuildOn(userId, scene)) return [];
+    if (!tour.public || !scene || !canBuildOn(userId, scene) || testTitle(tour.title)) return [];
     return [{ id: tour.id, title: tour.title, kind: tour.kind, path: tourPath(tour), thumbnail: scene.thumbnail ?? null, space: scene.title,
       stops: tour.experience?.stops.length ?? 0, hearts: heartCount(tour.id), updated: tour.updated }];
   });
@@ -242,7 +245,7 @@ export async function sharedCaptures(userId: string): Promise<SharedCapture[]> {
   const scenes = new Map((await readAllScenes()).map(scene => [scene.sceneId, scene]));
   const own = listCustomerSpaces(userId).flatMap(space => {
     const scene = space.sceneId ? scenes.get(space.sceneId) : undefined;
-    if (!scene || space.status !== "ready" || !spaceHosted(space) || !isScenePublic(scene.sceneId)) return [];
+    if (!scene || space.status !== "ready" || !spaceHosted(space) || !isScenePublic(scene.sceneId) || testTitle(scene.title)) return [];
     return [{ sceneId: scene.sceneId, title: scene.title, path: scene.scenePath, thumbnail: scene.thumbnail, created: space.created }];
   });
   if (userId !== operatorAccount()) return own;
