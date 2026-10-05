@@ -241,6 +241,15 @@ export async function sharedTours(userId: string): Promise<SharedTour[]> {
   return [...own, ...site.sort((a, b) => b.updated.localeCompare(a.updated))];
 }
 
+/** Scavenger hunts the site's operator has shared, most hearted first, to show newcomers what one looks like. */
+export async function operatorHunts(limit = 4): Promise<SharedTour[]> {
+  const operator = operatorAccount();
+  if (!operator) return [];
+  // The site's own guided tours have no hearts; only hunts built in the tour builder are listed.
+  const hunts = (await sharedTours(operator)).filter(tour => tour.kind === "hunt" && tour.hearts !== null);
+  return hunts.sort((a, b) => (b.hearts ?? 0) - (a.hearts ?? 0) || b.updated.localeCompare(a.updated)).slice(0, limit);
+}
+
 /** The person's own hosted spaces that are public, and for the site's operator the site's own. */
 export async function sharedCaptures(userId: string): Promise<SharedCapture[]> {
   const scenes = new Map((await readAllScenes()).map(scene => [scene.sceneId, scene]));

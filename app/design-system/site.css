@@ -436,3 +436,29 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
   border-top: 1px dashed var(--site-faint); color: var(--text-body); font-size: var(--size-caption); line-height: var(--leading-body); }
 .connect-ask span { color: var(--site-muted); font-weight: var(--weight-bold); }
 .connect-ask + .connect-ask { margin-top: var(--space-1); padding-top: 0; border-top: 0; }
+
+/* How to build a tour (/learn): each step's words beside the screen it happens on */
+.learn-actions { margin-bottom: var(--space-9); }
+.learn-steps { display: grid; gap: var(--space-9); margin: 0 0 var(--space-9); padding: 0; list-style: none; }
+.learn-step { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: var(--space-6); align-items: start;
+  padding-top: 10px; border-top: var(--rule-section); scroll-margin-top: var(--space-3); }
+.learn-step-text h2 { margin: 6px 0 12px; color: var(--text-heading); font-size: 24px; line-height: var(--leading-heading); }
+.learn-step-text p { margin: 0 0 12px; color: var(--text-body); font-size: 16px; line-height: 1.6; }
+.learn-step-text .site-hint { color: var(--site-muted); font-size: var(--size-caption); }
+.learn-step-text .learn-label { margin: var(--space-3) 0 8px; color: var(--text-heading); font-size: var(--size-caption); font-weight: var(--weight-bold); }
+.learn-prompt { font-size: 14px; line-height: 1.5; white-space: normal; }
+.learn-shot { margin: 0; outline: 1px solid var(--site-line); background: var(--paper-tint); }
+.learn-shot img { display: block; width: 100%; height: auto; }
+.learn-examples { margin-bottom: var(--space-9); }
+.learn-lead { margin: 0 0 var(--space-3); color: var(--site-muted); font-size: var(--size-caption); }
+.learn-end { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-4); background: var(--site-paper), var(--paper-cream); outline: 1px solid var(--site-line); }
+.learn-end h2 { margin: 0 0 4px; color: var(--text-heading); font-size: 24px; line-height: var(--leading-heading); }
+.learn-end p { margin: 0; color: var(--site-muted); }
+@media (max-width: 860px) {
+  .learn-actions { margin-bottom: var(--space-6); }
+  .learn-steps { gap: var(--space-6); margin-bottom: var(--space-6); }
+  .learn-step { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .learn-end { padding: var(--space-3) var(--space-2); }
+  .learn-end .site-button { width: 100%; }
+}
