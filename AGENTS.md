@@ -56,8 +56,9 @@ HARD GATE: Next itself must always be horizontally centered at the bottom of the
 viewport, including while moving and on the final Continue exploring action. Never
 align it to a corner or center the combined Previous/Next group instead. Verify
 rendered button bounds at desktop, breakpoint, and 320px mobile widths before deployment.
-On mobile, keep a full-width 72px Next text button at the bottom, with a small Previous
-button above it. Dollhouse stays at the bottom and is visible only in free exploration.
+On mobile, keep a full-width 48px Next text button at the bottom, with a small Previous
+button above it. The header stays one row (the title truncates), and the stop text scrolls
+in a panel that keeps to the bottom half of the screen. Dollhouse stays at the bottom and is visible only in free exploration.
 Show the Next label on desktop too. Do not expose a text visibility toggle; authored copy stays visible in guided mode.
 Other viewer controls use accessible icon buttons. Show mute only
 when audio is configured; never expose the debug markers button in the viewer. Single-click a

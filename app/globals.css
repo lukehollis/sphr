@@ -144,29 +144,39 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .scene-load-screen { padding-left: 32px; padding-right: 32px; }
   .scene-load-drawing { width: 128px; height: 116px; margin-bottom: 24px; }
   .scene-load-title { margin-bottom: 28px; }
-  .viewer-header { top: calc(16px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); flex-direction: column; align-items: stretch; gap: var(--space-1); }
-  .scene-heading { font-size: var(--size-label); }
-  .scene-title-button { flex: 1; min-height: 44px; }
-  .scene-details { width: 100%; max-width: none; }
-  .hud-right { align-self: flex-end; }
+  /* One row: the title takes what the controls leave and ends in an ellipsis; its details open across the row. */
+  .viewer-header { top: calc(16px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); gap: 4px; }
+  .scene-heading { position: static; flex: 1 1 0; font-size: var(--size-label); }
+  .scene-title-button { width: 100%; min-height: 44px; padding-right: 12px; }
+  .scene-heading > .scene-title { flex: 1; min-height: 44px; line-height: 28px; }
+  .scene-details { top: calc(100% + 4px); left: 0; right: 0; width: auto; max-width: none; }
+  .hud-right { flex: none; }
+  .heart-toggle, .guide-toggle { gap: 6px; padding: 0 8px; }
   .hud-left { left: var(--space-2); bottom: calc(16px + env(safe-area-inset-bottom)); }
-  .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: calc(100% - 128px - env(safe-area-inset-top)); padding: 0; flex-direction: column; align-items: stretch; gap: 0; background: rgba(0, 0, 0, .9); }
-  .tour-nav { position: relative; bottom: auto; left: auto; transform: none; flex: none; width: auto; margin: 0; padding: var(--space-1) var(--space-2) calc(16px + env(safe-area-inset-bottom)); flex-direction: column; align-items: center; gap: var(--space-1); }
-  .tour-prev { position: static; width: auto; height: 44px; padding: var(--space-1) var(--space-2); font-size: var(--size-caption); }
+  /* The tour's panel keeps to the bottom half of the screen; its text scrolls and the buttons stay put. */
+  .tour-overlay { top: auto; bottom: 0; left: 0; right: 0; max-height: min(52dvh, calc(100% - 76px - env(safe-area-inset-top))); padding: 0; flex-direction: column; align-items: stretch; gap: 0; background: rgba(0, 0, 0, .9); }
+  .tour-nav { position: relative; bottom: auto; left: auto; transform: none; flex: none; width: auto; margin: 0; padding: 4px var(--space-2) calc(12px + env(safe-area-inset-bottom)); flex-direction: column; align-items: center; gap: 4px; }
+  .tour-prev { position: static; width: auto; height: 44px; padding: 0 var(--space-2); font-size: var(--size-caption); }
+  .tour-prev svg { width: 18px; height: 18px; }
   .tour-prev, .tour-prev:disabled { background: none; }
-  .tour-next { width: 100%; height: 72px; padding: var(--space-2); font-size: 22px; text-transform: uppercase; }
-  .tour-next-final { font-size: 18px; }
+  .tour-next { width: 100%; height: 48px; padding: 0 var(--space-2); font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
+  .tour-next svg { width: 18px; height: 18px; }
+  a.tour-next-final { height: auto; min-height: 48px; padding: 10px var(--space-2); }
   .tour-button-label { display: inline; }
-  .tour-copy { flex: 0 1 auto; min-height: 0; width: 100%; max-height: calc(100dvh - 276px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); padding: 20px; background: none; }
-  .tour-main-text { font-size: 20px; }
+  .tour-copy { flex: 0 1 auto; min-height: 0; width: 100%; max-height: none; overflow-y: auto; padding: var(--space-2) var(--space-2) 12px; background: none; }
+  /* While more text waits below, the bottom edge fades so the panel reads as one that scrolls. */
+  .tour-copy[data-more="true"] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+  .tour-main-text { font-size: 16px; line-height: 1.45; }
+  .tour-hunt-step, .tour-stop-title { margin-bottom: 8px; font-size: 12px; }
   .tour-secondary-text { font-size: var(--size-caption); }
+  .tour-hint, .tour-restart { min-height: 40px; margin-top: 12px; }
   .tour-media { max-height: 18vh; }
   .earth-credit { top: calc(64px + env(safe-area-inset-top)); bottom: auto; max-width: calc(100% - 32px); }
   .viewer-corner { bottom: calc(2px + env(safe-area-inset-bottom)); }
-  .reconstruction-credit { top: calc(120px + env(safe-area-inset-top)); bottom: auto; left: var(--space-2); right: var(--space-2); align-items: flex-start; max-width: none; text-align: left; }
+  .reconstruction-credit { top: calc(72px + env(safe-area-inset-top)); bottom: auto; left: var(--space-2); right: var(--space-2); align-items: flex-start; max-width: none; text-align: left; }
   /* The guided tour's panel fills the bottom of a phone screen; the site name above the title stays. */
   .has-guided-tour .viewer-corner { display: none; }
-  .navigation-status { top: calc(112px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
+  .navigation-status { top: calc(72px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
 }
 @media (prefers-reduced-motion: reduce) {
   button, a { transition: none; }
@@ -208,7 +218,10 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
 .tour-finale-actions .tour-restart { margin-top: 0; }
 @media (max-width: 740px) {
   .tour-finale-layer { align-items: stretch; justify-content: flex-end; }
-  .tour-finale-actions .tour-next { width: 100%; height: 56px; }
+  /* The end card sits at the bottom at the height of what it says (its desktop width would set its height here). */
+  .tour-finale { flex-basis: auto; padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom)); }
+  .tour-finale-actions .tour-next { width: 100%; height: 48px; }
+  .tour-finale-title { font-size: 22px; }
 }
 
 /* Tour builder: the space on the left, the agent and the editable tour on the right. */
@@ -357,8 +370,17 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .tour-gradient { background: linear-gradient(to top, rgba(0, 0, 0, .8), rgba(0, 0, 0, .5) 70%, rgba(0, 0, 0, 0)); }
   .tour-gradient::before { display: none; }
   .tour-gradient .tour-copy, .tour-gradient.tour-side-center .tour-copy { text-align: left; }
-  .tour-gradient .tour-main-text { font-size: 20px; }
+  .tour-gradient .tour-main-text { font-size: 16px; }
   .tour-gradient .tour-media { width: 140px; height: 140px; }
   .tour-gradient.tour-side-center .tour-media { margin-left: 0; }
-  .tour-gradient .tour-next { min-width: 0; height: 64px; }
+  .tour-gradient .tour-next { min-width: 0; height: 48px; }
+  .tour-gradient .tour-prev { height: 44px; }
+}
+/* A tap leaves :hover on until the next tap elsewhere; on touch screens tour controls keep their resting colors. */
+@media (hover: none) {
+  .tour-next:hover { background: var(--always-paper); }
+  .tour-gradient .tour-next:hover { background: rgba(28, 28, 28, .72); }
+  .tour-prev:not(:disabled):hover { background: none; color: var(--text-heading); }
+  .tour-gradient .tour-prev:not(:disabled):hover { color: #ffffff; text-decoration: none; }
+  .tour-hint:hover:not(:disabled), .tour-restart:hover { background: transparent; color: var(--text-heading); }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { ChevronLeft, ChevronRight, Footprints, Lightbulb, RotateCcw } from "lucide-react";
 import type { RuntimeState, TourContinue, TourPoint, TourUiText } from "@/lib/types";
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
@@ -69,6 +69,37 @@ function TourMedia({ file }: { file: NonNullable<TourPoint['files']>[number] }) 
     : image ? <a href={image} target="_blank" rel="noopener noreferrer"><img className="tour-media" src={image} alt={file.title ?? ''} /></a> : null;
 }
 
+/**
+ * The stop's text box: a new stop starts at the top of its text, a hint once asked for
+ * scrolls into view (it comes last), and the box is marked (data-more) while more text
+ * waits below, so a short panel on a phone can show that it scrolls.
+ */
+function useScrollHint(stop: string, hint: boolean) {
+  const copy = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { copy.current?.scrollTo({ top: 0 }); }, [stop]);
+  useEffect(() => {
+    const element = copy.current;
+    if (hint && element) element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+  }, [hint, stop]);
+  useEffect(() => {
+    const element = copy.current;
+    if (!element) return;
+    // Only the box's own bottom padding left below is not more text.
+    const check = () => {
+      const padding = parseFloat(getComputedStyle(element).paddingBottom) || 0;
+      element.dataset.more = String(element.scrollHeight - element.clientHeight - element.scrollTop > padding + 2);
+    };
+    check();
+    // Text, a found note, a hint or an image loading can each change how much there is.
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    for (const child of element.children) observer.observe(child);
+    element.addEventListener("scroll", check, { passive: true });
+    return () => { observer.disconnect(); element.removeEventListener("scroll", check); };
+  });
+  return copy;
+}
+
 export default function TourOverlay({ point, ui, description, state, isLastPoint, onPrevious, onNext, hunt, textStyle = "panel", continueTo, onContinue }: Props) {
   const plain = point.format === "plain";
   const huntStep = hunt && point.find ? state.hunt : undefined;
@@ -90,11 +121,12 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
 
   const side = point.textPosition === "right" || point.textPosition === "center" ? point.textPosition : "left";
   const styleClass = textStyle === "gradient" ? ` tour-gradient tour-side-${side}` : "";
+  const copy = useScrollHint(`${state.activeSpaceIndex}:${state.activePointIndex}`, Boolean(locked && state.hunt?.hint));
 
   return (
     <section className={`tour-overlay${styleClass}`} aria-live="polite">
       {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl || hunt) && (
-        <div className={hunt ? "tour-copy tour-hunt" : "tour-copy"}>
+        <div className={hunt ? "tour-copy tour-hunt" : "tour-copy"} ref={copy}>
           {hunt && <p className="tour-hunt-step">{found ? "Found" : `Clue ${hunt.step} of ${hunt.steps}`}{point.title ? <span>{point.title}</span> : null}</p>}
           {!hunt && point.title && plain && <p className="tour-stop-title">{point.title}</p>}
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
