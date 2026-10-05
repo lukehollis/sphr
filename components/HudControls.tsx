@@ -44,6 +44,7 @@ type Props = {
   onToggleMute: () => void;
   onToggleGuide: () => void;
   onToggleReconstruction?: () => void;
+  onSelectReconstructionVariant?: (id: string) => void;
 };
 
 export default function HudControls({
@@ -59,7 +60,8 @@ export default function HudControls({
   onToggleView,
   onToggleMute,
   onToggleGuide,
-  onToggleReconstruction
+  onToggleReconstruction,
+  onSelectReconstructionVariant
 }: Props) {
   const reconstruction = state.reconstruction?.available && onToggleReconstruction ? state.reconstruction : null;
   return (
@@ -77,6 +79,11 @@ export default function HudControls({
           {reconstruction && <ControlButton label={reconstruction.visible ? "Show the capture" : "Show the reconstruction"} active={reconstruction.visible} onClick={onToggleReconstruction!}>
             <TempleIcon />
           </ControlButton>}
+          {reconstruction?.visible && (reconstruction.variants?.length ?? 0) > 1 && onSelectReconstructionVariant &&
+            <select className="reconstruction-period" aria-label="Reconstruction period" value={reconstruction.variant}
+              onChange={(event) => onSelectReconstructionVariant(event.target.value)}>
+              {reconstruction.variants!.map((variant) => <option key={variant.id} value={variant.id}>{variant.title}</option>)}
+            </select>}
           {hasGuidedTour && <button className="guide-toggle" type="button" role="switch" aria-label="Guide" aria-checked={state.guided} title={state.guided ? "Switch to free exploration" : "Switch to guided tour"} onClick={onToggleGuide}>
             <span className="guide-switch" aria-hidden="true" />
             <span>Guide</span>

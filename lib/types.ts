@@ -108,6 +108,8 @@ export type TourPoint = {
   earth?: StopEarth;
   /** Show the site's reconstruction at this stop, or the capture; unset keeps what shows. */
   reconstruction?: boolean;
+  /** A named period of the reconstruction, when its manifest offers several. */
+  reconstructionVariant?: string;
   mapUrl?: string;
   /** Explicit vertical field of view, in degrees, when supplied by an authoring system. */
   fov?: number;
@@ -292,6 +294,8 @@ export type ReconstructionConfig = {
   title?: string;
   /** The GLB, absolute or relative to the manifest. */
   model: string;
+  /** Named periods. GLB nodes use extras.reconstructionVariant to belong to one. */
+  variants?: { id: string; title: string }[];
   position?: [number, number, number];
   quaternion?: [number, number, number, number];
   scale?: number;
@@ -327,6 +331,8 @@ export type SceneGraphNode = TransformConfig & {
   visible?: boolean;
   persistent?: boolean;
   raycast?: boolean;
+  /** An environmental model that also gives way when the reconstruction shows. */
+  replacedByReconstruction?: boolean;
   fpvOpacity?: number;
   orbitOpacity?: number;
   debugOpacity?: number;
@@ -434,7 +440,8 @@ export type RuntimeState = {
    * The space has a reconstruction: whether it can still show (it has not failed to load),
    * whether it is shown in the current view, whether it is loading, and its title and credit.
    */
-  reconstruction?: { available: boolean; visible: boolean; loading: boolean; title?: string; credit?: string };
+  reconstruction?: { available: boolean; visible: boolean; loading: boolean; title?: string; credit?: string;
+    variant?: string; variants?: { id: string; title: string }[] };
 };
 
 export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };

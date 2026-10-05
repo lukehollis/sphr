@@ -386,7 +386,9 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
       view: { nodeId, rotation, ...(stop.position ? { position: stop.position } : before?.view.position ? { position: before.view.position } : {}), ...(typeof stop.fov === "number" ? { fov: stop.fov } : before?.view.fov ? { fov: before.view.fov } : {}),
         ...(stop.earth === undefined ? before?.view.earth ? { earth: before.view.earth } : {} : stop.earth ? { earth: stop.earth } : {}),
         ...(stop.reconstruction === undefined ? typeof before?.view.reconstruction === "boolean" ? { reconstruction: before.view.reconstruction } : {}
-          : typeof stop.reconstruction === "boolean" ? { reconstruction: stop.reconstruction } : {}) },
+          : typeof stop.reconstruction === "boolean" ? { reconstruction: stop.reconstruction } : {}),
+        ...(before?.view.distance !== undefined ? { distance: before.view.distance } : {}),
+        ...(before?.view.reconstructionVariant ? { reconstructionVariant: before.view.reconstructionVariant } : {}) },
       objects: stop.objects ?? [], effects: stop.effects ?? [], find: stop.find,
       look: stop.style === undefined ? before?.look : stop.style,
       sky: stop.sky === undefined ? before?.sky : stop.sky,

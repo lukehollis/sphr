@@ -151,7 +151,8 @@ export class ObjectLayer {
       const target = record.wanted ? 1 : 0;
       record.shown += (target - record.shown) * Math.min(1, delta * 6);
       if (Math.abs(record.shown - target) < 0.002) record.shown = target;
-      let scale = easeOutBack(record.shown);
+      // Navigation previews stay steady, including while appearing.
+      let scale = record.data.link ? 1 - Math.pow(1 - record.shown, 3) : easeOutBack(record.shown);
       let lift = 0;
       let spin = 0;
       if (record.collect !== null) {

@@ -300,6 +300,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onToggleMute={() => runtimeRef.current?.toggleMute()}
             onToggleGuide={() => runtimeRef.current?.start(!runtimeState.guided)}
             onToggleReconstruction={() => runtimeRef.current?.toggleReconstruction()}
+            onSelectReconstructionVariant={(id) => runtimeRef.current?.selectReconstructionVariant(id)}
           />
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}

@@ -23,6 +23,15 @@ export function parseReconstruction(value: unknown): ReconstructionConfig | null
   if (quaternion && Math.hypot(...quaternion) < 1e-6) return null;
   const title = words(input.title, 200);
   const credit = words(input.credit, 300);
+  const variantIds = new Set<string>();
+  const variants = (Array.isArray(input.variants) ? input.variants : []).slice(0, 12).flatMap((item) => {
+    const variant = item as Record<string, unknown> | null;
+    const id = typeof variant?.id === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(variant.id) ? variant.id : "";
+    const title = words(variant?.title, 120);
+    if (!id || !title || variantIds.has(id)) return [];
+    variantIds.add(id);
+    return [{ id, title }];
+  });
   const landmarks = (Array.isArray(input.landmarks) ? input.landmarks : []).slice(0, 200).flatMap((item) => {
     const landmark = item as Record<string, unknown> | null;
     const name = words(landmark?.name, 120);
@@ -33,6 +42,7 @@ export function parseReconstruction(value: unknown): ReconstructionConfig | null
   return {
     version: 1,
     model,
+    ...(variants.length ? { variants } : {}),
     ...(title ? { title } : {}),
     ...(credit ? { credit } : {}),
     ...(input.position ? { position: [...input.position as number[]] as [number, number, number] } : {}),

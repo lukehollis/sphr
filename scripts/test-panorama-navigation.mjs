@@ -329,7 +329,7 @@ test('arrow keys walk forward and back along the heading and turn the view', asy
 
 // A loaded reconstruction stand-in that records what the runtime shows.
 function fakeReconstruction() {
-  return { ready: true, failed: false, busy: false, opacity: 0, sky: 0, info: {},
+  return { ready: true, failed: false, busy: false, opacity: 0, sky: 0, info: {}, variants: [], setVariant() {},
     get visible() { return this.opacity > 0; },
     setOpacity(value) { this.opacity = value; }, setSky(value) { this.sky = value; }, getRaycastObjects: () => [], update() {} };
 }
@@ -413,4 +413,18 @@ test('a guided tour shows the reconstruction only at stops that ask for it, free
   assert.equal(runtime.reconFpv, false);
   assert.equal(runtime.panorama.getDebugSnapshot().veil, 0);
   dispose();
+});
+
+
+test('an authored free orbit frames its own target and preserves its extent in portrait', async () => {
+  const { runtime, dispose } = await runtimeHarness(false, 75);
+  const point = { targetType: 'FREE', position: { x: 10, y: 30, z: 50 }, rotation: { azimuth: 90, polar: -25 }, distance: 500, fov: 60 };
+  runtime.camera.aspect = 2;
+  const wide = runtime.poseForPoint(point, 'ORBIT');
+  assert.deepEqual(wide.target.toArray(), [10, 30, 50]);
+  assert.ok(Math.abs(wide.position.distanceTo(wide.target) - 500) < 1e-6);
+  runtime.camera.aspect = .5;
+  const portrait = runtime.poseForPoint(point, 'ORBIT');
+  assert.ok(Math.abs(portrait.position.distanceTo(portrait.target) - 1000) < 1e-6);
+  await dispose();
 });

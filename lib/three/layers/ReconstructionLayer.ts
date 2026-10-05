@@ -27,6 +27,8 @@ export class ReconstructionLayer {
   private opacity = 0;
   private disposed = false;
   private error: string | null = null;
+  private variant: string | undefined;
+  private readonly variantNodes: THREE.Object3D[] = [];
 
   constructor(private readonly scene: THREE.Scene, source: string | ReconstructionConfig) {
     this.group.name = "reconstruction";
@@ -43,6 +45,19 @@ export class ReconstructionLayer {
   get busy() { return this.state === "loading"; }
   get visible() { return this.group.visible; }
   get info() { return { title: this.config?.title, credit: this.config?.credit }; }
+  get variants() { return this.config?.variants ?? []; }
+  get selectedVariant() { return this.variants.some((item) => item.id === this.variant) ? this.variant : this.variants[0]?.id; }
+
+  /** Periods share their surroundings; only the selected sculpture is drawn. */
+  setVariant(id?: string) {
+    this.variant = id;
+    this.applyVariant();
+  }
+
+  private applyVariant() {
+    const selected = this.variants.some((item) => item.id === this.variant) ? this.variant : this.variants[0]?.id;
+    for (const node of this.variantNodes) node.visible = node.userData.reconstructionVariant === selected;
+  }
 
   /** Fetch the manifest and the model, once. Resolves false when either cannot be used. */
   load(): Promise<boolean> {
@@ -91,7 +106,11 @@ export class ReconstructionLayer {
 
   /** The model's surfaces for clicks and wall tests, only while it shows. */
   getRaycastObjects(): THREE.Object3D[] {
-    return this.group.visible ? [this.group] : [];
+    if (!this.group.visible) return [];
+    return this.meshes.filter((mesh) => {
+      for (let node: THREE.Object3D | null = mesh; node && node !== this.group; node = node.parent) if (!node.visible) return false;
+      return true;
+    });
   }
 
   getBounds(out = new THREE.Box3()) {
@@ -120,6 +139,8 @@ export class ReconstructionLayer {
       visible: this.group.visible,
       sky: this.sky.visible ? this.sky.material.uniforms.opacity.value : 0,
       meshes: this.meshes.length,
+      variant: this.selectedVariant,
+      variants: this.variants,
       landmarks: this.landmarks().map((landmark) => ({ name: landmark.name, position: landmark.position.toArray().map((value) => Number(value.toFixed(3))) }))
     };
   }
@@ -134,6 +155,7 @@ export class ReconstructionLayer {
     }
     this.materials.length = 0;
     this.meshes.length = 0;
+    this.variantNodes.length = 0;
     this.group.clear();
     this.sky.geometry.dispose();
     this.sky.material.dispose();
@@ -174,6 +196,7 @@ export class ReconstructionLayer {
     }
     const model = gltf.scene;
     model.traverse((child) => {
+      if (typeof child.userData.reconstructionVariant === "string") this.variantNodes.push(child);
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
       this.meshes.push(mesh);
@@ -193,6 +216,7 @@ export class ReconstructionLayer {
     if (config.quaternion) this.group.quaternion.fromArray(config.quaternion).normalize();
     if (config.scale) this.group.scale.setScalar(config.scale);
     this.group.add(model);
+    this.applyVariant();
     this.group.updateMatrixWorld(true);
     // Hidden until the viewer fades it in.
     this.state = "ready";

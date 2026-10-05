@@ -431,6 +431,11 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                       patchStop(stop.id, { view: { ...stop.view, reconstruction: event.target.checked } });
                       setTimeout(() => void session.current?.goToStop(index), 400);
                     }} /> Show the reconstruction here</label>
+                  {stop.view.reconstruction && Boolean(state?.reconstruction?.variants?.length) &&
+                    <label>Period<select value={stop.view.reconstructionVariant ?? state?.reconstruction?.variants?.[0]?.id}
+                      onChange={(event) => patchStop(stop.id, { view: { ...stop.view, reconstructionVariant: event.target.value } })}>
+                      {state?.reconstruction?.variants?.map((variant) => <option key={variant.id} value={variant.id}>{variant.title}</option>)}
+                    </select></label>}
                 </fieldset>}
                 {draft.effects.length > 0 && <fieldset><legend>Effects here</legend><div className="builder-chips">
                   {draft.effects.filter((effect) => !effect.always).map((effect) => <button type="button" key={effect.id} aria-pressed={stop.effects.includes(effect.id)} onClick={() => patchStop(stop.id, { effects: toggle(stop.effects, effect.id) })}>{effect.name || effectEntry(effect.type)?.label || effect.type}</button>)}

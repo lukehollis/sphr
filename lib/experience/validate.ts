@@ -185,6 +185,8 @@ function view(value: unknown, label: string, nodeIds?: Set<string>): StopView {
   if (input.fov !== undefined) result.fov = Math.max(30, Math.min(110, finite(input.fov, `${label} zoom`, 180)));
   if (input.viewMode === "ORBIT") result.viewMode = "ORBIT";
   if (typeof input.reconstruction === "boolean") result.reconstruction = input.reconstruction;
+  if (typeof input.reconstructionVariant === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(input.reconstructionVariant)) result.reconstructionVariant = input.reconstructionVariant;
+  if (input.distance !== undefined) result.distance = Math.max(.1, Math.min(5000000, finite(input.distance, `${label} orbit distance`)));
   const earth = input.earth as Record<string, unknown> | undefined;
   if (earth && typeof earth === "object") {
     const range = finite(earth.range ?? EARTH_RANGE.default, `${label} height above the map`);

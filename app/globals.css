@@ -384,3 +384,21 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .tour-gradient .tour-prev:not(:disabled):hover { color: #ffffff; text-decoration: none; }
   .tour-hint:hover:not(:disabled), .tour-restart:hover { background: transparent; color: var(--text-heading); }
 }
+/* A reconstruction may offer several historical periods. */
+.reconstruction-period {
+  width: 116px;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 6px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+@media (max-width: 740px) {
+  .reconstruction-period { position: absolute; top: 52px; right: 0; }
+  .reconstruction-credit { right: 148px; }
+}

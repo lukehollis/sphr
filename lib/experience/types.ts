@@ -76,6 +76,9 @@ export type StopView = {
   earth?: StopEarth;
   /** Show the site's reconstruction (true) or the capture (false) in this stop's view; unset keeps what shows. */
   reconstruction?: boolean;
+  reconstructionVariant?: string;
+  /** Distance from a free orbit target, in meters. */
+  distance?: number;
 };
 
 /** A scavenger hunt step asks the visitor to find one placed object. */

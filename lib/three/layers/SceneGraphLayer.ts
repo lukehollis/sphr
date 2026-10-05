@@ -156,7 +156,7 @@ export class SceneGraphLayer {
   ): NavigationTransitionMaterialState | null {
     if (!envMap) return null;
 
-    const records = this.getTransitionRecords(options.meshIds);
+    const records = this.getTransitionRecords(options.meshIds).filter((record) => this.captureOpacity > 0 || !this.isReplaced(record));
     if (!records.length) return null;
 
     this.restoreNavigationTransition();
@@ -390,7 +390,7 @@ export class SceneGraphLayer {
       const active = Boolean(node?.persistent) || this.activeIds.has(id);
       object.visible = active || Boolean(node?.raycast);
       if (record && this.transitionActiveIds.has(id)) {
-        record.object.visible = true;
+        record.object.visible = this.captureOpacity > 0 || !this.isReplaced(record);
         return;
       }
       if (record) this.applyMaterialState(record, active);
@@ -408,14 +408,14 @@ export class SceneGraphLayer {
           ? node.orbitOpacity ?? 1
           : node.fpvOpacity ?? 1;
     const visibleForRaycast = Boolean(node.raycast);
-    const capture = visibleForRaycast ? this.captureOpacity : 1;
+    const capture = this.isReplaced(record) ? this.captureOpacity : 1;
     const effectiveOpacity = (active ? opacity : 0) * capture;
     const occluder = this.occluding && visibleForRaycast && effectiveOpacity === 0 && this.viewMode === "FPV" && !this.debug && this.overviewReturnBlend === null && capture > 0.999;
     // Fully replaced by a reconstruction, the capture is not drawn at all; rays still find it.
-    const replaced = visibleForRaycast && capture === 0 && !occluder;
+    const replaced = this.isReplaced(record) && capture === 0 && !occluder;
     record.meshes.forEach((mesh) => { mesh.renderOrder = occluder ? 30 : 0; mesh.visible = !replaced; });
 
-    record.object.visible = active || visibleForRaycast;
+    record.object.visible = !replaced && (active || visibleForRaycast);
     for (const material of record.materials) {
       const baseOpacity = record.originalOpacity.get(material) ?? 1;
       const originalTransparent = record.originalTransparent.get(material) ?? material.transparent;
@@ -438,6 +438,10 @@ export class SceneGraphLayer {
       if (allowedIds && !allowedIds.has(record.node.id)) return false;
       return this.isTransitionRecord(record);
     });
+  }
+
+  private isReplaced(record: SceneGraphRecord) {
+    return Boolean(record.node.raycast || record.node.replacedByReconstruction);
   }
 
   private isTransitionRecord(record: SceneGraphRecord) {

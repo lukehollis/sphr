@@ -314,7 +314,7 @@ export class SphrRuntime {
     // A guided tour shows the reconstruction only at the stops that ask for it;
     // free exploration goes back to the usual: in the dollhouse, not in panoramas.
     if (this.reconstruction) {
-      if (guided) this.setReconWanted(this.state.viewMode, point?.reconstruction === true);
+      if (guided) { this.reconstruction.setVariant(point?.reconstructionVariant); this.setReconWanted(this.state.viewMode, point?.reconstruction === true); }
       else { this.reconOrbit = true; this.reconFpv = false; if (this.state.viewMode === "ORBIT") void this.loadReconstruction(); }
       if (!this.isNavigating) this.settleReconstruction();
     }
@@ -380,7 +380,7 @@ export class SphrRuntime {
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
     // In a guided tour the reconstruction shows only at stops that ask for it, so the
     // tour's own views (a cutaway of the capture, an authored model) stay as written.
-    if (this.tourShowsStops()) this.setReconWanted(nextViewMode, point.reconstruction === true);
+    if (this.tourShowsStops()) { this.reconstruction?.setVariant(point.reconstructionVariant); this.setReconWanted(nextViewMode, point.reconstruction === true); }
     else if (nextViewMode === "ORBIT" && this.reconWanted("ORBIT")) void this.loadReconstruction();
 
     this.state.activeSpaceIndex = spaceIndex;
@@ -478,6 +478,12 @@ export class SphrRuntime {
     this.setReconWanted(mode, !this.reconWanted(mode));
     // During a flight the new choice takes over when it lands.
     if (!this.isNavigating) this.settleReconstruction();
+    this.emitState();
+  }
+
+  selectReconstructionVariant(id: string) {
+    if (!this.reconstruction?.variants.some((item) => item.id === id)) return;
+    this.reconstruction.setVariant(id);
     this.emitState();
   }
 
@@ -1368,7 +1374,8 @@ export class SphrRuntime {
       ...(this.state.viewMode === "ORBIT" && this.earth?.visible
         ? { earth: { range: Math.round(this.camera.position.distanceTo(this.controls.target) / (this.earthPlace()?.scale ?? 1)) } } : {}),
       // A stop taken from the view keeps the reconstruction, or the capture, that is showing.
-      ...(this.reconstruction && !this.reconstruction.failed ? { reconstruction: this.reconWanted(this.state.viewMode) } : {})
+      ...(this.reconstruction && !this.reconstruction.failed ? { reconstruction: this.reconWanted(this.state.viewMode) } : {}),
+      ...(this.reconstruction?.selectedVariant ? { reconstructionVariant: this.reconstruction.selectedVariant } : {})
     };
   }
 
@@ -1662,6 +1669,10 @@ export class SphrRuntime {
       const pose = this.earthPoseFor(point);
       if (pose) return pose;
     }
+    if (point?.targetType === 'FREE' && point.position) {
+      const distance = point.distance === undefined ? undefined : point.distance / Math.min(1, this.camera.aspect);
+      return this.poseForTarget(vectorFromLike(point.position), point.rotation, point.zoom, mode, point.fov, distance);
+    }
     if (point?.targetType === 'MODEL') {
       const bounds = this.sceneGraph?.getBounds(point.models);
       const target = bounds && !bounds.isEmpty() ? bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
@@ -1869,7 +1880,7 @@ export class SphrRuntime {
     // In first person the model stays solid and the photographs fade over it, a clean crossfade.
     if (mode === "FPV") return { model: amount > 0 ? 1 : 0, sky: amount > 0 ? 1 : 0, veil: amount, capture: amount > 0 ? 0 : 1 };
     // In the dollhouse it trades places with the capture mesh.
-    return { model: amount, sky: 0, veil: 0, capture: 1 - amount };
+    return { model: amount, sky: amount, veil: 0, capture: amount > 0 ? 0 : 1 };
   }
 
   private showReconstruction(display: ReconstructionDisplay) {
@@ -1878,7 +1889,8 @@ export class SphrRuntime {
     reconstruction.setOpacity(display.model);
     reconstruction.setSky(display.sky);
     this.panorama?.setVeil(display.veil);
-    this.sceneGraph?.setCaptureOpacity(display.capture);
+    // Overlapping site meshes fight for depth, even during a fade. Draw one surface at a time.
+    this.sceneGraph?.setCaptureOpacity(display.model > 0 ? 0 : display.capture);
     this.nav?.setOverlay(display.model > 0);
   }
 
@@ -1957,7 +1969,8 @@ export class SphrRuntime {
       visible: !reconstruction.failed && this.reconWanted(this.state.viewMode),
       loading: reconstruction.busy,
       ...(title ? { title } : {}),
-      ...(credit ? { credit } : {})
+      ...(credit ? { credit } : {}),
+      ...(reconstruction.variants.length ? { variant: reconstruction.selectedVariant, variants: reconstruction.variants } : {})
     };
   }
 

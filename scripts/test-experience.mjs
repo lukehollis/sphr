@@ -889,3 +889,65 @@ test('effects can hold back for a find, a hint or a click, so a hunt celebrates 
     if (window === undefined) delete globalThis.window; else globalThis.window = window;
   }
 });
+
+test('reconstruction periods survive validation and a tour editor round trip', async () => {
+  const { parseReconstruction } = await import('../lib/reconstruction.ts');
+  const manifest = parseReconstruction({ model: 'site.glb', variants: [
+    { id: 'early', title: 'Early period' }, { id: 'late', title: 'Late period' },
+    { id: 'late', title: 'Duplicate' }, { id: '../bad', title: 'Invalid' }
+  ] });
+  assert.deepEqual(manifest.variants, [{ id: 'early', title: 'Early period' }, { id: 'late', title: 'Late period' }]);
+  const raw = tour(); raw.stops[0].view = { ...view, reconstruction: true, reconstructionVariant: 'late' };
+  const parsed = parseExperience(raw);
+  const applied = applyExperience(bootstrap(), parsed);
+  assert.equal(normalizeTour(applied).spaces[0].tourpoints[0].reconstructionVariant, 'late');
+  assert.equal(experienceFromBootstrap(applied).stops[0].view.reconstructionVariant, 'late');
+  assert.equal(normalizeAgentDraft({ ...raw, stops: [{ ...raw.stops[0], nodeId: 'a' }] }, parsed, new Set(['a'])).experience.stops[0].view.reconstructionVariant, 'late');
+});
+
+test('a reconstruction hides capture and environmental models through transitions, while exhibits remain visible', async () => {
+  const THREE = await import('three');
+  const { SceneGraphLayer } = await import('../lib/three/layers/SceneGraphLayer.ts');
+  const scene = new THREE.Scene();
+  const layer = new SceneGraphLayer(scene, [
+    { id: 'capture', type: 'model', file: 'capture.glb', raycast: true, persistent: true, transitionMesh: true },
+    { id: 'landscape', type: 'model', file: 'landscape.glb', replacedByReconstruction: true, persistent: true },
+    { id: 'exhibit', type: 'model', file: 'exhibit.glb', persistent: true }
+  ]);
+  layer.loader.loadAsync = async () => {
+    const group = new THREE.Group(); group.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()));
+    return { scene: group };
+  };
+  await layer.init(); layer.setViewMode('ORBIT');
+  const env = new THREE.CubeTexture();
+  assert.ok(layer.showNavigationTransition(env));
+  layer.setCaptureOpacity(0);
+  assert.equal(layer.getObject('capture').visible, false, 'an already-running projection also disappears');
+  assert.equal(layer.getObject('landscape').visible, false, 'persistent scenery gives way');
+  assert.equal(layer.getObject('exhibit').visible, true, 'unrelated exhibits stay');
+  layer.restoreNavigationTransition();
+  assert.equal(layer.showNavigationTransition(env), null, 'projection cannot re-show a replaced capture');
+  layer.showOnly(['landscape']); layer.setViewMode('FPV'); layer.setOverviewReturnBlend(0.5);
+  assert.equal(layer.getObject('landscape').visible, false, 'later stop and view updates cannot reveal it');
+  assert.equal(layer.getRaycastObjects().length, 1, 'the hidden survey remains available for capture navigation');
+  layer.setCaptureOpacity(1); layer.setViewMode('ORBIT'); layer.setOverviewReturnBlend(null);
+  assert.equal(layer.getObject('capture').visible, true); assert.equal(layer.getObject('landscape').visible, true);
+  layer.dispose(); env.dispose();
+});
+
+test('only the selected reconstruction period participates in surface hits', async () => {
+  const THREE = await import('three');
+  const { ReconstructionLayer } = await import('../lib/three/layers/ReconstructionLayer.ts');
+  const layer = new ReconstructionLayer(new THREE.Scene(), { version: 1, model: 'site.glb', variants: [
+    { id: 'early', title: 'Early' }, { id: 'late', title: 'Late' }
+  ] });
+  const meshes = ['early', 'late'].map((id) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    mesh.userData.reconstructionVariant = id; layer.group.add(mesh); return mesh;
+  });
+  layer.meshes.push(...meshes); layer.variantNodes.push(...meshes); layer.group.visible = true;
+  layer.setVariant('early'); assert.deepEqual(layer.getRaycastObjects(), [meshes[0]]);
+  layer.setVariant('late'); assert.deepEqual(layer.getRaycastObjects(), [meshes[1]]);
+  layer.setVariant('unknown'); assert.equal(layer.selectedVariant, 'early'); assert.deepEqual(layer.getRaycastObjects(), [meshes[0]]);
+  layer.dispose();
+});

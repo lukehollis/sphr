@@ -19,6 +19,8 @@ export function stopToTourPoint(stop: ExperienceStop): TourPoint {
     viewMode: stop.view.earth ? "ORBIT" : stop.view.viewMode ?? "FPV",
     ...(stop.view.earth ? { earth: stop.view.earth } : {}),
     ...(typeof stop.view.reconstruction === "boolean" ? { reconstruction: stop.view.reconstruction } : {}),
+    ...(stop.view.distance !== undefined ? { distance: stop.view.distance } : {}),
+    ...(stop.view.reconstructionVariant ? { reconstructionVariant: stop.view.reconstructionVariant } : {}),
     ...(stop.view.position ? { position: stop.view.position } : {}),
     rotation: stop.view.rotation,
     ...(stop.view.fov ? { fov: stop.view.fov } : {}),
@@ -102,7 +104,9 @@ export function experienceFromBootstrap(bootstrap: SphrBootstrap): Experience {
         fov: point.fov,
         viewMode: point.viewMode === "ORBIT" && !point.earth ? "ORBIT" : "FPV",
         earth: point.earth,
-        reconstruction: point.reconstruction
+        reconstruction: point.reconstruction,
+        reconstructionVariant: point.reconstructionVariant,
+        distance: point.distance
       },
       objects: point.objects ?? [],
       effects: point.effects ?? [],

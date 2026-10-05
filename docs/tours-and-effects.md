@@ -58,6 +58,15 @@ Blender's Z up into Y up.
 
 ## Data
 
+Reconstruction manifests can list `variants: [{ id, title }]` for historical
+periods in one GLB. Tag period-specific Blender objects with the custom
+property `reconstructionVariant` and export glTF extras. Untagged surroundings
+show in every period. A stop selects one with `view.reconstructionVariant`;
+visitors can also select a period while viewing the reconstruction. The first
+manifest variant is the default. Environmental scene graph models can set
+`replacedByReconstruction: true` so they give way along with the capture mesh,
+including during navigation and manual comparisons.
+
 Saved experiences live in the state database (`scene_tours`) and are applied
 to the space's opening segment when it is served. Packages can also author
 them directly in `tour_data`:
