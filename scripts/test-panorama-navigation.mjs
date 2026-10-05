@@ -416,6 +416,56 @@ test('a guided tour shows the reconstruction only at stops that ask for it, free
 });
 
 
+for (const outcome of ['ready', 'failed']) test(`a reconstruction overview retains the current panorama until its download is ${outcome}`, async t => {
+  const { runtime, dispose } = await runtimeHarness(true, 75);
+  t.after(dispose);
+  runtime.state.guided = true;
+  runtime.state.loading = { label: 'Ready', progress: 1, ready: true };
+  runtime.callbacks = {};
+  runtime.tour.spaces[0].tourpoints[1] = { targetType: 'FREE', viewMode: 'ORBIT', reconstruction: true,
+    position: { x: 200, y: 50, z: 400 }, rotation: { azimuth: 30, polar: -30 }, distance: 1000 };
+  const model = fakeReconstruction();
+  model.ready = false;
+  model.busy = true;
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  model.load = () => pending; // The background prefetch has already started this same download.
+  runtime.reconstruction = model;
+  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
+  runtime.annotations = { show() {} };
+  runtime.applyExperienceForPoint = () => {};
+  const cameraBefore = runtime.camera.position.clone();
+  const navigation = runtime.goTo(0, 1);
+  assert.equal(runtime.state.activePointIndex, 0, 'caption still belongs to the visible panorama');
+  assert.equal(runtime.state.viewMode, 'FPV');
+  assert.equal(runtime.state.loading.ready, true, 'an open tour stays ready');
+  assert.equal(runtime.state.loading.busy, true);
+  assert.equal(runtime.state.navigating, true);
+  assert.ok(runtime.camera.position.equals(cameraBefore));
+  assert.equal(runtime.panorama.getDebugSnapshot().visible, true);
+  assert.equal(opacity(runtime.scene, 'entry'), 1);
+  runtime.manager = new THREE.LoadingManager();
+  runtime.setupLoadingEvents();
+  runtime.manager.onProgress('face.jpg', 1, 1);
+  assert.equal(runtime.state.loading.busy, true, 'parallel texture progress does not dismiss the model indicator');
+  model.ready = outcome === 'ready'; model.failed = outcome === 'failed'; model.busy = false;
+  finish(model.ready); await navigation;
+  assert.equal(runtime.state.loading.busy, false);
+  if (model.ready) {
+    assert.equal(runtime.state.activePointIndex, 1);
+    assert.equal(runtime.state.viewMode, 'ORBIT');
+    assert.ok(runtime.cameraTween, 'the overview flight starts only with a usable model');
+  } else {
+    assert.equal(runtime.state.activePointIndex, 0);
+    assert.equal(runtime.state.viewMode, 'FPV');
+    assert.equal(runtime.controls.enabled, true);
+    assert.equal(runtime.state.navigating, false);
+    assert.match(runtime.state.navigationError, /reconstruction.*Reload/);
+    assert.ok(runtime.camera.position.equals(cameraBefore));
+    assert.equal(opacity(runtime.scene, 'entry'), 1);
+  }
+});
+
 test('an authored free orbit frames its own target and preserves its extent in portrait', async () => {
   const { runtime, dispose } = await runtimeHarness(false, 75);
   const point = { targetType: 'FREE', position: { x: 10, y: 30, z: 50 }, rotation: { azimuth: 90, polar: -25 }, distance: 500, fov: 60 };

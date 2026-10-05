@@ -268,7 +268,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         title={preview?.title || bootstrap?.space.title}
         image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
       />
-      <ViewLoadingIndicator busy={started && Boolean(runtimeState.loading.busy)} />
+      <ViewLoadingIndicator busy={started && (Boolean(runtimeState.loading.busy) ||
+        Boolean(runtimeState.reconstruction?.visible && runtimeState.reconstruction.loading))} />
 
       {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
       {started && runtimeState.earth && <div className="earth-credit">

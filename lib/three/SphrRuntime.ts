@@ -255,7 +255,7 @@ export class SphrRuntime {
     if (splatConfigs.length) {
       this.splats = new SparkSplatLayer(this.scene, this.renderer, splatConfigs, (loaded, total, label) => {
         const progress = total ? loaded / total : 0.2;
-        this.setLoading({ label: `Loading ${label}`, progress: Math.max(this.state.loading.progress, progress), ready: this.state.loading.ready });
+        this.setLoading({ ...this.state.loading, label: `Loading ${label}`, progress: Math.max(this.state.loading.progress, progress), ready: this.state.loading.ready });
       });
     }
 
@@ -362,20 +362,33 @@ export class SphrRuntime {
     const node = this.resolveNode(point.nodeUUID);
     const nodeChanged = Boolean(node && node.uuid !== outgoingNode?.uuid);
     const heading = this.camera.getWorldDirection(new THREE.Vector3());
-    if (nodeChanged || (fromOverview && !instant)) {
+    const prepareReconstruction = Boolean(this.tourShowsStops() && point.reconstruction === true && this.reconstruction && !this.reconstruction.ready);
+    if (nodeChanged || (fromOverview && !instant) || prepareReconstruction) {
       this.isNavigating = true;
       this.state.navigating = true;
       this.controls.enabled = false;
       this.state.navigationError = undefined;
+      if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: true };
       this.emitState();
-      try { if (nodeChanged) await this.panorama?.prepare(node!); }
+      // An overview's camera may be kilometers from the capture. Keep the outgoing
+      // photograph and caption until the reconstruction can fill that view.
+      try {
+        await Promise.all([
+          nodeChanged ? this.panorama?.prepare(node!) : undefined,
+          prepareReconstruction ? this.loadReconstruction() : undefined
+        ]);
+        if (prepareReconstruction && !this.reconstruction?.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
+      }
       catch (error) {
+        if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: false };
         this.endNavigationTransition();
         this.state.navigationError = error instanceof Error ? error.message : "Unable to load this location";
         this.emitState();
+        if (prepareReconstruction && !this.state.loading.ready) throw error;
         return;
       }
       if (this.disposed) return;
+      if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: false };
     }
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
     // In a guided tour the reconstruction shows only at stops that ask for it, so the
@@ -679,6 +692,7 @@ export class SphrRuntime {
     this.manager.onProgress = (url, loaded, total) => {
       const progress = total ? loaded / total : this.state.loading.progress;
       this.setLoading({
+        ...this.state.loading,
         label: url.split("/").pop() ?? "Loading",
         progress: Math.max(this.state.loading.progress, progress),
         ready: this.state.loading.ready
@@ -1866,7 +1880,7 @@ export class SphrRuntime {
     if (!reconstruction || reconstruction.ready || reconstruction.failed) return;
     if (this.reconTimer) clearTimeout(this.reconTimer);
     this.reconTimer = null;
-    if (reconstruction.busy) return;
+    // load() shares its promise, including a download already started in the background.
     const loading = reconstruction.load();
     this.emitState();
     await loading;
