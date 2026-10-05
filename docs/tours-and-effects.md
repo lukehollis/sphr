@@ -325,6 +325,34 @@ shows: a double click in the dollhouse or a click in first person goes to the
 panorama nearest the spot, its walls hide placed objects behind them, and the
 location markers draw over it.
 
+An optional `environment` adds daylight and aerial perspective to the model.
+It is scoped to the reconstruction; the captured view and model stages use
+their original renderer when the reconstruction is hidden. Settings use the model's Y-up meter coordinates:
+
+```json
+{ "sun": { "azimuth": 140, "elevation": 30, "color": "#fff1da", "intensity": 3 },
+  "sky": { "turbidity": 4, "rayleigh": 2, "clouds": 0.2 },
+  "fog": { "color": "#c9c4b5", "density": 0.00032, "height": 180,
+    "ground": 0, "anisotropy": 0.65, "shafts": 0.7 },
+  "ground": { "color": "#bda477", "height": -10, "radius": 30000, "relief": 8 } }
+```
+
+Sun azimuth is clockwise from local -Z. `fog.density` is extinction per meter;
+`height` controls its falloff above `fog.ground`. The dust scatters light toward
+the sun, with real monument shadows through it, so shafts appear when the
+view and occluders support them. The analytic sky provides filtered material
+lighting; the sun provides soft surface shadows. Depth-based contact shading
+and a filmic display curve retain stone detail. The optional ground sits under
+the authored terrain and is excluded from bounds and navigation; set its
+height below the lowest authored surface. Do not use it to replace surveyed
+landscape detail.
+
+Scattering stops at the visible surface, runs at reduced resolution, and is
+upsampled with depth weights to preserve silhouettes. The buffer is capped at
+640×360 with 20 ray steps (320×360 and 12 on narrow screens); stationary views
+reuse the sun's shadow map. Resources are released with the viewer. Manifests
+without `environment` keep their original rendering.
+
 In a guided tour or hunt the reconstruction shows only at stops that set
 `"reconstruction": true` (in first person or in the dollhouse), so a tour's own
 views, such as a cutaway of the capture or an authored model of the site, stay

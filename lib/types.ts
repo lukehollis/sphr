@@ -304,6 +304,16 @@ export type ReconstructionConfig = {
   landmarks?: { name: string; position: [number, number, number] }[];
   /** The sky behind it in first person, as #rrggbb colors overhead and at the horizon. */
   sky?: { zenith?: string; horizon?: string };
+  /** Optional daylight, terrain backdrop and shadowed aerial perspective, in model coordinates. */
+  environment?: ReconstructionEnvironmentConfig;
+};
+
+export type ReconstructionEnvironmentConfig = {
+  sun: { azimuth: number; elevation: number; color: string; intensity: number };
+  sky: { turbidity: number; rayleigh: number; clouds: number };
+  fog: { color: string; density: number; height: number; ground: number; anisotropy: number; shafts: number };
+  /** A distant ground under the authored terrain; never used for navigation. */
+  ground?: { color: string; height: number; radius: number; relief: number };
 };
 
 export type SphrSpace = {

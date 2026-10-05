@@ -154,14 +154,14 @@ export class LookPass {
     else this.host.styleSplats(null, 0);
   }
 
-  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number) {
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, time: number, drawScene?: () => void) {
     if (!this.active) {
-      this.renderer.render(scene, camera);
+      if (drawScene) drawScene(); else this.renderer.render(scene, camera);
       return;
     }
     const target = this.ensureTarget();
     this.renderer.setRenderTarget(target);
-    this.renderer.render(scene, camera);
+    if (drawScene) drawScene(); else this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
     this.draw(target.texture, camera, time, null);
   }

@@ -149,6 +149,16 @@ export class SphrRuntime {
   private disposed = false;
   private resizeObserver: ResizeObserver | null = null;
   private readonly state: RuntimeState;
+  private atmosphereExposure = 1.15;
+  /** Stable callback; a look can render the same atmosphere into its own frame. */
+  private readonly renderScene = () => {
+    const amount = this.reconstruction?.environmentOpacity ?? 0;
+    this.ambientLight.intensity = 1.7 * (1 - amount);
+    this.sunLight.intensity = 3.2 * (1 - amount);
+    this.renderer.toneMapping = amount > 0.001 ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
+    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(this.atmosphereExposure, 1, amount);
+    if (!this.reconstruction?.render(this.renderer, this.camera)) this.renderer.render(this.scene, this.camera);
+  };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -1524,8 +1534,8 @@ export class SphrRuntime {
       this.updateEarth(now);
       this.updateNearPlane();
       this.cursor?.update(now);
-      if (this.looks) this.looks.render(this.scene, this.camera, now / 1000);
-      else this.renderer.render(this.scene, this.camera);
+      if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
+      else this.renderScene();
       this.cursor?.render(this.renderer, this.camera);
     });
   }
@@ -2200,10 +2210,10 @@ export class SphrRuntime {
 
   private applyAtmosphere(extra?: string) {
     if (extra === "nightMode") {
-      this.renderer.toneMappingExposure = 0.78;
+      this.atmosphereExposure = this.renderer.toneMappingExposure = 0.78;
       this.scene.fog = new THREE.FogExp2(0x050711, 0.014);
     } else {
-      this.renderer.toneMappingExposure = 1.15;
+      this.atmosphereExposure = this.renderer.toneMappingExposure = 1.15;
       this.scene.fog = this.getNodes().length ? null : new THREE.FogExp2(0x090b12, 0.008);
     }
   }

@@ -1,9 +1,25 @@
-import type { ReconstructionConfig } from "@/lib/types";
+import type { ReconstructionConfig, ReconstructionEnvironmentConfig } from "@/lib/types";
 
 const finite = (value: unknown, limit = 1e7): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit;
 const numbers = (value: unknown, length: number, limit?: number) => Array.isArray(value) && value.length === length && value.every((item) => finite(item, limit));
 const color = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim().toLowerCase() : undefined;
 const words = (value: unknown, limit: number) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, limit) : "";
+const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const bounded = (value: unknown, fallback: number, min: number, max: number) => finite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
+/** Atmospheric settings are opt-in, finite and bounded even in an untrusted manifest. */
+export function parseReconstructionEnvironment(value: unknown): ReconstructionEnvironmentConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const input = record(value), sun = record(input.sun), sky = record(input.sky), fog = record(input.fog), ground = record(input.ground);
+  return {
+    sun: { azimuth: bounded(sun.azimuth, 125, -360, 360), elevation: bounded(sun.elevation, 32, 5, 85), color: color(sun.color) ?? "#fff1da", intensity: bounded(sun.intensity, 3, 0, 8) },
+    sky: { turbidity: bounded(sky.turbidity, 4, 1, 12), rayleigh: bounded(sky.rayleigh, 2, 0, 4), clouds: bounded(sky.clouds, 0.12, 0, 0.6) },
+    fog: { color: color(fog.color) ?? "#c9c4b5", density: bounded(fog.density, 0.00032, 0, 0.003), height: bounded(fog.height, 180, 10, 2000), ground: bounded(fog.ground, 0, -10000, 10000), anisotropy: bounded(fog.anisotropy, 0.65, 0, 0.85), shafts: bounded(fog.shafts, 0.7, 0, 2) },
+    ...(input.ground && typeof input.ground === "object" && !Array.isArray(input.ground) ? { ground: {
+      color: color(ground.color) ?? "#bda477", height: bounded(ground.height, -10, -10000, 10000), radius: bounded(ground.radius, 15000, 2000, 50000), relief: bounded(ground.relief, 8, 0, 100)
+    } } : {})
+  };
+}
 
 /**
  * A reconstruction manifest checked field by field: a bad placement or a
@@ -39,6 +55,7 @@ export function parseReconstruction(value: unknown): ReconstructionConfig | null
   });
   const skyInput = input.sky as Record<string, unknown> | undefined;
   const sky = skyInput && typeof skyInput === "object" ? { ...(color(skyInput.zenith) ? { zenith: color(skyInput.zenith) } : {}), ...(color(skyInput.horizon) ? { horizon: color(skyInput.horizon) } : {}) } : {};
+  const environment = parseReconstructionEnvironment(input.environment);
   return {
     version: 1,
     model,
@@ -49,7 +66,8 @@ export function parseReconstruction(value: unknown): ReconstructionConfig | null
     ...(quaternion ? { quaternion: [...quaternion] } : {}),
     ...(input.scale !== undefined ? { scale: input.scale as number } : {}),
     ...(landmarks.length ? { landmarks } : {}),
-    ...(Object.keys(sky).length ? { sky } : {})
+    ...(Object.keys(sky).length ? { sky } : {}),
+    ...(environment ? { environment } : {})
   };
 }
 

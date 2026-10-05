@@ -951,3 +951,54 @@ test('only the selected reconstruction period participates in surface hits', asy
   layer.setVariant('unknown'); assert.equal(layer.selectedVariant, 'early'); assert.deepEqual(layer.getRaycastObjects(), [meshes[0]]);
   layer.dispose();
 });
+
+test('reconstruction atmospheres validate finite physical parameters without changing older manifests', async () => {
+  const { parseReconstruction } = await import('../lib/reconstruction.ts');
+  const manifest = { version: 1, model: 'site.glb' };
+  assert.equal(parseReconstruction(manifest).environment, undefined);
+  for (const invalid of [null, true, 'fog', []]) assert.equal(parseReconstruction({ ...manifest, environment: invalid }).environment, undefined);
+  const parsed = parseReconstruction({ ...manifest, environment: {
+    sun: { azimuth: Infinity, elevation: -100, intensity: 999, color: '#FFF1DA' },
+    sky: { clouds: 12, turbidity: NaN },
+    fog: { density: -1, height: 0, ground: -30, anisotropy: 9, shafts: 99, color: 'transparent' },
+    ground: { radius: 1e9, height: -52, relief: -1 }
+  } }).environment;
+  assert.deepEqual(parsed.sun, { azimuth: 125, elevation: 5, color: '#fff1da', intensity: 8 });
+  assert.equal(parsed.sky.clouds, 0.6);
+  assert.equal(parsed.sky.turbidity, 4);
+  assert.deepEqual(parsed.fog, { color: '#c9c4b5', density: 0, height: 10, ground: -30, anisotropy: 0.85, shafts: 2 });
+  assert.equal(parsed.ground.radius, 15000, 'absurd input uses the bounded default');
+  assert.equal(parsed.ground.height, -52);
+  assert.equal(parsed.ground.relief, 0);
+  const optional = parseReconstruction({ ...manifest, environment: {} }).environment;
+  assert.equal(optional.ground, undefined, 'no extra terrain unless explicitly requested');
+  assert.ok(optional.fog.density > 0 && optional.fog.density < 0.001);
+});
+
+test('a reconstruction environment hides completely with the capture and releases its scene objects', async () => {
+  const THREE = await import('three');
+  const { parseReconstructionEnvironment } = await import('../lib/reconstruction.ts');
+  const { ReconstructionEnvironment } = await import('../lib/three/layers/ReconstructionEnvironment.ts');
+  const scene = new THREE.Scene();
+  const site = new THREE.Group();
+  site.position.set(15, 4, -20); site.rotation.y = Math.PI / 2; site.scale.setScalar(2);
+  scene.add(site); site.updateMatrixWorld(true);
+  const environment = new ReconstructionEnvironment(scene, site, parseReconstructionEnvironment({ ground: { height: -10 } }));
+  const originalChildren = scene.children.length;
+  assert.ok(originalChildren > 1);
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 20000);
+  camera.position.set(20, 6, -20); camera.lookAt(15, 6, -20); camera.updateMatrixWorld(true);
+  environment.setOpacity(1); environment.setSky(1); environment.update(camera);
+  assert.equal(scene.getObjectByName('reconstruction-sun').visible, true);
+  assert.equal(scene.getObjectByName('reconstruction-daylight-sky').visible, true);
+  assert.deepEqual(site.children, [], 'distant ground never expands the navigable model or its bounds');
+  const backdrop = scene.getObjectByName('reconstruction-environment'); backdrop.updateMatrixWorld(true);
+  assert.deepEqual(backdrop.matrixWorld.elements, site.matrixWorld.elements, 'backdrop uses the same authored placement');
+  environment.setOpacity(0); environment.setSky(0);
+  assert.equal(scene.getObjectByName('reconstruction-sun').visible, false);
+  assert.equal(scene.getObjectByName('reconstruction-daylight-sky').visible, false);
+  assert.equal(backdrop.visible, false);
+  assert.equal(environment.render({}, camera, []), false, 'captured views do not allocate targets or run atmospheric passes');
+  environment.dispose();
+  assert.deepEqual(scene.children, [site], 'leaving a viewer removes every atmosphere-owned scene object');
+});

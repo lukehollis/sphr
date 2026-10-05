@@ -3,6 +3,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ReconstructionConfig } from "@/lib/types";
 import { parseReconstruction, reconstructionModelUrl } from "@/lib/reconstruction";
+import { ReconstructionEnvironment } from "@/lib/three/layers/ReconstructionEnvironment";
 
 type LoadState = "idle" | "loading" | "ready" | "failed";
 
@@ -29,6 +30,7 @@ export class ReconstructionLayer {
   private error: string | null = null;
   private variant: string | undefined;
   private readonly variantNodes: THREE.Object3D[] = [];
+  private environment: ReconstructionEnvironment | null = null;
 
   constructor(private readonly scene: THREE.Scene, source: string | ReconstructionConfig) {
     this.group.name = "reconstruction";
@@ -47,6 +49,7 @@ export class ReconstructionLayer {
   get info() { return { title: this.config?.title, credit: this.config?.credit }; }
   get variants() { return this.config?.variants ?? []; }
   get selectedVariant() { return this.variants.some((item) => item.id === this.variant) ? this.variant : this.variants[0]?.id; }
+  get environmentOpacity() { return this.environment?.opacity ?? 0; }
 
   /** Periods share their surroundings; only the selected sculpture is drawn. */
   setVariant(id?: string) {
@@ -57,6 +60,7 @@ export class ReconstructionLayer {
   private applyVariant() {
     const selected = this.variants.some((item) => item.id === this.variant) ? this.variant : this.variants[0]?.id;
     for (const node of this.variantNodes) node.visible = node.userData.reconstructionVariant === selected;
+    this.environment?.invalidateShadow();
   }
 
   /** Fetch the manifest and the model, once. Resolves false when either cannot be used. */
@@ -80,6 +84,7 @@ export class ReconstructionLayer {
     if (Math.abs(opacity - this.opacity) < 1e-4 && this.group.visible === (opacity > 0)) return;
     this.opacity = opacity;
     this.group.visible = opacity > 0;
+    this.environment?.setOpacity(opacity);
     if (!this.group.visible) return;
     const transparent = opacity < 1;
     for (const material of this.materials) {
@@ -96,12 +101,23 @@ export class ReconstructionLayer {
   /** The sky behind the model, for first person. */
   setSky(value: number) {
     const opacity = this.ready ? THREE.MathUtils.clamp(value, 0, 1) : 0;
+    if (this.environment) {
+      this.sky.visible = false;
+      this.environment.setSky(opacity);
+      return;
+    }
     this.sky.visible = opacity > 0.001;
     this.sky.material.uniforms.opacity.value = opacity;
   }
 
   update(camera: THREE.Camera) {
     if (this.sky.visible) this.sky.position.copy(camera.position);
+    this.environment?.update(camera);
+  }
+
+  /** Atmosphere draws before a tour's optional look and preserves its target. */
+  render(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera) {
+    return this.environment?.render(renderer, camera, this.materials) ?? false;
   }
 
   /** The model's surfaces for clicks and wall tests, only while it shows. */
@@ -139,6 +155,7 @@ export class ReconstructionLayer {
       visible: this.group.visible,
       sky: this.sky.visible ? this.sky.material.uniforms.opacity.value : 0,
       meshes: this.meshes.length,
+      environment: this.environment?.getDebugSnapshot() ?? null,
       variant: this.selectedVariant,
       variants: this.variants,
       landmarks: this.landmarks().map((landmark) => ({ name: landmark.name, position: landmark.position.toArray().map((value) => Number(value.toFixed(3))) }))
@@ -147,6 +164,7 @@ export class ReconstructionLayer {
 
   dispose() {
     this.disposed = true;
+    this.environment?.dispose();
     this.scene.remove(this.group, this.sky);
     this.group.traverse((child) => (child as THREE.Mesh).geometry?.dispose?.());
     for (const material of this.materials) {
@@ -200,6 +218,7 @@ export class ReconstructionLayer {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
       this.meshes.push(mesh);
+      if (this.config?.environment) mesh.castShadow = mesh.receiveShadow = true;
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
         if (!material || this.materials.includes(material)) continue;
         // Vertex colors (weathering and paint) multiply the base color texture.
@@ -218,6 +237,7 @@ export class ReconstructionLayer {
     this.group.add(model);
     this.applyVariant();
     this.group.updateMatrixWorld(true);
+    if (config.environment) this.environment = new ReconstructionEnvironment(this.scene, this.group, config.environment);
     // Hidden until the viewer fades it in.
     this.state = "ready";
     this.opacity = 0;
