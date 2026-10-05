@@ -255,7 +255,7 @@ export class SphrRuntime {
     if (splatConfigs.length) {
       this.splats = new SparkSplatLayer(this.scene, this.renderer, splatConfigs, (loaded, total, label) => {
         const progress = total ? loaded / total : 0.2;
-        this.setLoading({ label: `Loading ${label}`, progress: Math.max(this.state.loading.progress, progress), ready: false });
+        this.setLoading({ label: `Loading ${label}`, progress: Math.max(this.state.loading.progress, progress), ready: this.state.loading.ready });
       });
     }
 

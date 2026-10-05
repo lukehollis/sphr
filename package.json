@@ -16,7 +16,7 @@
     "test:hosting": "node --test scripts/test-hosting.mjs && python3 -m unittest discover -s scripts/matterport -p test_publish.py -v",
     "test:admin": "node --test scripts/test-admin.mjs",
     "test:editor": "node --experimental-transform-types --test scripts/test-scene-editor.mjs",
-    "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-overview.mjs scripts/test-audio-autoplay.mjs && node --experimental-transform-types --test scripts/test-panorama-navigation.mjs",
+    "test:navigation": "node --test scripts/test-navigation.mjs scripts/test-overview.mjs scripts/test-audio-autoplay.mjs && node --experimental-transform-types --test scripts/test-panorama-navigation.mjs scripts/test-viewer-session.mjs",
     "test:catalog": "python3 -m unittest discover -s scripts/matterport -p test_catalog.py -v",
     "test:accounts": "node --test scripts/test-accounts.mjs",
     "test:social": "node --test scripts/test-social.mjs",

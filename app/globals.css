@@ -119,6 +119,9 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .reconstruction-credit { position: absolute; z-index: 19; right: var(--space-3); bottom: 56px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: min(60%, 420px); color: #fff; font-size: 10px; line-height: 1.3; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, .85); pointer-events: none; }
 .reconstruction-title { font-size: 12px; }
 .navigation-status { position: absolute; z-index: 25; top: 88px; left: var(--space-3); max-width: calc(100% - 48px); padding: var(--space-2); border-left: 3px solid var(--accent); background: var(--surface-page); font-size: var(--size-caption); }
+.view-load-indicator { position: absolute; z-index: 25; top: calc(88px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 32px); padding: 8px 12px; background: var(--surface-page); color: var(--text-body); font-size: 12px; line-height: 16px; white-space: nowrap; pointer-events: none; }
+.view-load-indicator svg { flex: none; color: var(--accent); animation: view-load-spin 1s linear infinite; }
+@keyframes view-load-spin { to { transform: rotate(360deg); } }
 
 /* Authored tour text uses the same page stock and rules. Camera motion is unchanged. */
 .tour-overlay { position: absolute; top: 104px; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); z-index: 18; display: flex; align-items: flex-end; padding-bottom: 60px; pointer-events: none; }
@@ -177,10 +180,13 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   /* The guided tour's panel fills the bottom of a phone screen; the site name above the title stays. */
   .has-guided-tour .viewer-corner { display: none; }
   .navigation-status { top: calc(72px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
+  .view-load-indicator { top: calc(120px + env(safe-area-inset-top)); }
 }
 @media (prefers-reduced-motion: reduce) {
   button, a { transition: none; }
   .scene-load-track > span { transition: none; }
+  .view-load-indicator svg { animation: none; }
+  .sphr-viewer-stage { transition: none; }
 }
 
 /* Editing: the space edit page's start view controls, and the tour builder's notes and save button. */

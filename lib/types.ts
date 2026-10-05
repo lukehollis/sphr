@@ -415,6 +415,8 @@ export type LoadingState = {
   label: string;
   progress: number;
   ready: boolean;
+  /** Another view is loading while the already-open scene remains visible. */
+  busy?: boolean;
   error?: string;
 };
 

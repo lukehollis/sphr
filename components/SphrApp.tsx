@@ -8,6 +8,7 @@ import HudControls, { type SpaceDetails, type TourHeart } from "@/components/Hud
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
 import LoadingScreen from "@/components/LoadingScreen";
+import ViewLoadingIndicator from "@/components/ViewLoadingIndicator";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import type { ViewerHost } from "@/lib/host-link";
 import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
@@ -263,10 +264,11 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
       <div ref={viewportRef} className="sphr-viewport" />
       <LoadingScreen
         loading={runtimeState.loading}
-        visible={!started || !runtimeState.loading.ready}
+        visible={!started}
         title={preview?.title || bootstrap?.space.title}
         image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
       />
+      <ViewLoadingIndicator busy={started && Boolean(runtimeState.loading.busy)} />
 
       {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
       {started && runtimeState.earth && <div className="earth-credit">

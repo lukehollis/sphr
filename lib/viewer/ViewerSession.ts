@@ -15,6 +15,7 @@ export class ViewerSession {
   private disposed = false;
   private viewInset = 0;
   private switching = false;
+  private retiring = new Map<Stage, ReturnType<typeof setTimeout>>();
   private state: RuntimeState;
   private preferences: { guided: boolean; muted: boolean; showText: boolean };
 
@@ -56,7 +57,8 @@ export class ViewerSession {
     const stage: Stage = { element, key: segment.key, spaceIndex };
     this.pending = stage;
     this.switching = true;
-    this.state = { ...this.state, navigating: true, navigationError: undefined, loading: { label: 'Loading ' + segment.space.title, progress: 0, ready: false } };
+    this.state = { ...this.state, navigating: true, navigationError: undefined,
+      loading: { label: previous ? 'Loading next view' : 'Loading ' + segment.space.title, progress: 0, ready: Boolean(previous), busy: Boolean(previous) } };
     this.emit();
     try {
       if (segment.space.availability?.status === 'unavailable') throw new Error(segment.space.availability.message);
@@ -67,8 +69,14 @@ export class ViewerSession {
       stage.three = new SphrRuntime(canvas, segment.bootstrap, {
         onState: state => {
           if (this.disposed || (this.pending ?? this.active) !== stage) return;
-          this.state = { ...state, activeSpaceIndex: spaceIndex, finished: this.state.finished,
-            loading: this.switching ? { ...state.loading, ready: false } : state.loading };
+          // The pending renderer is hidden. Keep the outgoing stop's caption, controls
+          // and view state until the new scene can actually be shown.
+          if (this.switching && previous) {
+            this.state = { ...this.state, loading: { label: 'Loading next view', progress: state.loading.progress, ready: true, busy: true } };
+          } else {
+            this.state = { ...state, activeSpaceIndex: spaceIndex, finished: this.state.finished,
+              loading: this.switching ? { ...state.loading, ready: false } : state.loading };
+          }
           this.emit();
         },
         onObjectSelect: id => this.callbacks.onObjectSelect?.(id),
@@ -87,8 +95,14 @@ export class ViewerSession {
       this.switching = false;
       element.style.opacity = '1';
       element.style.pointerEvents = '';
-      this.release(previous);
-      this.state = { ...this.state, navigating: false, navigationError: undefined, loading: { label: 'Ready', progress: 1, ready: true } };
+      // Keep the outgoing canvas under the incoming canvas during its opacity fade.
+      // Removing it immediately would turn that short handoff into a flash of black.
+      if (previous) this.retiring.set(previous, setTimeout(() => {
+        this.retiring.delete(previous);
+        this.release(previous);
+      }, 200));
+      this.state = { ...stage.three.getState(), activeSpaceIndex: spaceIndex, finished: this.state.finished,
+        navigating: false, navigationError: undefined, loading: { label: 'Ready', progress: 1, ready: true } };
       this.emit();
     } catch (error) {
       this.release(stage);
@@ -222,6 +236,8 @@ export class ViewerSession {
 
   dispose() {
     this.disposed = true;
+    for (const [stage, timer] of this.retiring) { clearTimeout(timer); this.release(stage); }
+    this.retiring.clear();
     this.release(this.pending);
     this.release(this.active);
     this.pending = this.active = undefined;
