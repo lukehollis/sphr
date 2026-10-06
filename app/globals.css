@@ -381,6 +381,11 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .tour-gradient .tour-next { min-width: 0; height: 48px; }
   .tour-gradient .tour-prev { height: 44px; }
 }
+/* On touch screens the panel is a column, where the side-by-side text width above would become a
+   height: a two-line caption took half the screen, and the picture moved up to clear it. */
+@media (hover: none) {
+  .tour-gradient .tour-copy, .tour-gradient.tour-side-center .tour-copy { flex-basis: auto; }
+}
 /* A tap leaves :hover on until the next tap elsewhere; on touch screens tour controls keep their resting colors. */
 @media (hover: none) {
   .tour-next:hover { background: var(--always-paper); }
