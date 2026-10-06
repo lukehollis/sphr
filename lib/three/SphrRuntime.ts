@@ -449,7 +449,7 @@ export class SphrRuntime {
       // photograph and caption until the reconstruction can fill that view.
       try {
         await Promise.all([
-          nodeChanged ? this.panorama?.prepareQuick(node!, 600) : undefined,
+          nodeChanged ? this.panorama?.prepareQuick(node!, 600, 25000) : undefined,
           prepareReconstruction ? this.loadReconstruction() : undefined,
           point.viewMode === "ORBIT" ? this.captureLoaded() : undefined
         ]);
@@ -1279,7 +1279,7 @@ export class SphrRuntime {
     this.state.navigationError = undefined;
     this.controls.enabled = false;
     this.emitState();
-    try { await this.panorama?.prepareQuick(node, 600); }
+    try { await this.panorama?.prepareQuick(node, 600, 25000); }
     catch (error) {
       this.endNavigationTransition();
       this.state.navigationError = String(error);

@@ -297,7 +297,20 @@ export class PanoramaLayer {
    * Ready to show soon: the sharp faces when they arrive within `graceMs` of the small ones,
    * else the small ones, which sharpen in place once the rest arrive.
    */
-  async prepareQuick(node: NodeData, graceMs = 0) {
+  async prepareQuick(node: NodeData, graceMs = 0, limitMs = 0) {
+    const ready = this.prepareSoon(node, graceMs);
+    if (!limitMs) return ready;
+    // A request that never answers (a dropped phone connection) would otherwise hold the move forever;
+    // the downloads carry on, so trying again is quick.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([ready, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("This view is taking too long to load. Try again.")), limitMs);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
+
+  private async prepareSoon(node: NodeData, graceMs: number) {
     const sharp = this.urls(node);
     const preview = this.previewUrls(node);
     if (!preview || this.loaded(sharp)) { await this.prepare(node); return; }
