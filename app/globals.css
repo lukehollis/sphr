@@ -75,7 +75,10 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .scene-load-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; font-size: 14px; line-height: 1.4; }
 .scene-load-percent { font-variant-numeric: tabular-nums; }
 .scene-load-percent > span { margin-left: 3px; color: #bcbcbc; }
-.scene-load-track { height: 2px; margin-top: 12px; background: rgba(220, 220, 220, .28); overflow: hidden; }
+.scene-load-track { position: relative; height: 2px; margin-top: 12px; background: rgba(220, 220, 220, .28); overflow: hidden; }
+/* A light that keeps crossing the track, so a slow connection never looks stalled while a file is still coming. */
+.scene-load-track::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 28%; background: linear-gradient(90deg, transparent, rgba(240, 240, 240, .6), transparent); animation: scene-load-sweep 1.6s ease-in-out infinite; }
+@keyframes scene-load-sweep { from { transform: translateX(-100%); } to { transform: translateX(360%); } }
 .scene-load-track > span { display: block; height: 100%; background: #d0d0d0; transition: width 180ms ease-out; }
 .scene-load-ticks { display: flex; align-items: flex-start; justify-content: space-between; height: 8px; }
 .scene-load-ticks i { display: block; height: 4px; width: 1px; background: rgba(220, 220, 220, .35); }
@@ -184,6 +187,7 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
 @media (prefers-reduced-motion: reduce) {
   button, a { transition: none; }
   .scene-load-track > span { transition: none; }
+  .scene-load-track::after { animation: none; display: none; }
   .view-load-indicator svg { animation: none; }
   .sphr-viewer-stage { transition: none; }
 }

@@ -1760,11 +1760,25 @@ export class SphrRuntime {
     const next = this.state.guided && this.tour.hasGuidedTour
       ? this.resolveNode(this.tour.spaces[this.state.activeSpaceIndex]?.tourpoints[this.state.activePointIndex + 1]?.nodeUUID)
       : null;
-    if (next && next.uuid !== node.uuid) void this.panorama?.prepare(next).then(() => this.textureCache.trim()).catch(() => {});
-    const neighbors = (this.nav?.getNavigableNodes() ?? []).filter((item) => item.uuid !== node.uuid && item.uuid !== next?.uuid);
-    for (const neighbor of neighbors.slice(0, next && this.light ? 1 : 2)) {
-      void this.panorama?.prepare(neighbor).then(() => this.textureCache.trim()).catch(() => {});
+    const neighbors = (this.nav?.getNavigableNodes() ?? []).filter((item) => item.uuid !== node.uuid && item.uuid !== next?.uuid)
+      .slice(0, next && this.light ? 1 : 2);
+    const panorama = this.panorama;
+    if (!panorama) return;
+    const ahead = next && next.uuid !== node.uuid ? next : null;
+    if (!this.light) {
+      for (const item of [ahead, ...neighbors]) if (item) void panorama.prepare(item).then(() => this.textureCache.trim()).catch(() => {});
+      return;
     }
+    // On a phone the view in front sharpens first, then the small faces of where the visitor may go
+    // next, then the next stop's sharp ones, so a slow connection is not split between them.
+    void (async () => {
+      await Promise.race([panorama.whenSharp(), new Promise((resolve) => setTimeout(resolve, 8000))]);
+      const stayed = () => !this.disposed && this.panorama === panorama && this.currentNode?.uuid === node.uuid;
+      if (!stayed()) return;
+      await Promise.all([ahead, ...neighbors].map((item) => item ? panorama.preparePreview(item).catch(() => {}) : null));
+      if (ahead && stayed()) await panorama.prepare(ahead).catch(() => {});
+      this.textureCache.trim();
+    })();
   }
 
   private findTourPointForNode(nodeUUID: string) {

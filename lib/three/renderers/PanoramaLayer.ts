@@ -293,6 +293,12 @@ export class PanoramaLayer {
     await this.load(this.urls(node));
   }
 
+  /** The small faces alone, for somewhere the visitor may go next on a slow connection. */
+  async preparePreview(node: NodeData) {
+    const preview = this.previewUrls(node);
+    if (preview && !this.loaded(this.urls(node))) await this.load(preview);
+  }
+
   /**
    * Ready to show soon: the sharp faces when they arrive within `graceMs` of the small ones,
    * else the small ones, which sharpen in place once the rest arrive.
@@ -314,8 +320,11 @@ export class PanoramaLayer {
     const sharp = this.urls(node);
     const preview = this.previewUrls(node);
     if (!preview || this.loaded(sharp)) { await this.prepare(node); return; }
-    const sharpReady = this.prepare(node).then(() => true, () => false);
-    await this.load(preview).catch(() => sharpReady);
+    // A phone's connection is usually what limits it, so the small faces get it to themselves first.
+    let sharpReady = this.phone ? null : this.prepare(node).then(() => true, () => false);
+    const shown = await this.load(preview).then(() => true, () => false);
+    sharpReady ??= this.prepare(node).then(() => true, () => false);
+    if (!shown) await sharpReady;
     if (graceMs > 0 && !this.loaded(sharp)) await Promise.race([sharpReady, wait(graceMs)]);
     if (!this.loaded(preview) && !this.loaded(sharp)) throw new Error(`Unable to load the panorama at ${node.uuid}`);
   }
