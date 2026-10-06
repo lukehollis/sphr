@@ -11,6 +11,7 @@ import { hasHeart, heartCount, profileCard } from "@/lib/server/profiles";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
+import { existingLightCopies } from "@/lib/server/light";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 
 export const dynamic = "force-dynamic";
@@ -40,10 +41,10 @@ export default async function TourPage({ params }: Props) {
   const scene = await tourScene(tour);
   if (!scene) notFound();
   if (slug?.length !== 1 || slug[0] !== sceneTitleSlug(tour.title)) redirect(tourPath(tour));
-  const [variants, reconstruction] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId)]);
+  const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId)]);
   const user = await currentUser();
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl}
-    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction }}
+    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction, light }}
     preview={{ title: tour.title, image: scene.thumbnail, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} info={readSpaceInfo(scene.sceneId).info}
     social={{ creator: profileCard(tour.userId), heart: { tourId: tour.id, count: heartCount(tour.id), hearted: hasHeart(user?.id, tour.id), signedIn: Boolean(user), loginPath: loginPath(tourPath(tour)) } }} />;
 }

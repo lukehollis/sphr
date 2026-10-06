@@ -1,4 +1,4 @@
-import type { CameraRotation, SphrBootstrap, SphrSpace, Vector3Like } from './types';
+import type { CameraRotation, LightCopies, SphrBootstrap, SphrSpace, Vector3Like } from './types';
 import type { SceneListing } from './scene-types';
 import type { Experience } from './experience/types';
 import { applyExperience } from '@/lib/experience/apply';
@@ -6,7 +6,7 @@ import { applyExperience } from '@/lib/experience/apply';
 export type StartView = { nodeId?: string; position: Vector3Like; rotation: CameraRotation; fov: number };
 export type SceneEdits = { title: string | null; startView: StartView | null; revision: number; thumbnailVersion: string | null };
 /** What the viewer applies on top of a published capture; `standalone` marks a customer's own tour of the space. */
-export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean; variants?: string | null; reconstruction?: string | null };
+export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean; variants?: string | null; reconstruction?: string | null; light?: LightCopies | null };
 
 export function sceneTitleSlug(title: string) {
   return title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -75,6 +75,10 @@ export function applySceneEdits(input: SphrBootstrap, edits: ViewerEdits): SphrB
   // A reconstruction of the site, placed in the opening space's coordinates; other spaces have their own.
   if (edits.reconstruction && !edited.space.space_data.reconstruction) {
     edited.space.space_data = { ...edited.space.space_data, reconstruction: edits.reconstruction };
+  }
+  // Smaller copies of this capture's faces and models, for a quick first view and for phones.
+  if (edits.light && !edited.space.space_data.light) {
+    edited.space.space_data = { ...edited.space.space_data, light: edits.light };
   }
   return edits.experience ? applyExperience(edited, edits.experience, { standalone: edits.standalone }) : edited;
 }

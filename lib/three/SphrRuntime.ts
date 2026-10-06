@@ -15,6 +15,8 @@ import type {
   TourPoint
 } from "@/lib/types";
 import { TextureCache } from "@/lib/three/TextureCache";
+import { prefersLight } from "@/lib/three/light";
+import { ktx2Loader } from "@/lib/three/ktx2";
 import { AudioController } from "@/lib/three/AudioController";
 import { AnnotationLayer } from "@/lib/three/layers/AnnotationLayer";
 import { CursorLayer } from "@/lib/three/layers/CursorLayer";
@@ -100,6 +102,8 @@ export class SphrRuntime {
   private readonly tour;
   private readonly manager = new THREE.LoadingManager();
   private readonly textureCache: TextureCache;
+  /** A phone, or a browser saving data: mid-size faces, the lighter capture model, fewer textures kept. */
+  private readonly light = prefersLight();
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointerDown = new THREE.Vector2();
   private activePointerId: number | null = null;
@@ -204,7 +208,7 @@ export class SphrRuntime {
     this.renderer.toneMapping = THREE.LinearToneMapping;
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.setClearColor(0x0a0c10, 0);
-    this.textureCache = new TextureCache(this.manager);
+    this.textureCache = new TextureCache(this.manager, (this.light ? 64 : 320) * 1024 * 1024, !this.light);
     this.looks = new LookPass(this.renderer, this.lookHost(), typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.audio = new AudioController(this.tour.audio);
@@ -273,7 +277,7 @@ export class SphrRuntime {
     }
 
     if (!this.bootstrap.space.space_data.noPanos && nodes.length) {
-      this.panorama = new PanoramaLayer(this.scene, this.textureCache, this.bootstrap.space.version);
+      this.panorama = new PanoramaLayer(this.scene, this.textureCache, this.bootstrap.space.version, this.bootstrap.space.space_data.light?.faces, this.light);
       this.panorama.setVariantSource(this.bootstrap.space.space_data.variants);
 
     }
@@ -285,7 +289,7 @@ export class SphrRuntime {
 
     const reconstruction = this.bootstrap.space.space_data.reconstruction;
     if (reconstruction && (typeof reconstruction === "string" || typeof reconstruction === "object")) {
-      this.reconstruction = new ReconstructionLayer(this.scene, reconstruction);
+      this.reconstruction = new ReconstructionLayer(this.scene, reconstruction, this.light ? this.bootstrap.space.space_data.light?.models : undefined, ktx2Loader(this.renderer));
     }
 
     const splatConfigs = this.getSplatConfigs();
@@ -301,22 +305,31 @@ export class SphrRuntime {
       this.iiif = new IiifImageLayer(this.scene, this.textureCache, iiifConfigs);
     }
 
-    this.sceneGraph = new SceneGraphLayer(this.scene, this.tour.sceneGraph);
+    this.sceneGraph = new SceneGraphLayer(this.scene, this.tour.sceneGraph, this.light ? this.bootstrap.space.space_data.light?.models : undefined, ktx2Loader(this.renderer));
     this.cursor = new CursorLayer();
     this.annotations = new AnnotationLayer(this.scene, this.textureCache, this.tour.annotationGraph);
+
+    // A tour opening in a panorama shows it before the capture mesh arrives: the mesh is unseen
+    // there (it catches clicks, carries the move between locations and hides placed objects
+    // behind walls), so it loads right after. Hunts and the editor wait for it, since what is
+    // hidden behind a wall matters to them from the start.
+    const deferCapture = !this.editing && this.tour.kind !== "hunt" && !this.bootstrap.space.space_data.noPanos
+      && Boolean(this.panorama) && initialPoint?.viewMode !== "ORBIT";
+    const later = (node: SceneGraphNode) => deferCapture && node.type === "model" && Boolean(node.raycast) && (node.fpvOpacity ?? 1) === 0;
 
     await Promise.all([
       this.panorama?.loadInitial(this.currentNode),
       this.skybox?.init(),
       this.splats?.init(),
       this.iiif?.init(),
-      this.sceneGraph.init()
+      this.sceneGraph.init(later),
+      this.setupExperience()
     ]);
     if (this.disposed) { this.sceneGraph.dispose(); return; }
     this.annotations.init();
     this.nav?.setOccluders(this.sceneGraph.getRaycastObjects());
-    await this.setupExperience();
-    if (this.disposed) return;
+    // Until the capture mesh can hide them behind walls, placed objects wait out of sight.
+    if (this.sceneGraph.complete === false && this.objects) this.objects.root.visible = false;
 
     // A link's spot stands in for the stop at that location while the camera settles there.
     this.entryPoint = entryNode ? initialPoint : undefined;
@@ -328,10 +341,32 @@ export class SphrRuntime {
     this.startAnimationLoop();
     // Splat spaces bucket their splats once open, for the cursor's slope and the ground underfoot.
     if (this.walksOnSplats()) void this.splats?.prepareSurface();
-    // The reconstruction waits until the space is showing, then loads for the dollhouse.
+    void this.afterFirstView();
+  }
+
+  /**
+   * What the first view did not need follows once the view in front of the visitor has
+   * sharpened (or a few seconds pass), so it does not slow the faces down: the capture mesh
+   * left out of it, then the reconstruction, for the dollhouse and the stops that show it.
+   */
+  private async afterFirstView() {
+    await Promise.race([this.panorama?.whenSharp(), new Promise((resolve) => setTimeout(resolve, 4000))]);
+    if (this.disposed) return;
     if (this.reconstruction && !this.reconstruction.busy && !this.reconstruction.ready) {
       this.reconTimer = setTimeout(() => void this.loadReconstruction(), RECONSTRUCTION_DELAY_MS);
     }
+    await this.captureLoaded();
+  }
+
+  /** The whole capture, for views that show it (the overview, a stop that looks down on it) and once the first view is in. */
+  private async captureLoaded() {
+    const graph = this.sceneGraph;
+    if (!graph || graph.complete !== false) return;
+    await graph.loadDeferred();
+    if (this.disposed || this.sceneGraph !== graph) return;
+    this.nav?.setOccluders(graph.getRaycastObjects());
+    if (this.objects) this.objects.root.visible = true;
+    this.emitState();
   }
 
   start(guided: boolean) {
@@ -414,8 +449,9 @@ export class SphrRuntime {
       // photograph and caption until the reconstruction can fill that view.
       try {
         await Promise.all([
-          nodeChanged ? this.panorama?.prepare(node!) : undefined,
-          prepareReconstruction ? this.loadReconstruction() : undefined
+          nodeChanged ? this.panorama?.prepareQuick(node!, 600) : undefined,
+          prepareReconstruction ? this.loadReconstruction() : undefined,
+          point.viewMode === "ORBIT" ? this.captureLoaded() : undefined
         ]);
         if (prepareReconstruction && !this.reconstruction?.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
       }
@@ -501,6 +537,12 @@ export class SphrRuntime {
 
   toggleViewMode() {
     if (this.isNavigating) return;
+    if (this.state.viewMode === "FPV" && this.sceneGraph?.complete === false) {
+      // The overview shows the capture mesh; it is on its way.
+      this.isNavigating = true;
+      void this.captureLoaded().finally(() => { this.isNavigating = false; if (!this.disposed) this.toggleViewMode(); });
+      return;
+    }
     const newMode = this.state.viewMode === "FPV" ? "ORBIT" : "FPV";
     // Walking a space freely, the dollhouse returns to where the visitor stood.
     if (newMode === "ORBIT" && this.walksFreely()) this.freeView = { position: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov };
@@ -711,7 +753,9 @@ export class SphrRuntime {
     const config = this.bootstrap.space.space_data.navigationTransition;
     if (config?.enabled === false || !this.hasTransitionMeshConfig(this.tour.sceneGraph)) return;
 
-    const requestedSize = Math.min(config?.cubeRenderTargetSize ?? 1024, window.innerWidth < 768 ? 1024 : 2048);
+    // A phone keeps the photo it projects during a move small and 8-bit: at 1024 in half float it
+    // alone took 67 MB of a phone's graphics memory, for a second's blurred motion.
+    const requestedSize = Math.min(config?.cubeRenderTargetSize ?? 1024, this.light ? 512 : window.innerWidth < 768 ? 1024 : 2048);
     const maxSize = this.renderer.capabilities.maxCubemapSize || requestedSize;
     const size = Math.min(maxSize, this.previousPowerOfTwo(Math.max(256, requestedSize)));
     this.cubeRenderTarget = new THREE.WebGLCubeRenderTarget(size, {
@@ -721,7 +765,8 @@ export class SphrRuntime {
       wrapS: THREE.ClampToEdgeWrapping,
       wrapT: THREE.ClampToEdgeWrapping,
       mapping: THREE.CubeReflectionMapping,
-      type: THREE.HalfFloatType
+      // 8-bit targets store sRGB, so dark tombs do not band.
+      ...(this.light ? { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace } : { type: THREE.HalfFloatType })
     });
     this.cubeCamera = new THREE.CubeCamera(0.1, 1000, this.cubeRenderTarget);
     this.cubeScene = new THREE.Scene();
@@ -1234,7 +1279,7 @@ export class SphrRuntime {
     this.state.navigationError = undefined;
     this.controls.enabled = false;
     this.emitState();
-    try { await this.panorama?.prepare(node); }
+    try { await this.panorama?.prepareQuick(node, 600); }
     catch (error) {
       this.endNavigationTransition();
       this.state.navigationError = String(error);
@@ -1710,9 +1755,14 @@ export class SphrRuntime {
     this.tooltip.style.transform = `translate(${Math.round(event.clientX - rect.left + 14)}px, ${Math.round(event.clientY - rect.top + 14)}px)`;
   }
 
+  /** The next stop of a guided tour first, so Next is quick, then the nearest locations. */
   private prefetchNeighbors(node: NodeData) {
-    const neighbors = this.nav?.getNavigableNodes() ?? [];
-    for (const neighbor of neighbors.filter((item) => item.uuid !== node.uuid).slice(0, 2)) {
+    const next = this.state.guided && this.tour.hasGuidedTour
+      ? this.resolveNode(this.tour.spaces[this.state.activeSpaceIndex]?.tourpoints[this.state.activePointIndex + 1]?.nodeUUID)
+      : null;
+    if (next && next.uuid !== node.uuid) void this.panorama?.prepare(next).then(() => this.textureCache.trim()).catch(() => {});
+    const neighbors = (this.nav?.getNavigableNodes() ?? []).filter((item) => item.uuid !== node.uuid && item.uuid !== next?.uuid);
+    for (const neighbor of neighbors.slice(0, next && this.light ? 1 : 2)) {
       void this.panorama?.prepare(neighbor).then(() => this.textureCache.trim()).catch(() => {});
     }
   }

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { SceneGraphNode } from "@/lib/types";
 import { applyTransform } from "@/lib/three/math";
 
@@ -46,21 +47,49 @@ export class SceneGraphLayer {
   /** How much of the capture shows while a reconstruction stands in for it (1 as captured). */
   private captureOpacity = 1;
 
+  private deferred: SceneGraphNode[] = [];
+  private deferredLoad: Promise<void> | null = null;
+  private disposed = false;
+
+  /**
+   * @param lighter published model addresses and lighter copies to load in their place
+   * @param ktx2 reads GPU-compressed textures (the lighter copies use them)
+   */
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly nodes: SceneGraphNode[]
+    private readonly nodes: SceneGraphNode[],
+    private readonly lighter: Record<string, string> = {},
+    ktx2?: KTX2Loader
   ) {
     this.root.name = "scene-graph";
     this.loader = new GLTFLoader();
     const draco = new DRACOLoader();
     draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
     this.loader.setDRACOLoader(draco);
+    if (ktx2) this.loader.setKTX2Loader(ktx2);
   }
 
-  async init() {
+  /** @param later top-level nodes to leave for loadDeferred, after the first view */
+  async init(later?: (node: SceneGraphNode) => boolean) {
     this.scene.add(this.root);
-    await Promise.all(this.nodes.map((node) => this.buildNode(node, this.root)));
+    this.deferred = later ? this.nodes.filter(later) : [];
+    await Promise.all(this.nodes.filter((node) => !this.deferred.includes(node)).map((node) => this.buildNode(node, this.root)));
     this.applyVisibility();
+  }
+
+  /** Every model is in: nothing was left for later, or it has arrived (or failed to). */
+  get complete() {
+    return !this.deferred.length;
+  }
+
+  /** Loads what init left for later, once. */
+  loadDeferred() {
+    this.deferredLoad ??= Promise.all(this.deferred.map((node) => this.buildNode(node, this.root)
+      .catch((error) => console.warn(`Unable to load ${node.id}`, error)))).then(() => {
+      this.deferred = [];
+      if (!this.disposed) this.applyVisibility();
+    });
+    return this.deferredLoad;
   }
 
   showOnly(ids: string[] = []) {
@@ -277,6 +306,7 @@ export class SceneGraphLayer {
   }
 
   dispose() {
+    this.disposed = true;
     this.restoreNavigationTransition();
     this.scene.remove(this.root);
     this.root.traverse((child) => {
@@ -332,7 +362,8 @@ export class SceneGraphLayer {
     }
 
     if (node.type === "model" && node.file) {
-      const gltf = await this.loader.loadAsync(node.file);
+      const gltf = await this.loader.loadAsync(this.lighter[node.file] ?? node.file);
+      if (this.disposed) return;
       gltf.scene.name = node.id;
       applyTransform(gltf.scene, node);
       parent.add(gltf.scene);

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { NodeData } from "@/lib/types";
+import type { LightCopies, NodeData } from "@/lib/types";
 import { eulerFromLike } from "@/lib/three/math";
 import { nodeCubeFaceUrl, nodePanoramaUrl } from "@/lib/media";
 import { TextureCache } from "@/lib/three/TextureCache";
@@ -9,7 +9,11 @@ type PanoObject = {
   group: THREE.Group;
   materials: THREE.Material[];
   urls: string[];
+  /** The sharper faces on their way in, pinned until they replace `urls`. */
+  sharpening?: string[];
 };
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const FACE_ROTATIONS: [number, number, number][] = [
   [Math.PI / 2, 0, Math.PI],
@@ -168,6 +172,7 @@ const STYLE_FRAGMENT = /* glsl */ `
 function stylable(material: THREE.MeshBasicMaterial, style: PanoramaStyle, texture: THREE.Texture | null) {
   const image = texture?.image as { width?: number; height?: number } | undefined;
   const texel = new THREE.Vector2(1 / Math.max(256, image?.width ?? 1024), 1 / Math.max(256, image?.height ?? 1024));
+  material.userData.texel = texel;
   // Each face has its own drawn version, so this material keeps its own sampler.
   const variant = { uVariantMap: { value: null as THREE.Texture | null }, uHasVariantMap: { value: 0 } };
   material.userData.variant = variant;
@@ -230,31 +235,91 @@ export class PanoramaLayer {
   private disposed = false;
   private fade: { start: number; duration: number; fadeStart: number } | null = null;
 
+  private readonly lightNodes: Set<string>;
+
+  /**
+   * @param light smaller copies of the faces: the smallest shows first, and `phone` keeps to the
+   *   largest copy under the published size instead of the published faces
+   */
   constructor(
     private readonly scene: THREE.Scene,
     private readonly textureCache: TextureCache,
-    private readonly version?: string | null
-  ) {}
-
-  private urls(node: NodeData) {
-    return node.image && !(node.faces?.length || node.cubeFaces?.length || node.textureTemplate)
-      ? [nodePanoramaUrl(node, "full")]
-      : Array.from({ length: 6 }, (_, face) => nodeCubeFaceUrl(node, face, "1024", this.version));
+    private readonly version?: string | null,
+    private readonly light?: LightCopies["faces"],
+    private readonly phone = false
+  ) {
+    this.lightNodes = new Set(light?.nodes ?? []);
   }
 
-  async prepare(node: NodeData) {
-    const urls = this.urls(node);
+  private lightUrls(node: NodeData, size: number) {
+    const template = this.light!.template;
+    return Array.from({ length: 6 }, (_, face) => template.replace("{size}", String(size))
+      .replace("{uuid}", encodeURIComponent(node.uuid)).replace("{face}", String(face)));
+  }
+
+  private hasLight(node: NodeData) {
+    return Boolean(this.light && this.lightNodes.has(node.uuid) && (node.faces?.length || node.cubeFaces?.length));
+  }
+
+  /** The faces to settle on: the published ones, or on a phone the mid-size copy. */
+  private urls(node: NodeData) {
+    if (node.image && !(node.faces?.length || node.cubeFaces?.length || node.textureTemplate)) return [nodePanoramaUrl(node, "full")];
+    if (this.phone && this.hasLight(node)) {
+      const mid = this.light!.sizes.filter((size) => size >= 1024);
+      if (mid.length) return this.lightUrls(node, mid[0]);
+    }
+    return Array.from({ length: 6 }, (_, face) => nodeCubeFaceUrl(node, face, "1024", this.version));
+  }
+
+  /** Small faces that show while the sharp ones load, when the space has them. */
+  private previewUrls(node: NodeData) {
+    if (!this.hasLight(node)) return null;
+    const smallest = this.light!.sizes[0];
+    return smallest < 1024 ? this.lightUrls(node, smallest) : null;
+  }
+
+  private loaded(urls: string[] | null) {
+    return Boolean(urls && urls.every((url) => this.textureCache.isLoaded(url)));
+  }
+
+  private async load(urls: string[]) {
     this.textureCache.retain(urls);
     try { await Promise.all(urls.map((url) => this.textureCache.loadAsync(url))); }
     finally { this.textureCache.release(urls, false); }
   }
 
+  /** Loads the sharp faces (used ahead of time, for nearby locations and the next stop). */
+  async prepare(node: NodeData) {
+    await this.load(this.urls(node));
+  }
+
+  /**
+   * Ready to show soon: the sharp faces when they arrive within `graceMs` of the small ones,
+   * else the small ones, which sharpen in place once the rest arrive.
+   */
+  async prepareQuick(node: NodeData, graceMs = 0) {
+    const sharp = this.urls(node);
+    const preview = this.previewUrls(node);
+    if (!preview || this.loaded(sharp)) { await this.prepare(node); return; }
+    const sharpReady = this.prepare(node).then(() => true, () => false);
+    await this.load(preview).catch(() => sharpReady);
+    if (graceMs > 0 && !this.loaded(sharp)) await Promise.race([sharpReady, wait(graceMs)]);
+    if (!this.loaded(preview) && !this.loaded(sharp)) throw new Error(`Unable to load the panorama at ${node.uuid}`);
+  }
+
   async loadInitial(node?: NodeData | null) {
     if (!node) return;
-    await this.prepare(node);
+    await this.prepareQuick(node);
     if (this.disposed) return;
     this.active = this.createPano(node, 1);
     this.scene.add(this.active.group);
+  }
+
+  /** Resolves when the location in view shows its sharp faces. */
+  async whenSharp() {
+    const pano = this.active;
+    if (!pano?.sharpening) return;
+    await Promise.all(pano.sharpening.map((url) => this.textureCache.loadAsync(url).catch(() => undefined)));
   }
 
   navigate(node: NodeData, duration = 700, options: { replaceImmediately?: boolean; fadeStart?: number } = {}) {
@@ -308,7 +373,7 @@ export class PanoramaLayer {
   prepareTransitionCapture(scene: THREE.Scene, node: NodeData, position: THREE.Vector3) {
     this.clearTransitionCapture();
     this.transitionScene = scene;
-    this.transitionCapture = this.createPano(node, 1);
+    this.transitionCapture = this.createPano(node, 1, false);
     this.transitionCapture.group.name = `panorama-transition-capture-${node.uuid}`;
     this.transitionCapture.group.position.copy(position);
     scene.add(this.transitionCapture.group);
@@ -368,10 +433,13 @@ export class PanoramaLayer {
     this.outgoing = null;
   }
 
-  private createPano(node: NodeData, opacity: number): PanoObject {
+  private createPano(node: NodeData, opacity: number, sharpen = true): PanoObject {
     const group = new THREE.Group();
     group.name = `panorama-${node.uuid}`;
-    const urls = this.urls(node);
+    const sharp = this.urls(node);
+    const preview = this.previewUrls(node);
+    // The small faces stand in when the sharp ones have not all arrived yet.
+    const urls = preview && !this.loaded(sharp) && this.loaded(preview) ? preview : sharp;
     this.textureCache.retain(urls);
 
     if (node.image && !(node.faces?.length || node.cubeFaces?.length || node.textureTemplate)) {
@@ -416,10 +484,34 @@ export class PanoramaLayer {
       materials.push(material);
     }
     applyProductionCubeRotation(group, node);
-    const pano = { node, group, materials, urls };
+    const pano: PanoObject = { node, group, materials, urls };
     this.attachVariant(pano);
     this.attachSky(pano);
+    if (urls !== sharp && sharpen) this.sharpen(pano, sharp);
     return pano;
+  }
+
+  /** Swaps the small faces for the sharp ones as soon as all six arrive. */
+  private sharpen(pano: PanoObject, sharp: string[]) {
+    pano.sharpening = sharp;
+    this.textureCache.retain(sharp);
+    void Promise.all(sharp.map((url) => this.textureCache.loadAsync(url))).then((textures) => {
+      if (pano.sharpening !== sharp) return;
+      textures.forEach((texture, face) => {
+        const material = pano.materials[face] as THREE.MeshBasicMaterial;
+        material.map = texture;
+        const image = texture.image as { width?: number; height?: number } | undefined;
+        (material.userData.texel as THREE.Vector2 | undefined)?.set(1 / Math.max(256, image?.width ?? 1024), 1 / Math.max(256, image?.height ?? 1024));
+      });
+      this.textureCache.release(pano.urls, false);
+      pano.urls = sharp;
+      pano.sharpening = undefined;
+    }, () => {
+      // The small faces stay; nothing else to undo but the pins.
+      if (pano.sharpening !== sharp) return;
+      this.textureCache.release(sharp, false);
+      pano.sharpening = undefined;
+    });
   }
 
   private setOpacity(object: PanoObject | null, opacity: number) {
@@ -556,6 +648,7 @@ export class PanoramaLayer {
     if (skies) { this.textureCache.release(skies, false); this.panoSkies.delete(object); }
     const variant = this.panoVariants.get(object);
     if (variant) { this.textureCache.release(variant.urls, false); this.panoVariants.delete(object); }
+    if (object.sharpening) { this.textureCache.release(object.sharpening, false); object.sharpening = undefined; }
     this.textureCache.release(object.urls);
     object.group.traverse((child) => {
       const mesh = child as THREE.Mesh;

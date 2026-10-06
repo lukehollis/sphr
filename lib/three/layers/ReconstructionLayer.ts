@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { ReconstructionConfig } from "@/lib/types";
 import { parseReconstruction, reconstructionModelUrl } from "@/lib/reconstruction";
 import { ReconstructionEnvironment } from "@/lib/three/layers/ReconstructionEnvironment";
@@ -32,7 +33,11 @@ export class ReconstructionLayer {
   private readonly variantNodes: THREE.Object3D[] = [];
   private environment: ReconstructionEnvironment | null = null;
 
-  constructor(private readonly scene: THREE.Scene, source: string | ReconstructionConfig) {
+  /**
+   * @param lighter published model addresses and lighter copies to load in their place (phones)
+   * @param ktx2 reads GPU-compressed textures (the lighter copies use them)
+   */
+  constructor(private readonly scene: THREE.Scene, source: string | ReconstructionConfig, private readonly lighter: Record<string, string> = {}, private readonly ktx2?: KTX2Loader) {
     this.group.name = "reconstruction";
     this.group.visible = false;
     this.manifestUrl = typeof source === "string" ? source : null;
@@ -205,8 +210,9 @@ export class ReconstructionLayer {
     const draco = new DRACOLoader();
     draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
     loader.setDRACOLoader(draco);
+    if (this.ktx2) loader.setKTX2Loader(this.ktx2);
     let gltf;
-    try { gltf = await loader.loadAsync(url); }
+    try { gltf = await loader.loadAsync(this.lighter[url] ?? url); }
     finally { draco.dispose(); }
     if (this.disposed) {
       gltf.scene.traverse((child) => (child as THREE.Mesh).geometry?.dispose?.());

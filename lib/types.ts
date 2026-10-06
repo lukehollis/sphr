@@ -281,6 +281,21 @@ export type SpaceData = {
   geo?: EarthPlace;
   /** A stylized model of what the site once looked like: its manifest's address, or the manifest. */
   reconstruction?: string | ReconstructionConfig;
+  /** Smaller copies of the panorama faces and capture models, made offline, for a quick first view and for phones. */
+  light?: LightCopies;
+};
+
+/**
+ * Smaller copies of a published capture, listed beside it (scripts/matterport/light_copies.py).
+ * The originals stay as published; the viewer shows a small face first and sharpens it, and
+ * phones keep to the mid size and the lighter capture model.
+ */
+export type LightCopies = {
+  version: 1;
+  /** `{size}`, `{uuid}` and `{face}` fill in a face's address. */
+  faces?: { template: string; sizes: number[]; nodes: string[] };
+  /** A published model's address and its lighter copy (compressed geometry, a smaller texture). */
+  models?: Record<string, string>;
 };
 
 /**

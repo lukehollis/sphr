@@ -176,7 +176,6 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .tour-media { max-height: 18vh; }
   .earth-credit { top: calc(64px + env(safe-area-inset-top)); bottom: auto; max-width: calc(100% - 32px); }
   .viewer-corner { bottom: calc(2px + env(safe-area-inset-bottom)); }
-  .reconstruction-credit { top: calc(72px + env(safe-area-inset-top)); bottom: auto; left: var(--space-2); right: var(--space-2); align-items: flex-start; max-width: none; text-align: left; }
   /* The guided tour's panel fills the bottom of a phone screen; the site name above the title stays. */
   .has-guided-tour .viewer-corner { display: none; }
   .navigation-status { top: calc(72px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
@@ -404,7 +403,8 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   font-size: 12px;
 }
 
+/* On a phone the reconstruction's name, credit and period picker would sit over the view; they stay
+   on larger screens (the period follows the tour's stops either way). */
 @media (max-width: 740px) {
-  .reconstruction-period { position: absolute; top: 52px; right: 0; }
-  .reconstruction-credit { right: 148px; }
+  .reconstruction-period, .reconstruction-credit { display: none; }
 }
