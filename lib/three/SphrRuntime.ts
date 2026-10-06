@@ -317,7 +317,12 @@ export class SphrRuntime {
     // hidden behind a wall matters to them from the start.
     const deferCapture = !this.editing && this.tour.kind !== "hunt" && !this.bootstrap.space.space_data.noPanos
       && Boolean(this.panorama) && initialPoint?.viewMode !== "ORBIT";
-    const later = (node: SceneGraphNode) => deferCapture && node.type === "model" && Boolean(node.raycast) && (node.fpvOpacity ?? 1) === 0;
+    // So do models only a later stop shows (an authored site model can be 20 MB): out of sight until then.
+    const firstModels = new Set(this.stopModels(initialPoint));
+    const shownFirst = (node: SceneGraphNode): boolean => firstModels.has(node.id) || (node.children ?? []).some(shownFirst);
+    const later = (node: SceneGraphNode) => deferCapture && node.type === "model" && (node.raycast
+      ? (node.fpvOpacity ?? 1) === 0
+      : !node.persistent && !shownFirst(node));
 
     // Placed objects stay out of sight until the capture mesh arrives, so their models wait for it too.
     const objectsAfter = deferCapture ? new Promise<void>((resolve) => { this.releaseObjects = resolve; }) : undefined;
@@ -457,7 +462,7 @@ export class SphrRuntime {
         await Promise.all([
           nodeChanged ? this.panorama?.prepareQuick(node!, 600, 25000) : undefined,
           prepareReconstruction ? this.loadReconstruction() : undefined,
-          point.viewMode === "ORBIT" ? this.captureLoaded() : undefined
+          point.viewMode === "ORBIT" || this.sceneGraph?.waitsFor?.(this.stopModels(point)) ? this.captureLoaded() : undefined
         ]);
         if (prepareReconstruction && !this.reconstruction?.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
       }

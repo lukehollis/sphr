@@ -82,6 +82,14 @@ export class SceneGraphLayer {
     return !this.deferred.length;
   }
 
+  /** Whether any of these models was left for later and is not in yet. */
+  waitsFor(ids: string[]) {
+    if (!this.deferred.length || !ids.length) return false;
+    const wanted = new Set(ids);
+    const holds = (node: SceneGraphNode): boolean => wanted.has(node.id) || (node.children ?? []).some(holds);
+    return this.deferred.some(holds);
+  }
+
   /** Loads what init left for later, once. */
   loadDeferred() {
     this.deferredLoad ??= Promise.all(this.deferred.map((node) => this.buildNode(node, this.root)
