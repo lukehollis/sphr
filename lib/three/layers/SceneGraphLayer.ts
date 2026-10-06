@@ -83,11 +83,11 @@ export class SceneGraphLayer {
     return !this.deferred.some((node) => node.raycast);
   }
 
-  /** The models left for later that hold any of these ids. */
+  /** The models left for later that hold any of these ids, other than capture meshes (loadDeferred brings those). */
   private deferredFor(ids: string[]) {
     const wanted = new Set(ids);
     const holds = (node: SceneGraphNode): boolean => wanted.has(node.id) || (node.children ?? []).some(holds);
-    return ids.length ? this.deferred.filter(holds) : [];
+    return ids.length ? this.deferred.filter((node) => !node.raycast && holds(node)) : [];
   }
 
   /** Whether any of these models was left for later and is not in yet. */
@@ -109,16 +109,11 @@ export class SceneGraphLayer {
   }
 
   /**
-   * Loads what init left for later: the capture meshes, then the models only later stops show, so
-   * those do not slow the capture down. Resolves once the capture is in.
+   * Loads the capture meshes init left for later, once. Models only later stops show wait for
+   * whenLoaded: a big one downloading in the background would hold up the next panorama's faces.
    */
   loadDeferred() {
-    if (!this.deferredLoad) {
-      const capture = this.deferred.filter((node) => node.raycast);
-      const rest = this.deferred.filter((node) => !node.raycast);
-      this.deferredLoad = Promise.all(capture.map((node) => this.loadLater(node))).then(() => {});
-      void this.deferredLoad.then(() => Promise.all(rest.map((node) => this.loadLater(node))));
-    }
+    this.deferredLoad ??= Promise.all(this.deferred.filter((node) => node.raycast).map((node) => this.loadLater(node))).then(() => {});
     return this.deferredLoad;
   }
 

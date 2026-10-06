@@ -372,10 +372,8 @@ export class SphrRuntime {
   private async captureLoaded() {
     this.releaseObjects?.();
     const graph = this.sceneGraph;
-    // Starts whatever was left for later; models only later stops show follow the capture.
-    const capture = graph?.loadDeferred?.();
     if (!graph || graph.complete !== false) return;
-    await capture;
+    await graph.loadDeferred();
     if (this.disposed || this.sceneGraph !== graph) return;
     this.nav?.setOccluders(graph.getRaycastObjects());
     if (this.objects) this.objects.root.visible = true;
@@ -1777,9 +1775,13 @@ export class SphrRuntime {
 
   /** The next stop of a guided tour first, so Next is quick, then the nearest locations. */
   private prefetchNeighbors(node: NodeData) {
-    const next = this.state.guided && this.tour.hasGuidedTour
-      ? this.resolveNode(this.tour.spaces[this.state.activeSpaceIndex]?.tourpoints[this.state.activePointIndex + 1]?.nodeUUID)
-      : null;
+    const nextPoint = this.state.guided && this.tour.hasGuidedTour
+      ? this.tour.spaces[this.state.activeSpaceIndex]?.tourpoints[this.state.activePointIndex + 1]
+      : undefined;
+    const next = nextPoint ? this.resolveNode(nextPoint.nodeUUID) : null;
+    // A model only the next stop shows (left for later) comes after the view in front.
+    const nextModels = nextPoint ? this.stopModels(nextPoint) : [];
+    const modelsAhead = () => { if (nextModels.length) void this.sceneGraph?.whenLoaded?.(nextModels); };
     const neighbors = (this.nav?.getNavigableNodes() ?? []).filter((item) => item.uuid !== node.uuid && item.uuid !== next?.uuid)
       .slice(0, next && this.light ? 1 : 2);
     const panorama = this.panorama;
@@ -1787,6 +1789,7 @@ export class SphrRuntime {
     const ahead = next && next.uuid !== node.uuid ? next : null;
     if (!this.light) {
       for (const item of [ahead, ...neighbors]) if (item) void panorama.prepare(item).then(() => this.textureCache.trim()).catch(() => {});
+      modelsAhead();
       return;
     }
     // On a phone the view in front sharpens first, then the small faces of where the visitor may go
@@ -1798,6 +1801,7 @@ export class SphrRuntime {
       await Promise.all([ahead, ...neighbors].map((item) => item ? panorama.preparePreview(item).catch(() => {}) : null));
       if (ahead && stayed()) await panorama.prepare(ahead).catch(() => {});
       this.textureCache.trim();
+      if (stayed()) modelsAhead();
     })();
   }
 
