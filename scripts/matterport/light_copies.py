@@ -77,6 +77,20 @@ def capture_models(bootstrap):
     return list(dict.fromkeys(found))
 
 
+def tour_models(bootstrap):
+    """Models a tour shows (an authored site model, say), as the scene graph names them: not capture meshes."""
+    graphs = [bootstrap.get('tour', {}).get('tour_data', {}).get('sceneGraph') or [], bootstrap['space']['space_data'].get('sceneGraph') or []]
+    found = []
+    def walk(nodes):
+        for node in nodes:
+            if node.get('type') == 'model' and not node.get('raycast') and re.match(r'^https://.+\.glb$', node.get('file') or ''):
+                found.append(node['file'])
+            walk(node.get('children') or [])
+    for graph in graphs:
+        walk(graph)
+    return list(dict.fromkeys(found))
+
+
 def reconstruction_models(bootstrap, scene_id, base):
     """The reconstruction a scene shows: named in its package, or kept beside it by scene ID."""
     urls = []
@@ -145,8 +159,9 @@ def make(scene_id, catalog, stage, origin, reconstructions, prepared):
     bootstrap = scene_bootstrap(scene_id, catalog)
     nodes = face_nodes(bootstrap)
     captures = capture_models(bootstrap)
-    rebuilt = [url for url in reconstruction_models(bootstrap, scene_id, reconstructions) if url not in captures]
-    models = captures + rebuilt
+    shown = [url for url in tour_models(bootstrap) if url not in captures]
+    rebuilt = [url for url in reconstruction_models(bootstrap, scene_id, reconstructions) if url not in captures + shown]
+    models = captures + shown + rebuilt
     # The copies' folder is named after the capture they copy, so a new capture gets a new address.
     version = hashlib.sha256(json.dumps([[n['uuid'], n.get('faces') or n.get('cubeFaces')] for n in nodes] + captures).encode()).hexdigest()[:16]
     folder = stage / scene_id / version
@@ -160,8 +175,13 @@ def make(scene_id, catalog, stage, origin, reconstructions, prepared):
     lighter = {}
     for url in models:
         target = write_model(url, folder, CAPTURE_TEXTURE if url in captures else RECONSTRUCTION_TEXTURE, prepared.get(url))
+        size = len(fetch(url))
+        if url in shown and not prepared.get(url) and target.stat().st_size >= 0.9 * size:
+            # Already small (or compressed): the published model serves phones as well.
+            target.unlink()
+            continue
         lighter[url] = f'{base}/models/{target.name}'
-        print(f'  model {url.rsplit("/", 1)[-1]}: {len(fetch(url)) / 1e6:.1f} MB -> {target.stat().st_size / 1e6:.1f} MB')
+        print(f'  model {url.rsplit("/", 1)[-1]}: {size / 1e6:.1f} MB -> {target.stat().st_size / 1e6:.1f} MB')
     if lighter:
         index['models'] = lighter
     if len(index) == 1:
