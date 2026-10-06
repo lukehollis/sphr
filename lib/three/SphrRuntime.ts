@@ -362,7 +362,9 @@ export class SphrRuntime {
   private async afterFirstView() {
     await Promise.race([this.panorama?.whenSharp(), new Promise((resolve) => setTimeout(resolve, 4000))]);
     if (this.disposed) return;
-    if (this.reconstruction && !this.reconstruction.busy && !this.reconstruction.ready) {
+    // A phone's connection is too narrow for it to come early: it would hold up the next views'
+    // faces. There it loads a stop ahead of the stop that shows it (prefetchNeighbors).
+    if (!this.light && this.reconstruction && !this.reconstruction.busy && !this.reconstruction.ready) {
       this.reconTimer = setTimeout(() => void this.loadReconstruction(), RECONSTRUCTION_DELAY_MS);
     }
     await this.captureLoaded();
@@ -1781,7 +1783,11 @@ export class SphrRuntime {
     const next = nextPoint ? this.resolveNode(nextPoint.nodeUUID) : null;
     // A model only the next stop shows (left for later) comes after the view in front.
     const nextModels = nextPoint ? this.stopModels(nextPoint) : [];
-    const modelsAhead = () => { if (nextModels.length) void this.sceneGraph?.whenLoaded?.(nextModels); };
+    const reconAhead = Boolean(nextPoint && this.tourShowsStops() && (nextPoint.reconstruction === true || (nextPoint.viewMode === "ORBIT" && this.reconWanted("ORBIT"))));
+    const modelsAhead = () => {
+      if (nextModels.length) void this.sceneGraph?.whenLoaded?.(nextModels);
+      if (reconAhead) void this.loadReconstruction();
+    };
     const neighbors = (this.nav?.getNavigableNodes() ?? []).filter((item) => item.uuid !== node.uuid && item.uuid !== next?.uuid)
       .slice(0, next && this.light ? 1 : 2);
     const panorama = this.panorama;

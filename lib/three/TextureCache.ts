@@ -2,6 +2,28 @@ import * as THREE from "three";
 
 type Entry = { texture: THREE.Texture; ready: Promise<THREE.Texture>; loaded: boolean; pins: number; permanent: boolean; used: number };
 
+/**
+ * TextureLoader with the image asking for the connection first. Browsers rank a fetch (a model
+ * downloading) above an image, so on a slow connection the faces of the next view waited behind it.
+ */
+class FaceLoader extends THREE.TextureLoader {
+  load(url: string, onLoad?: (texture: THREE.Texture<HTMLImageElement>) => void, _onProgress?: (event: ProgressEvent) => void, onError?: (error: unknown) => void) {
+    const texture = new THREE.Texture<HTMLImageElement>();
+    const address = this.manager.resolveURL(this.path + url);
+    const image = document.createElementNS("http://www.w3.org/1999/xhtml", "img") as HTMLImageElement;
+    const settle = () => { image.removeEventListener("load", loaded); image.removeEventListener("error", failed); };
+    const loaded = () => { settle(); texture.image = image; texture.needsUpdate = true; onLoad?.(texture); this.manager.itemEnd(address); };
+    const failed = (event: Event) => { settle(); onError?.(event); this.manager.itemError(address); this.manager.itemEnd(address); };
+    image.addEventListener("load", loaded, false);
+    image.addEventListener("error", failed, false);
+    if (!address.startsWith("data:") && this.crossOrigin !== undefined) image.crossOrigin = this.crossOrigin;
+    image.fetchPriority = "high";
+    this.manager.itemStart(address);
+    image.src = address;
+    return texture;
+  }
+}
+
 /** Bounded panorama cache. Visible images stay pinned until their fade completes. */
 export class TextureCache {
   private readonly loader: THREE.TextureLoader;
@@ -12,7 +34,7 @@ export class TextureCache {
    * @param budget bytes of unpinned textures kept for reuse (phones keep fewer)
    * @param mipmaps phones skip them: a face is drawn near its own size there, and they add a third
    */
-  constructor(manager?: THREE.LoadingManager, private readonly budget = 320 * 1024 * 1024, private readonly mipmaps = true) { this.loader = new THREE.TextureLoader(manager); }
+  constructor(manager?: THREE.LoadingManager, private readonly budget = 320 * 1024 * 1024, private readonly mipmaps = true) { this.loader = new FaceLoader(manager); }
 
   load(url: string, onLoad?: (texture: THREE.Texture) => void) {
     if (!url) return null;
