@@ -1783,7 +1783,8 @@ export class SphrRuntime {
     const next = nextPoint ? this.resolveNode(nextPoint.nodeUUID) : null;
     // A model only the next stop shows (left for later) comes after the view in front.
     const nextModels = nextPoint ? this.stopModels(nextPoint) : [];
-    const reconAhead = Boolean(nextPoint && this.tourShowsStops() && (nextPoint.reconstruction === true || (nextPoint.viewMode === "ORBIT" && this.reconWanted("ORBIT"))));
+    // Only for a stop that waits for the reconstruction: elsewhere it would compete with what the next stop does wait for.
+    const reconAhead = Boolean(nextPoint && this.tourShowsStops() && nextPoint.reconstruction === true);
     const modelsAhead = () => {
       if (nextModels.length) void this.sceneGraph?.whenLoaded?.(nextModels);
       if (reconAhead) void this.loadReconstruction();
