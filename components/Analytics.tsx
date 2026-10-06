@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { isBrowserNoise } from "@/lib/browser-noise";
 
 // Sends page views and the steps people take to the site's own analytics (see
 // lib/server/analytics.ts), and the same events to Google Analytics when it is loaded.
@@ -41,14 +42,12 @@ export function googleEvent(name: string, params?: Record<string, unknown>) {
   try { window.gtag?.("event", name, params ?? {}); } catch { /* analytics never breaks the page */ }
 }
 
-// Browser noise that says nothing about this site: extensions, cross-origin scripts, resize loops.
-const noise = /ResizeObserver loop|^Script error\.?$|extension:\/\/|Non-Error promise rejection captured/i;
 let reported = 0;
 
 /** Sends a JavaScript error (a few per page at most) so failures on some browser or device show up. */
 export function reportError(kind: string, error: unknown, source = "") {
   const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? "")).slice(0, 200);
-  if (!message || noise.test(message) || noise.test(source) || reported >= 5) return;
+  if (!message || isBrowserNoise(message) || isBrowserNoise(source) || reported >= 5) return;
   reported++;
   send("client_error", { kind, message, source: source.replace(window.location.origin, "").slice(0, 120) });
 }

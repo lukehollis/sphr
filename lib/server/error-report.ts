@@ -1,3 +1,4 @@
+import { isBrowserNoise } from "../browser-noise";
 import { saveEvent } from "./analytics-store";
 import { notifyTeam, type TeamEvent } from "./team-notify";
 
@@ -37,8 +38,9 @@ export function reportProblem(title: string, message: string, fields: TeamEvent[
 export function reportClientError(props: Record<string, string | number | boolean>, path: string | null, device: string) {
   const message = String(props.message ?? "").slice(0, 300);
   // A page that reloaded itself after part of it didn't arrive usually recovers. It stays in the analytics,
-  // and the operator hears about it only if it is still failing after the reload.
-  if (!message || props.source === "reloaded the page") return;
+  // and the operator hears about it only if it is still failing after the reload. Scripts that apps and
+  // extensions inject into the page stay in the analytics too, but they aren't this site's errors.
+  if (!message || props.source === "reloaded the page" || isBrowserNoise(message)) return;
   noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
     fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null]] });
 }
