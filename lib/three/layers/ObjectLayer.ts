@@ -53,8 +53,11 @@ export class ObjectLayer {
     this.scene.add(this.root);
   }
 
-  /** Add, update and remove objects to match the list; unchanged sources are kept. */
-  async setObjects(objects: PlacedObject[]) {
+  /**
+   * Add, update and remove objects to match the list; unchanged sources are kept. With `after`, the
+   * objects are placed (and can be shown) at once and their models download once it resolves.
+   */
+  async setObjects(objects: PlacedObject[], after?: Promise<unknown>) {
     const ids = new Set(objects.map((object) => object.id));
     for (const [id, record] of this.records) {
       if (!ids.has(id)) { this.root.remove(record.holder); this.disposeContent(record); this.records.delete(id); }
@@ -77,7 +80,8 @@ export class ObjectLayer {
       const key = sourceKey(data);
       if (key !== record.sourceKey) {
         record.sourceKey = key;
-        loads.push(this.build(record, key));
+        const ready = record;
+        loads.push(after ? after.then(() => this.disposed ? undefined : this.build(ready, key)) : this.build(record, key));
       } else if ((data.animation ?? "") !== record.clip) {
         this.play(record);
       }

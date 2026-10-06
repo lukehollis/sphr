@@ -173,6 +173,8 @@ export class SphrRuntime {
   private spaceBounds: THREE.Box3 | null = null;
   private experienceAudio: ExperienceAudio | null = null;
   private currentNode: NodeData | null = null;
+  /** Lets placed objects' models start downloading (they wait behind a deferred capture mesh). */
+  private releaseObjects?: () => void;
   private cubeRenderTarget: THREE.WebGLCubeRenderTarget | null = null;
   private cubeCamera: THREE.CubeCamera | null = null;
   private cubeScene: THREE.Scene | null = null;
@@ -317,13 +319,16 @@ export class SphrRuntime {
       && Boolean(this.panorama) && initialPoint?.viewMode !== "ORBIT";
     const later = (node: SceneGraphNode) => deferCapture && node.type === "model" && Boolean(node.raycast) && (node.fpvOpacity ?? 1) === 0;
 
+    // Placed objects stay out of sight until the capture mesh arrives, so their models wait for it too.
+    const objectsAfter = deferCapture ? new Promise<void>((resolve) => { this.releaseObjects = resolve; }) : undefined;
+
     await Promise.all([
       this.panorama?.loadInitial(this.currentNode),
       this.skybox?.init(),
       this.splats?.init(),
       this.iiif?.init(),
       this.sceneGraph.init(later),
-      this.setupExperience()
+      this.setupExperience(objectsAfter)
     ]);
     if (this.disposed) { this.sceneGraph.dispose(); return; }
     this.annotations.init();
@@ -360,6 +365,7 @@ export class SphrRuntime {
 
   /** The whole capture, for views that show it (the overview, a stop that looks down on it) and once the first view is in. */
   private async captureLoaded() {
+    this.releaseObjects?.();
     const graph = this.sceneGraph;
     if (!graph || graph.complete !== false) return;
     await graph.loadDeferred();
@@ -1316,7 +1322,8 @@ export class SphrRuntime {
 
   // ---- Placed objects, effects, scavenger hunts and editing ----
 
-  private async setupExperience() {
+  /** @param objectsAfter when given, the objects' models download once it resolves and the first view does not wait for them */
+  private async setupExperience(objectsAfter?: Promise<void>) {
     this.objects = new ObjectLayer(this.scene);
     this.effects = new EffectsLayer({
       scene: this.scene,
@@ -1330,7 +1337,8 @@ export class SphrRuntime {
       viewMode: () => this.state.viewMode,
       audio: () => this.audioHost()
     });
-    await Promise.all([this.objects.setObjects(this.tour.objects), this.effects.setEffects(this.tour.effects)]);
+    const objects = this.objects.setObjects(this.tour.objects, objectsAfter);
+    await Promise.all([objectsAfter ? null : objects, this.effects.setEffects(this.tour.effects)]);
     this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0);
   }
 
