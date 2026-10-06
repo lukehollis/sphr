@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Ray, Vector3 } from 'three';
-import { selectDirectionalTarget, selectNavigationTarget, selectSpotTarget } from '../lib/three/navigation.ts';
+import { freeMoveDirection, selectDirectionalTarget, selectNavigationTarget, selectSpotTarget, standingSpot } from '../lib/three/navigation.ts';
 
 const v = (x, y, z) => new Vector3(x, y, z);
 const current = v(0, 0, 0);
@@ -54,4 +54,35 @@ test('a click on a distant spot goes straight to the scan nearest it when that s
   assert.equal(selectSpotTarget(v(1, 6, -21), false, scans, current, all), 'far', 'a wall click goes to the scan at its foot');
   const many = Array.from({ length: 10 }, (_, i) => candidate(`s${i}`, 0, 0, -10 - i));
   assert.equal(selectSpotTarget(v(0, 0, -10), true, many, current, value => value === 's9'), null, 'only the nearest few are tested');
+});
+
+// Splat spaces walk freely: where a click stands the visitor, and which way held keys go.
+const near = (a, b) => a.distanceTo(b) < 1e-9;
+test('a click on splat ground stands the visitor there at eye height', () => {
+  const spot = standingSpot({ point: v(2, -.4, -3), normal: v(0, 1, 0), direction: v(0, -.3, -1).normalize(), distance: 3 }, .5, () => { throw new Error('ground is known'); });
+  assert.ok(near(spot, v(2, .1, -3)));
+});
+test('a click on a wall stops short of it, standing on the ground below that spot', () => {
+  const direction = v(0, 0, -1);
+  const spot = standingSpot({ point: v(0, 1, -6), normal: v(0, 0, 1), direction, distance: 6 }, .5, (at) => (assert.ok(near(at, v(0, 1, -5.5))), -.4));
+  assert.ok(near(spot, v(0, .1, -5.5)));
+});
+test('a wall spot high above any ground found stays where the line of sight reaches', () => {
+  const spot = standingSpot({ point: v(0, 4, -6), normal: v(0, 0, 1), direction: v(0, 0, -1), distance: 6 }, .5, () => -.4);
+  assert.ok(near(spot, v(0, 4, -5.5)));
+  assert.ok(near(standingSpot({ point: v(0, 1, -.4), normal: v(0, 0, 1), direction: v(0, 0, -1), distance: .4 }, .5, () => null), v(0, 1, -.2)), 'a near wall stops halfway');
+});
+test('held keys walk level along the heading, sideways and up', () => {
+  const look = v(0, -.6, -1).normalize(), up = v(0, 1, 0);
+  assert.ok(near(freeMoveDirection(look, up, { forward: 1, right: 0, up: 0 }), v(0, 0, -1)), 'looking down still walks level');
+  assert.ok(near(freeMoveDirection(look, up, { forward: 0, right: 1, up: 0 }), v(1, 0, 0)));
+  assert.ok(near(freeMoveDirection(look, up, { forward: -1, right: 0, up: 0 }), v(0, 0, 1)));
+  assert.ok(near(freeMoveDirection(look, up, { forward: 0, right: 0, up: 1 }), v(0, 1, 0)));
+  const diagonal = freeMoveDirection(look, up, { forward: 1, right: 1, up: 0 });
+  assert.ok(Math.abs(diagonal.length() - 1) < 1e-9, 'diagonals are no faster');
+  assert.equal(freeMoveDirection(look, up, { forward: 0, right: 0, up: 0 }).length(), 0);
+});
+test('looking straight down, forward is the top of the screen', () => {
+  assert.ok(near(freeMoveDirection(v(0, -1, 0), v(1, 0, 0), { forward: 1, right: 0, up: 0 }), v(1, 0, 0)));
+  assert.ok(near(freeMoveDirection(v(0, 1, 0), v(1, 0, 0), { forward: 1, right: 0, up: 0 }), v(-1, 0, 0)), 'looking up, the top of the screen is behind');
 });

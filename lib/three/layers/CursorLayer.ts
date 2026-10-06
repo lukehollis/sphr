@@ -48,13 +48,29 @@ export class CursorLayer {
     this.normal.applyMatrix3(this.normalMatrix).normalize();
 
     if (floorOnly && Math.abs(this.normal.y) < 0.7) { this.hide(); return; }
-    this.mesh.scale.setScalar(THREE.MathUtils.clamp(hit.distance * 0.35, 0.4, 1));
-    this.targetQuaternion.setFromUnitVectors(this.cursorUp, this.normal).multiply(this.additionalRotation);
-    this.mesh.position.copy(hit.point).addScaledVector(this.normal, 0.01);
-    this.mesh.quaternion.copy(this.targetQuaternion);
+    this.place(hit.point, this.normal, THREE.MathUtils.clamp(hit.distance * 0.35, 0.4, 1), false);
+  }
+
+  /**
+   * A surface found without faces (a splat): the ring keeps the same size on
+   * screen, whatever the capture's scale, and eases into the surface's slope,
+   * which splats only give roughly.
+   */
+  showAt(point: THREE.Vector3, normal: THREE.Vector3, distance: number) {
+    this.normal.copy(normal).normalize();
+    this.place(point, this.normal, distance * 0.5, true);
+  }
+
+  private place(point: THREE.Vector3, normal: THREE.Vector3, scale: number, ease: boolean) {
+    const now = performance.now();
+    this.mesh.scale.setScalar(scale);
+    this.targetQuaternion.setFromUnitVectors(this.cursorUp, normal).multiply(this.additionalRotation);
+    this.mesh.position.copy(point).addScaledVector(normal, 0.01 * Math.min(1, scale));
+    if (ease && this.mesh.visible && now - this.lastHitTime < 250) this.mesh.quaternion.slerp(this.targetQuaternion, 0.35);
+    else this.mesh.quaternion.copy(this.targetQuaternion);
     this.mesh.material.opacity = 1;
     this.mesh.visible = true;
-    this.lastHitTime = performance.now();
+    this.lastHitTime = now;
   }
 
   update(now: number) {

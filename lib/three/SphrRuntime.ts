@@ -33,7 +33,7 @@ import { IiifImageLayer } from "@/lib/three/renderers/IiifImageLayer";
 import { LookPass, lookKey, type LookHost } from "@/lib/three/looks/LookPass";
 import { PanoramaLayer, panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
 import { SparkSplatLayer } from "@/lib/three/renderers/SparkSplatLayer";
-import { selectDirectionalTarget, selectNavigationTarget, selectSpotTarget } from "@/lib/three/navigation";
+import { freeMoveDirection, selectDirectionalTarget, selectNavigationTarget, selectSpotTarget, standingSpot } from "@/lib/three/navigation";
 import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
@@ -55,6 +55,8 @@ type CameraPose = {
 };
 
 type ViewMode = "FPV" | "ORBIT";
+/** A spot on the splats under the pointer, with the slope found around it and the ray that found it. */
+type SplatSurface = { point: THREE.Vector3; normal: THREE.Vector3; direction: THREE.Vector3; distance: number };
 /** How the reconstruction shows: the model, the sky behind it, the photographs it hides and the capture it replaces. */
 type ReconstructionDisplay = { model: number; sky: number; veil: number; capture: number };
 
@@ -71,6 +73,16 @@ const RECONSTRUCTION_DELAY_MS = 1500;
 // With a model in view, the near plane moves out a little for depth precision kilometers away.
 const RECONSTRUCTION_NEAR = 0.1;
 const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
+// Spaces without panorama locations: held keys move the camera, [forward, right, up].
+const MOVE_KEYS: Record<string, [number, number, number]> = {
+  w: [1, 0, 0], ArrowUp: [1, 0, 0], s: [-1, 0, 0], ArrowDown: [-1, 0, 0],
+  a: [0, -1, 0], d: [0, 1, 0], e: [0, 0, 1], q: [0, 0, -1]
+};
+// Walking speed in eye heights a second; Shift runs. A click walks at most WALK_REACH eye heights.
+const WALK_REACH = 8;
+const WALK_SPEED = 1.6;
+const RUN_FACTOR = 3;
+const DOWN = new THREE.Vector3(0, -1, 0);
 
 function isTypingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
@@ -94,6 +106,21 @@ export class SphrRuntime {
   private pointerMoved = false;
   // Held arrow/A/D keys turn the view: +1 left, -1 right.
   private readonly turnKeys = new Map<string, number>();
+  // Spaces without panorama locations: held keys walk the camera, easing in and out.
+  private readonly moveKeys = new Map<string, [number, number, number]>();
+  private readonly moveVelocity = new THREE.Vector3();
+  private running = false;
+  /** How high the view stands over the ground, the measure for walking a splat space. */
+  private eye: number | null = null;
+  /** The ground under the camera when last sampled, so walking follows the slope. */
+  private walkGround: number | null = null;
+  private lastGroundSample = 0;
+  private walkLift = 0;
+  /** The first-person view left for the dollhouse, to come back to. */
+  private freeView: CameraPose | null = null;
+  private readonly surfaceRaycaster = new THREE.Raycaster();
+  /** The latest pointer over a splat space, hit-tested once a frame. */
+  private splatHover: THREE.Vector2 | null = null;
   private lastFrameTime = 0;
   private controls: OrbitControls;
   private audio: AudioController;
@@ -299,6 +326,8 @@ export class SphrRuntime {
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
+    // Splat spaces bucket their splats once open, for the cursor's slope and the ground underfoot.
+    if (this.walksOnSplats()) void this.splats?.prepareSurface();
     // The reconstruction waits until the space is showing, then loads for the dollhouse.
     if (this.reconstruction && !this.reconstruction.busy && !this.reconstruction.ready) {
       this.reconTimer = setTimeout(() => void this.loadReconstruction(), RECONSTRUCTION_DELAY_MS);
@@ -366,6 +395,7 @@ export class SphrRuntime {
     const point = this.entryPoint ?? activeTourPoint(this.tour, spaceIndex, pointIndex);
     if (!point) return;
     if (this.isNavigating && !instant) return;
+    this.freeView = null;
 
     const fromOverview = this.state.viewMode === "ORBIT";
     const outgoingNode = this.currentNode;
@@ -472,11 +502,16 @@ export class SphrRuntime {
   toggleViewMode() {
     if (this.isNavigating) return;
     const newMode = this.state.viewMode === "FPV" ? "ORBIT" : "FPV";
+    // Walking a space freely, the dollhouse returns to where the visitor stood.
+    if (newMode === "ORBIT" && this.walksFreely()) this.freeView = { position: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov };
     this.nav?.beginTransition();
     this.state.viewMode = newMode;
     this.updateControlsForViewMode();
     const point = this.getActivePoint();
-    const pose = this.currentNode ? this.poseForNode(this.currentNode, newMode, point) : this.poseForPoint(point, newMode);
+    const pose = newMode === "FPV" && this.freeView ? this.freeView
+      : newMode === "ORBIT" && this.freeView && this.walksOnSplats() && point?.viewMode !== "ORBIT" ? this.splatOverview()
+      : this.currentNode ? this.poseForNode(this.currentNode, newMode, point) : this.poseForPoint(point, newMode);
+    this.walkGround = null;
     this.nav?.setOrbit(newMode === "ORBIT");
     this.panorama?.setVisible(newMode === "FPV");
     this.sceneGraph?.setViewMode(newMode, this.state.debug);
@@ -794,6 +829,12 @@ export class SphrRuntime {
     const hoveredNode = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     this.nav?.setHovered(hoveredNode && hoveredNode.uuid !== this.currentNode?.uuid ? hoveredNode.uuid : null);
     const targets = this.surfaceTargets();
+    if (!targets.length && this.walksOnSplats()) {
+      // Splat hits are tested once a frame, with the latest pointer.
+      this.splatHover = pointer;
+      this.canvas.style.cursor = this.state.viewMode === "FPV" ? "pointer" : "grab";
+      return;
+    }
     if (!targets.length) { this.canvas.style.cursor = hoveredNode ? "pointer" : ""; return; }
     const canNavigate = Boolean(hoveredNode || this.findPanoramaNavigationNode());
     this.canvas.style.cursor = canNavigate ? "pointer" : "grab";
@@ -846,6 +887,7 @@ export class SphrRuntime {
       return;
     }
 
+    if (this.walkToSplat(pointer)) return;
     this.handleMeshFloorNavigation();
   };
 
@@ -855,11 +897,14 @@ export class SphrRuntime {
     event.preventDefault();
 
     const rect = this.canvas.getBoundingClientRect();
-    this.raycaster.setFromCamera(new THREE.Vector2(
+    const pointer = new THREE.Vector2(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1
-    ), this.camera);
+    );
+    this.raycaster.setFromCamera(pointer, this.camera);
     const hit = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
+    // A splat space steps down into the capture where it was double-clicked.
+    if (!hit && !this.nav && this.walksOnSplats() && this.enterSplatAt(pointer)) return;
     let node = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     // Markers behind the visible surface must not select a different room or floor.
     if (node && hit && this.nav && this.camera.position.distanceTo(this.nav.getWorldFloorPosition(node)) > hit.distance + 0.2) node = null;
@@ -888,6 +933,17 @@ export class SphrRuntime {
     if (this.editing && event.key === "Escape" && !isTypingTarget(event.target)) { this.selectObject(null); return; }
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    this.running = event.shiftKey;
+    if (this.walksFreely()) {
+      // Without panorama locations, WASD walks, Q and E sink and rise, and the side arrows turn.
+      const move = MOVE_KEYS[key];
+      const turn = key === "ArrowLeft" ? 1 : key === "ArrowRight" ? -1 : 0;
+      if ((!move && !turn) || !this.state.loading.ready) return;
+      event.preventDefault();
+      if (move) this.moveKeys.set(key, move);
+      else this.turnKeys.set(key, turn);
+      return;
+    }
     const step = key === "ArrowUp" || key === "w" ? 1 : key === "ArrowDown" || key === "s" ? -1 : 0;
     const turn = key === "ArrowLeft" || key === "a" ? 1 : key === "ArrowRight" || key === "d" ? -1 : 0;
     if ((!step && !turn) || this.state.viewMode !== "FPV" || !this.state.loading.ready) return;
@@ -898,10 +954,13 @@ export class SphrRuntime {
   };
 
   private handleKeyUp = (event: KeyboardEvent) => {
-    this.turnKeys.delete(event.key.length === 1 ? event.key.toLowerCase() : event.key);
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    this.running = event.shiftKey;
+    this.turnKeys.delete(key);
+    this.moveKeys.delete(key);
   };
 
-  private handleWindowBlur = () => this.turnKeys.clear();
+  private handleWindowBlur = () => { this.turnKeys.clear(); this.moveKeys.clear(); this.running = false; };
 
   /** Up/W walks to the reachable scan ahead, Down/S to the one behind, keeping the heading. */
   private async stepInDirection(direction: number) {
@@ -920,6 +979,194 @@ export class SphrRuntime {
   private turnView(radians: number) {
     const look = this.controls.target.clone().sub(this.camera.position).applyAxisAngle(WORLD_UP, radians);
     this.controls.target.copy(this.camera.position).add(look);
+  }
+
+  /** Above the space, the side arrows swing the camera around what it looks at. */
+  private orbitView(radians: number) {
+    const offset = this.camera.position.clone().sub(this.controls.target).applyAxisAngle(WORLD_UP, radians);
+    this.camera.position.copy(this.controls.target).add(offset);
+  }
+
+  /** Spaces without panorama locations (splats, models): the camera walks and flies freely. */
+  private walksFreely() {
+    if (this.getNodes().length || this.bootstrap.space.space_data.clickNavigation?.enabled === false) return false;
+    return Boolean(this.splats || this.sceneGraph?.getRaycastObjects().length);
+  }
+
+  /** Free spaces whose surface is the splats themselves, with no mesh to hit. */
+  private walksOnSplats() {
+    return this.walksFreely() && Boolean(this.splats?.getMeshes().length) && !this.surfaceTargets().length;
+  }
+
+  /**
+   * The splat surface under a screen point: the nearest splat the ray meets,
+   * moved onto the plane the splats around it lie on, and that plane's normal.
+   * Until those are bucketed (just after loading) the surface faces the camera.
+   */
+  private splatSurface(pointer: THREE.Vector2): SplatSurface | null {
+    const meshes = this.splats?.getMeshes() ?? [];
+    if (!meshes.length) return null;
+    const ray = this.surfaceRaycaster;
+    ray.setFromCamera(pointer, this.camera);
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (!hit) return null;
+    const direction = ray.ray.direction.clone();
+    const surface = { point: hit.point.clone(), normal: direction.clone().negate(), direction, distance: hit.distance };
+    const local = this.splats?.surfaceAt(hit.point);
+    if (!local) return surface;
+    surface.normal.copy(local.normal);
+    if (surface.normal.dot(direction) > 0) surface.normal.negate();
+    // Big splats stop a ray a little short; meet the plane instead when it is close by.
+    const along = local.center.clone().sub(ray.ray.origin).dot(surface.normal) / direction.dot(surface.normal);
+    if (Number.isFinite(along) && along > 0 && Math.abs(along - hit.distance) < this.eyeHeight() * 0.5) {
+      surface.distance = along;
+      surface.point.copy(ray.ray.origin).addScaledVector(direction, along);
+    }
+    return surface;
+  }
+
+  /** The height of the splat ground under a point, or null with nothing within reach. */
+  private groundBelow(position: THREE.Vector3, reach: number) {
+    const meshes = this.splats?.getMeshes() ?? [];
+    if (!meshes.length) return null;
+    const ground = this.splats!.groundBelow(position, reach);
+    if (ground !== null) return ground;
+    // Until the splats are bucketed, a ray down; it meets only the splats Spark picked for rays.
+    if (!this.splats!.raycastReady()) return null;
+    const ray = this.surfaceRaycaster;
+    ray.set(position, DOWN);
+    ray.far = reach;
+    const hit = ray.intersectObjects(meshes, false)[0];
+    ray.far = Infinity;
+    return hit ? hit.point.y : null;
+  }
+
+  /**
+   * How high the view stands over the ground: in a splat space (at whatever
+   * scale) measured under the camera in first person once its splats are
+   * bucketed, else the configured click height or a share of the space's size.
+   */
+  private eyeHeight() {
+    if (this.eye) return this.eye;
+    const size = this.getSpaceBounds().getSize(new THREE.Vector3()).length();
+    const configured = this.bootstrap.space.space_data.clickNavigation?.yOffset;
+    const fallback = configured ?? (size > 0 ? size * 0.04 : 1.6);
+    if (configured || !this.splats || this.state.viewMode !== "FPV") return fallback;
+    const ground = this.groundBelow(this.camera.position, size || 10);
+    const measured = ground === null ? 0 : this.camera.position.y - ground;
+    if (!(measured > size * 0.005 && measured < size * 0.25)) return fallback;
+    // Only the bucketed splats measure it well enough to keep.
+    if (this.splats.surfaceReady()) this.eye = measured;
+    return measured;
+  }
+
+  private hoverSplat(pointer: THREE.Vector2) {
+    if (this.isNavigating || this.activePointerId !== null) return;
+    const surface = this.splatSurface(pointer);
+    if (surface) this.cursor?.showAt(surface.point, surface.normal, surface.distance);
+    else this.cursor?.hide();
+  }
+
+  /** Where a visitor stands to reach a spot on the splats. */
+  private splatStandingSpot(surface: SplatSurface) {
+    const eye = this.eyeHeight();
+    return standingSpot(surface, eye, (spot) => this.groundBelow(spot.clone().addScaledVector(WORLD_UP, eye * 0.5), eye * 4));
+  }
+
+  /**
+   * Above a splat space walked in first person: looking down on where the
+   * visitor stood from a few eye heights up, inside the capture's own sky.
+   */
+  private splatOverview(): CameraPose {
+    const eye = this.eyeHeight();
+    const target = this.camera.position.clone().addScaledVector(WORLD_UP, -eye);
+    const heading = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
+    if (heading.lengthSq() < 1e-6) heading.set(0, 0, -1);
+    // Captures from 360 photos keep their sky close around them, so the view stays low.
+    const direction = heading.normalize().setY(-1).normalize();
+    return { position: target.clone().addScaledVector(direction, -eye * 3.5), target, fov: 70 };
+  }
+
+  /** In first person, a click on the splats walks there, keeping the heading. */
+  private walkToSplat(pointer: THREE.Vector2) {
+    if (!this.walksOnSplats()) return false;
+    const surface = this.splatSurface(pointer);
+    if (!surface) return false;
+    const eye = this.eyeHeight();
+    const position = this.splatStandingSpot(surface);
+    const travel = position.clone().sub(this.camera.position);
+    // A spot far off walks toward it: away from where it was taken, a capture thins out.
+    if (travel.length() > eye * WALK_REACH) {
+      position.copy(this.camera.position).addScaledVector(travel.normalize(), eye * WALK_REACH);
+      const ground = this.groundBelow(position.clone().addScaledVector(WORLD_UP, eye * 2), eye * 6);
+      if (ground !== null) position.y = ground + eye;
+    }
+    const distance = position.distanceTo(this.camera.position);
+    if (distance < eye * 0.1) return true;
+    this.cursor?.showAt(surface.point, surface.normal, surface.distance);
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    this.walkGround = null;
+    this.moveVelocity.set(0, 0, 0);
+    this.flyTo({ position, target: position.clone().addScaledVector(direction, 0.1), fov: this.camera.fov },
+      false, undefined, undefined, THREE.MathUtils.clamp(500 + (220 * distance) / eye, 700, 2200));
+    return true;
+  }
+
+  /** From the dollhouse, a double click on the splats steps down into the capture there. */
+  private enterSplatAt(pointer: THREE.Vector2) {
+    const surface = this.splatSurface(pointer);
+    if (!surface) return false;
+    const position = this.splatStandingSpot(surface);
+    // Facing on across the space the way the dollhouse looked, a little down.
+    const heading = surface.direction.clone().setY(0);
+    if (heading.lengthSq() < 1e-6) heading.set(0, 1, 0).applyQuaternion(this.camera.quaternion).setY(0);
+    heading.normalize().setY(-0.2).normalize();
+    const fov = this.freeView?.fov ?? this.poseForPoint(this.getActivePoint(), "FPV").fov;
+    this.state.viewMode = "FPV";
+    this.updateControlsForViewMode();
+    this.sceneGraph?.setViewMode("FPV", this.state.debug);
+    this.walkGround = null;
+    this.freeView = null;
+    this.flyFromOverview({ position, target: position.clone().addScaledVector(heading, 0.1), fov });
+    this.emitState();
+    return true;
+  }
+
+  /**
+   * Held keys move the camera and what it looks at together, easing in and out.
+   * In first person the walk keeps level and follows the ground's rise and fall;
+   * above the space it glides at a pace set by how far away the camera looks.
+   */
+  private moveFreely(elapsed: number, now: number) {
+    if (!this.moveKeys.size && this.moveVelocity.lengthSq() === 0) return;
+    if (this.cameraTween || this.isNavigating || !this.controls.enabled || !this.state.loading.ready) {
+      this.moveVelocity.set(0, 0, 0);
+      return;
+    }
+    const input = { forward: 0, right: 0, up: 0 };
+    for (const [forward, right, up] of this.moveKeys.values()) { input.forward += forward; input.right += right; input.up += up; }
+    const orbit = this.state.viewMode === "ORBIT";
+    const speed = (orbit ? this.camera.position.distanceTo(this.controls.target) * 0.8 : this.eyeHeight() * WALK_SPEED) * (this.running ? RUN_FACTOR : 1);
+    const look = this.camera.getWorldDirection(new THREE.Vector3());
+    const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const wanted = freeMoveDirection(look, screenUp, input).multiplyScalar(speed);
+    this.moveVelocity.lerp(wanted, 1 - Math.exp(-elapsed * 9));
+    if (!this.moveKeys.size && this.moveVelocity.length() < speed * 0.01) { this.moveVelocity.set(0, 0, 0); return; }
+    const step = this.moveVelocity.clone().multiplyScalar(elapsed);
+    if (!orbit && this.splats && now - this.lastGroundSample > 100 && Math.hypot(step.x, step.z) > 0) {
+      // Follow the change in the ground below, not its height, so rising with E sticks.
+      this.lastGroundSample = now;
+      const eye = this.eyeHeight();
+      const ground = this.groundBelow(this.camera.position.clone().addScaledVector(WORLD_UP, eye * 0.5), eye * 4.5);
+      if (ground !== null && this.walkGround !== null && Math.abs(ground - this.walkGround) < eye * 0.75) this.walkLift += ground - this.walkGround;
+      this.walkGround = ground;
+    }
+    const lift = this.walkLift * (1 - Math.exp(-elapsed * 8));
+    this.walkLift -= lift;
+    step.y += lift;
+    this.camera.position.add(step);
+    this.controls.target.add(step);
+    this.cursor?.hide();
   }
 
   navigateNode(uuid: string) {
@@ -1515,6 +1762,8 @@ export class SphrRuntime {
       this.lastFrameTime = now;
       const turn = Math.sign([...this.turnKeys.values()].reduce((sum, value) => sum + value, 0));
       if (turn && !this.cameraTween && this.controls.enabled && this.state.viewMode === "FPV") this.turnView(turn * KEY_TURN_SPEED * elapsed);
+      else if (turn && !this.cameraTween && this.controls.enabled && this.walksFreely()) this.orbitView(turn * KEY_TURN_SPEED * elapsed);
+      this.moveFreely(elapsed, now);
       this.tweens = this.tweens.filter((tween) => tween.update(now));
       if (this.cameraTween && !this.cameraTween.update(now)) this.cameraTween = null;
       if (this.transitionMeshTween && !this.transitionMeshTween.update(now)) this.transitionMeshTween = null;
@@ -1533,6 +1782,7 @@ export class SphrRuntime {
       this.splats?.update();
       this.updateEarth(now);
       this.updateNearPlane();
+      if (this.splatHover) { this.hoverSplat(this.splatHover); this.splatHover = null; }
       this.cursor?.update(now);
       if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
       else this.renderScene();
@@ -1653,7 +1903,8 @@ export class SphrRuntime {
     });
   }
 
-  private flyTo(pose: CameraPose, instant = false, onComplete?: () => void, onUpdate?: (progress: number) => void) {
+  private flyTo(pose: CameraPose, instant = false, onComplete?: () => void, onUpdate?: (progress: number) => void,
+    duration = this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100) {
     if (instant) {
       this.cameraTween?.cancel();
       this.cameraTween = null;
@@ -1667,7 +1918,7 @@ export class SphrRuntime {
     const fromFov = this.camera.fov;
     this.cameraTween?.cancel();
     this.cameraTween = createTween({
-      duration: this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100,
+      duration,
       onUpdate: (value) => {
         this.camera.position.lerpVectors(fromPosition, pose.position, value);
         this.controls.target.lerpVectors(fromTarget, pose.target, value);
@@ -2048,7 +2299,8 @@ export class SphrRuntime {
     this.controls.enableZoom = orbit;
     this.controls.rotateSpeed = orbit ? 0.4 : -0.32;
     this.controls.zoomSpeed = 0.8;
-    this.controls.minDistance = orbit ? 1 : 0.1;
+    // Splats come at any scale; above one the camera can come in to half an eye height.
+    this.controls.minDistance = orbit ? (this.walksOnSplats() ? Math.min(1, this.eyeHeight() * 0.5) : 1) : 0.1;
     // Large metric captures need portrait framing distances beyond 150 meters.
     // Let the bounds-based camera pose fit the entire survey without clamping it.
     this.controls.maxDistance = orbit ? Infinity : 0.1;

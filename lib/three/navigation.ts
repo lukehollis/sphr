@@ -94,3 +94,36 @@ export function selectSpotTarget<T>(
   for (const candidate of ranked.slice(0, maxChecks)) if (reachable(candidate.value)) return candidate.value;
   return null;
 }
+
+/**
+ * Where to stand to reach a spot on a capture without marked floors (a splat).
+ * Ground (a surface facing up) is stood on at eye height. Anything else is
+ * approached along the line of sight, stopping short of it, and stood on the
+ * ground below that point when `groundAt` finds some near enough.
+ */
+export function standingSpot(
+  surface: { point: THREE.Vector3; normal: THREE.Vector3; direction: THREE.Vector3; distance: number },
+  eye: number,
+  groundAt: (spot: THREE.Vector3) => number | null
+) {
+  if (surface.normal.y > 0.7) return surface.point.clone().addScaledVector(new THREE.Vector3(0, 1, 0), eye);
+  const spot = surface.point.clone().addScaledVector(surface.direction, -Math.min(eye, surface.distance * 0.5));
+  const ground = groundAt(spot);
+  if (ground !== null && spot.y - ground < eye * 3) spot.y = ground + eye;
+  return spot;
+}
+
+/**
+ * Which way held keys move the camera, as a unit vector: forward and back
+ * level along the heading, sideways, and straight up or down. Looking
+ * straight down, the top of the screen is ahead.
+ */
+export function freeMoveDirection(look: THREE.Vector3, screenUp: THREE.Vector3, input: { forward: number; right: number; up: number }) {
+  const forward = new THREE.Vector3(look.x, 0, look.z);
+  if (forward.lengthSq() < 1e-6) forward.set(screenUp.x, 0, screenUp.z).multiplyScalar(Math.sign(-look.y) || 1);
+  if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+  forward.normalize();
+  const right = new THREE.Vector3(-forward.z, 0, forward.x);
+  const move = forward.multiplyScalar(input.forward).addScaledVector(right, input.right).add(new THREE.Vector3(0, input.up, 0));
+  return move.lengthSq() > 1 ? move.normalize() : move;
+}

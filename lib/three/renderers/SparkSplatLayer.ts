@@ -35,6 +35,9 @@ export class SparkSplatLayer {
   private bounds: THREE.Box3 | null = null;
   private centers: THREE.Vector3[] | null = null;
   private regenerate = false;
+  /** Splat centers bucketed in cells, to find the slope of the surface near a point. */
+  private surface: { cell: number; points: Float32Array; count: number; cells: Map<number, number[]> } | null = null;
+  private surfaceBuild: Promise<void> | null = null;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -243,6 +246,15 @@ export class SparkSplatLayer {
     this.splats.forEach((mesh) => mesh.updateVersion());
   }
 
+  surfaceReady() {
+    return Boolean(this.surface);
+  }
+
+  /** Whether ray tests meet the splats as seen: with levels of detail, Spark picks their set a moment after the first frames. */
+  raycastReady() {
+    return this.splats.some((mesh) => this.roles.get(mesh) === "color" && (mesh.raycastIndices || !mesh.context?.enableLod?.value));
+  }
+
   getMeshes(): THREE.Object3D[] {
     return this.splats.filter((mesh) => this.roles.get(mesh) === "color");
   }
@@ -419,6 +431,107 @@ export class SparkSplatLayer {
     return points;
   }
 
+  /**
+   * Bucket the capture's splat centers in cells a thirty-second of its core
+   * wide, skipping faint splats and ones larger than a cell (level-of-detail
+   * stand-ins, distant sky), a slice at a time so the view keeps moving.
+   */
+  prepareSurface() {
+    if (this.surfaceBuild || !this.unpack) return this.surfaceBuild;
+    const unpack = this.unpack;
+    const core = this.coreSphere();
+    if (!core) return null;
+    const cell = core.radius / 32;
+    this.surfaceBuild = (async () => {
+      const limit = 600_000;
+      const points = new Float32Array(limit * 3);
+      const cells = new Map<number, number[]>();
+      const point = new THREE.Vector3();
+      let count = 0;
+      for (const mesh of this.splats) {
+        if (this.roles.get(mesh) !== "color") continue;
+        const packed = mesh.packedSplats?.packedArray && mesh.packedSplats.getNumSplats() ? mesh.packedSplats : mesh.packedSplats?.lodSplats;
+        const array = packed?.packedArray;
+        const total = packed?.getNumSplats() ?? 0;
+        if (!array || !total) continue;
+        mesh.updateMatrixWorld(true);
+        const scale = mesh.matrixWorld.getMaxScaleOnAxis();
+        const step = Math.max(1, Math.ceil(total / limit));
+        for (let index = 0; index < total && count < limit; index += step) {
+          if (index % (step * 40_000) === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            if (this.disposed) return;
+          }
+          const splat = unpack(array, index, packed!.splatEncoding);
+          if (splat.opacity < 0.2 || Math.max(splat.scales.x, splat.scales.y, splat.scales.z) * scale > cell) continue;
+          point.copy(splat.center).applyMatrix4(mesh.matrixWorld);
+          points[count * 3] = point.x; points[count * 3 + 1] = point.y; points[count * 3 + 2] = point.z;
+          const key = cellKey(point, cell);
+          const bucket = cells.get(key);
+          if (bucket) bucket.push(count); else cells.set(key, [count]);
+          count++;
+        }
+      }
+      this.surface = { cell, points, count, cells };
+    })();
+    return this.surfaceBuild;
+  }
+
+  /**
+   * The surface near a point, from the splat centers within a cell of it: the
+   * plane they best lie on (its normal is the direction they spread least)
+   * and their middle. Null until the cells are built or with too few splats.
+   */
+  surfaceAt(point: THREE.Vector3) {
+    const surface = this.surface;
+    if (!surface) return null;
+    const { cell, points, cells } = surface;
+    const radius = cell * cell;
+    const probe = new THREE.Vector3();
+    let n = 0, sx = 0, sy = 0, sz = 0, xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      probe.set(point.x + dx * cell, point.y + dy * cell, point.z + dz * cell);
+      for (const index of cells.get(cellKey(probe, cell)) ?? []) {
+        const x = points[index * 3] - point.x, y = points[index * 3 + 1] - point.y, z = points[index * 3 + 2] - point.z;
+        if (x * x + y * y + z * z > radius) continue;
+        n++; sx += x; sy += y; sz += z;
+        xx += x * x; xy += x * y; xz += x * z; yy += y * y; yz += y * z; zz += z * z;
+      }
+    }
+    if (n < 8) return null;
+    const mx = sx / n, my = sy / n, mz = sz / n;
+    const normal = smallestEigenvector(xx / n - mx * mx, xy / n - mx * my, xz / n - mx * mz, yy / n - my * my, yz / n - my * mz, zz / n - mz * mz);
+    return normal ? { normal, center: new THREE.Vector3(mx, my, mz).add(point), count: n } : null;
+  }
+
+  /**
+   * The ground under a point: of the splats in a column a cell wide below it
+   * (as far down as `reach`), the densest layer, which is the ground's surface
+   * rather than a stray splat or a bush over it. Null until the cells are built.
+   */
+  groundBelow(point: THREE.Vector3, reach: number) {
+    const surface = this.surface;
+    if (!surface) return null;
+    const { cell, points, cells } = surface;
+    const layers = new Map<number, { count: number; sum: number }>();
+    const probe = new THREE.Vector3();
+    for (let row = Math.floor(point.y / cell); row >= Math.floor((point.y - reach) / cell); row--) {
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        probe.set(point.x + dx * cell, (row + 0.5) * cell, point.z + dz * cell);
+        for (const index of cells.get(cellKey(probe, cell)) ?? []) {
+          const x = points[index * 3] - point.x, y = points[index * 3 + 1], z = points[index * 3 + 2] - point.z;
+          if (x * x + z * z > cell * cell || y > point.y || y < point.y - reach) continue;
+          const layer = Math.floor((y * 2) / cell);
+          const entry = layers.get(layer);
+          if (entry) { entry.count++; entry.sum += y; } else layers.set(layer, { count: 1, sum: y });
+        }
+      }
+    }
+    let best: { count: number; sum: number } | null = null;
+    for (const entry of layers.values()) if (!best || entry.count > best.count) best = entry;
+    return best && best.count >= 6 ? best.sum / best.count : null;
+  }
+
   getBounds(out: THREE.Box3) {
     if (this.bounds) return out.copy(this.bounds);
     out.makeEmpty();
@@ -486,4 +599,29 @@ export class SparkSplatLayer {
       this.spark = null;
     }
   }
+}
+
+function cellKey(point: THREE.Vector3, cell: number) {
+  return Math.imul(Math.floor(point.x / cell), 73856093) ^ Math.imul(Math.floor(point.y / cell), 19349663) ^ Math.imul(Math.floor(point.z / cell), 83492791);
+}
+
+/** The eigenvector of a symmetric 3x3 matrix with the smallest eigenvalue, or null when it has no clear one. */
+function smallestEigenvector(a: number, b: number, c: number, d: number, e: number, f: number) {
+  // [[a b c] [b d e] [c e f]]: eigenvalues by the trigonometric method.
+  const q = (a + d + f) / 3;
+  const p1 = b * b + c * c + e * e;
+  const p = Math.sqrt(((a - q) ** 2 + (d - q) ** 2 + (f - q) ** 2 + 2 * p1) / 6);
+  if (!(p > 1e-12)) return null;
+  const [ba, bd, bf, bb, bc, be] = [(a - q) / p, (d - q) / p, (f - q) / p, b / p, c / p, e / p];
+  const det = ba * (bd * bf - be * be) - bb * (bb * bf - be * bc) + bc * (bb * be - bd * bc);
+  const phi = Math.acos(Math.min(1, Math.max(-1, det / 2))) / 3;
+  const smallest = q + 2 * p * Math.cos(phi + (2 * Math.PI) / 3);
+  // The rows of (A - λI) span the plane the eigenvector is normal to.
+  const rows = [new THREE.Vector3(a - smallest, b, c), new THREE.Vector3(b, d - smallest, e), new THREE.Vector3(c, e, f - smallest)];
+  let best: THREE.Vector3 | null = null;
+  for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) {
+    const candidate = new THREE.Vector3().crossVectors(rows[i], rows[j]);
+    if (!best || candidate.lengthSq() > best.lengthSq()) best = candidate;
+  }
+  return best && best.lengthSq() > 1e-24 ? best.normalize() : null;
 }

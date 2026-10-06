@@ -64,6 +64,9 @@ Other viewer controls use accessible icon buttons. Show mute only
 when audio is configured; never expose the debug markers button in the viewer. Single-click a
 floor marker or nearby floor in first person to move to a reachable scan. Double-click dollhouse surfaces/markers to enter a scan;
 double-click empty background to return to the current scan.
+Splat spaces without panoramas walk freely: the ring cursor lies on the splat surface, a
+click walks there (stood at the measured eye height), WASD walk with Q/E to sink and rise,
+Shift to run and the side arrows to turn, and double-clicking from the dollhouse steps in.
 
 Check real asset integrity and source alignment, then inspect actual browser behavior.
 When host browser tools are provided, follow their interaction policy; standalone
