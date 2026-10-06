@@ -49,6 +49,7 @@ export class SceneGraphLayer {
 
   private deferred: SceneGraphNode[] = [];
   private deferredLoad: Promise<void> | null = null;
+  private readonly laterLoads = new Map<SceneGraphNode, Promise<void>>();
   private disposed = false;
 
   /**
@@ -77,27 +78,53 @@ export class SceneGraphLayer {
     this.applyVisibility();
   }
 
-  /** Every model is in: nothing was left for later, or it has arrived (or failed to). */
+  /** The capture is in: no capture mesh was left for later, or it has arrived (or failed to). */
   get complete() {
-    return !this.deferred.length;
+    return !this.deferred.some((node) => node.raycast);
+  }
+
+  /** The models left for later that hold any of these ids. */
+  private deferredFor(ids: string[]) {
+    const wanted = new Set(ids);
+    const holds = (node: SceneGraphNode): boolean => wanted.has(node.id) || (node.children ?? []).some(holds);
+    return ids.length ? this.deferred.filter(holds) : [];
   }
 
   /** Whether any of these models was left for later and is not in yet. */
   waitsFor(ids: string[]) {
-    if (!this.deferred.length || !ids.length) return false;
-    const wanted = new Set(ids);
-    const holds = (node: SceneGraphNode): boolean => wanted.has(node.id) || (node.children ?? []).some(holds);
-    return this.deferred.some(holds);
+    return this.deferredFor(ids).length > 0;
   }
 
-  /** Loads what init left for later, once. */
+  /** One model left for later, loaded once. */
+  private loadLater(node: SceneGraphNode) {
+    let load = this.laterLoads.get(node);
+    if (!load) {
+      load = this.buildNode(node, this.root).catch((error) => console.warn(`Unable to load ${node.id}`, error)).then(() => {
+        this.deferred = this.deferred.filter((item) => item !== node);
+        if (!this.disposed) this.applyVisibility();
+      });
+      this.laterLoads.set(node, load);
+    }
+    return load;
+  }
+
+  /**
+   * Loads what init left for later: the capture meshes, then the models only later stops show, so
+   * those do not slow the capture down. Resolves once the capture is in.
+   */
   loadDeferred() {
-    this.deferredLoad ??= Promise.all(this.deferred.map((node) => this.buildNode(node, this.root)
-      .catch((error) => console.warn(`Unable to load ${node.id}`, error)))).then(() => {
-      this.deferred = [];
-      if (!this.disposed) this.applyVisibility();
-    });
+    if (!this.deferredLoad) {
+      const capture = this.deferred.filter((node) => node.raycast);
+      const rest = this.deferred.filter((node) => !node.raycast);
+      this.deferredLoad = Promise.all(capture.map((node) => this.loadLater(node))).then(() => {});
+      void this.deferredLoad.then(() => Promise.all(rest.map((node) => this.loadLater(node))));
+    }
     return this.deferredLoad;
+  }
+
+  /** Resolves once these models are in, loading any left for later now. */
+  async whenLoaded(ids: string[]) {
+    await Promise.all(this.deferredFor(ids).map((node) => this.loadLater(node)));
   }
 
   showOnly(ids: string[] = []) {

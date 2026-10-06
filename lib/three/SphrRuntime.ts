@@ -372,8 +372,10 @@ export class SphrRuntime {
   private async captureLoaded() {
     this.releaseObjects?.();
     const graph = this.sceneGraph;
+    // Starts whatever was left for later; models only later stops show follow the capture.
+    const capture = graph?.loadDeferred?.();
     if (!graph || graph.complete !== false) return;
-    await graph.loadDeferred();
+    await capture;
     if (this.disposed || this.sceneGraph !== graph) return;
     this.nav?.setOccluders(graph.getRaycastObjects());
     if (this.objects) this.objects.root.visible = true;
@@ -449,12 +451,16 @@ export class SphrRuntime {
     const nodeChanged = Boolean(node && node.uuid !== outgoingNode?.uuid);
     const heading = this.camera.getWorldDirection(new THREE.Vector3());
     const prepareReconstruction = Boolean(this.tourShowsStops() && point.reconstruction === true && this.reconstruction && !this.reconstruction.ready);
-    if (nodeChanged || (fromOverview && !instant) || prepareReconstruction) {
+    // A model only this stop shows (left for after the first view) may still be on its way.
+    const stopModels = this.stopModels(point);
+    const prepareModels = Boolean(this.sceneGraph?.waitsFor?.(stopModels));
+    const busy = prepareReconstruction || prepareModels;
+    if (nodeChanged || (fromOverview && !instant) || busy) {
       this.isNavigating = true;
       this.state.navigating = true;
       this.controls.enabled = false;
       this.state.navigationError = undefined;
-      if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: true };
+      if (busy) this.state.loading = { ...this.state.loading, busy: true };
       this.emitState();
       // An overview's camera may be kilometers from the capture. Keep the outgoing
       // photograph and caption until the reconstruction can fill that view.
@@ -462,12 +468,13 @@ export class SphrRuntime {
         await Promise.all([
           nodeChanged ? this.panorama?.prepareQuick(node!, 600, 25000) : undefined,
           prepareReconstruction ? this.loadReconstruction() : undefined,
-          point.viewMode === "ORBIT" || this.sceneGraph?.waitsFor?.(this.stopModels(point)) ? this.captureLoaded() : undefined
+          point.viewMode === "ORBIT" ? this.captureLoaded() : undefined,
+          prepareModels ? this.sceneGraph?.whenLoaded(stopModels) : undefined
         ]);
         if (prepareReconstruction && !this.reconstruction?.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
       }
       catch (error) {
-        if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: false };
+        if (busy) this.state.loading = { ...this.state.loading, busy: false };
         this.endNavigationTransition();
         this.state.navigationError = error instanceof Error ? error.message : "Unable to load this location";
         this.emitState();
@@ -475,7 +482,7 @@ export class SphrRuntime {
         return;
       }
       if (this.disposed) return;
-      if (prepareReconstruction) this.state.loading = { ...this.state.loading, busy: false };
+      if (busy) this.state.loading = { ...this.state.loading, busy: false };
     }
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
     // In a guided tour the reconstruction shows only at stops that ask for it, so the
