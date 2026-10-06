@@ -94,5 +94,5 @@ ordinary panorama movement and mobile layout. Repeat checks when changes warrant
 
 Record source filename/hash/bytes, URL, scan/face counts and resolution, actual triangles,
 atlas coverage, photo/mesh metrics, floor range, graph components, exact executed checks,
-observed scenarios and limits. Save a concise capture report under `docs/` and retain the
+observed scenarios and limits. Save the capture report in ignored local/external records and retain the
 machine JSON beside assets. Partial visual review must not be labeled exhaustive.

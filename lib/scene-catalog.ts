@@ -49,6 +49,11 @@ export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
   return (await readSourceScenes()).map(scene => tourNamedListing(editedListing(scene, edits.get(scene.sceneId)), tours.get(scene.sceneId)));
 });
 
+export const readAllScenes = cache(async (): Promise<SceneListing[]> => {
+  const edits = readSceneEdits();
+  return (await readSourceScenes()).map(scene => editedListing(scene, edits.get(scene.sceneId)));
+});
+
 export const readSceneCatalog = cache(async (): Promise<SceneListing[]> => {
   const scenes = await readAllScenes();
   if (await isAdmin()) return scenes;

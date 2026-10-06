@@ -1,6 +1,5 @@
 #!/bin/sh
-# Certbot deploy hook: reload only for this application's renewed certificate.
+# Certbot deploy hook: validate and reload Nginx after certificate renewal.
 set -eu
-[ "${RENEWED_LINEAGE:-}" = /etc/letsencrypt/live/app.mused.com ] || exit 0
 /usr/sbin/nginx -t
 systemctl reload nginx

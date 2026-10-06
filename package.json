@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "convert:legacy-splat": "node scripts/convert-legacy-splat.mjs",
     "import:matterport": "node scripts/matterport/import.mjs",
+    "import:matterport-web": "node scripts/matterport/import-web.mjs",
     "test:matterport": "node scripts/matterport/test.mjs",
     "scenes:index": "python3 scripts/matterport/catalog.py",
     "scenes:publish": "python3 scripts/matterport/publish.py",

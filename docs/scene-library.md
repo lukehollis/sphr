@@ -27,10 +27,10 @@ Cards show only a linked thumbnail and title. Share the canonical scene URL from
 the browser address bar. Individual
 spaces load directly into free exploration or their authored tour without an intro screen.
 
-On app.mused.com, imported spaces start private. Sign in at `/admin` to preview them
+When `SPHR_ACCESS_CONTROL=1`, imported spaces start private. Sign in at `/admin` to preview them
 and set Visibility to Public when ready. Anonymous visitors see only public cards;
 private viewer URLs require admin sign-in. The files and catalog in the public GCS
-bucket remain accessible directly. See [admin and website visibility](mused-hosting.md#admin-and-website-visibility)
+bucket remain accessible directly. See [admin and website visibility](hosting.md#admin-and-website-visibility)
 for deployment, account storage, and backups.
 
 Use a unique storage `--slug` per scene. Reimporting that same storage slug preserves its
@@ -57,8 +57,8 @@ their new public files. Updates to existing scene metadata are visible on the ne
 
 ## Public hosting
 
-For the current Mused deployment (GCP app VM plus GCP static assets), use
-[Mused hosting](mused-hosting.md). The app supports a remote catalog and the
+For a Node application host with static assets on GCS or a CDN, use
+[hosting](hosting.md). The app supports a remote catalog and the
 `npm run scenes:publish` command uploads validated packages without an app redeploy.
 
 Local links work on the computer running SPHR. Internet sharing requires deploying the

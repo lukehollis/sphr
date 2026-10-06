@@ -50,11 +50,11 @@ pages outside the viewer, secondary buttons carry a 1px ink outline as on the ho
 Keep keyboard focus outlines and active indicators (blue in the viewer, ink on pages),
 and preserve control dimensions.
 
-The collection has no visible heading, counts, or instructions. Its compact footer
-contains the current-year copyright linked to mused.com and Login / Sign up links
-to Mused's existing account pages. Keep it in normal collection flow and at the
-bottom of short/empty collections, with a section rule and muted text. Full-screen
-viewers retain their existing controls without a collection footer. Keep the
+The collection has no visible heading, counts, instructions or operator branding.
+When access control is enabled, its compact footer links to the local `/admin` login.
+Without access control there is no footer. Do not hard-code a deployment's copyright,
+account services or external signup links in the open-source UI. Full-screen viewers
+retain their existing controls without a collection footer. Keep the
 search/sort controls and photographic cards. Each card contains only a linked
 thumbnail and title; authored stories also carry a small “Guided tour” label. An
 All / Guided tours / Spaces filter separates stories from free exploration. Avoid

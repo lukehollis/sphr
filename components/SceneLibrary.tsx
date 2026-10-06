@@ -7,6 +7,7 @@ import { SiteFooter } from "./site/Chrome";
 
 const isGuided = (scene: SceneListing) => scene.hasGuidedTour ?? scene.legacy?.kind === "tour";
 
+
 function SceneThumbnail({ scene }: { scene: SceneListing }) {
   const [failed, setFailed] = useState(false);
   return <div className="site-card-media">
