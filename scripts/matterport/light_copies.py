@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 
@@ -38,7 +39,7 @@ RECONSTRUCTION_TEXTURE = 1024
 GLTF = ['npx', '--yes', '@gltf-transform/cli@4.0.10']
 
 
-def fetch(url, attempts=3):
+def fetch(url, attempts=6):
     for attempt in range(attempts):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'spacery-light-copies'}), timeout=60) as response:
@@ -46,6 +47,7 @@ def fetch(url, attempts=3):
         except Exception:
             if attempt == attempts - 1:
                 raise
+            time.sleep(2 ** attempt)  # dropped connections and failed lookups pass
 
 
 def scene_bootstrap(scene_id, catalog):
@@ -162,18 +164,30 @@ def make(scene_id, catalog, stage, origin, reconstructions, prepared):
         print(f'  model {url.rsplit("/", 1)[-1]}: {len(fetch(url)) / 1e6:.1f} MB -> {target.stat().st_size / 1e6:.1f} MB')
     if lighter:
         index['models'] = lighter
+    if len(index) == 1:
+        # One photo per location, splats or a model alone: nothing here has a smaller copy.
+        print(f'{scene_id}: nothing to copy')
+        return None
     (stage / scene_id / 'index.json').write_text(json.dumps(index, indent=1))
     print(f'{scene_id}: {len(nodes)} locations, sizes {sizes}, {len(lighter)} models, in {folder}')
     return version
 
 
+def run(command, attempts=4):
+    for attempt in range(attempts):
+        if subprocess.run(command).returncode == 0:
+            return
+        time.sleep(5 * 2 ** attempt)
+    raise RuntimeError('failed: ' + ' '.join(command[:4]))
+
+
 def upload(scene_id, version, stage, bucket_root):
     folder = stage / scene_id / version
-    subprocess.run(['gcloud', 'storage', 'rsync', str(folder), f'{bucket_root}/{scene_id}/{version}', '--recursive',
-                    '--cache-control=public,max-age=31536000,immutable'], check=True)
+    run(['gcloud', 'storage', 'rsync', str(folder), f'{bucket_root}/{scene_id}/{version}', '--recursive',
+         '--cache-control=public,max-age=31536000,immutable'])
     # The index goes last and stays fresh, so it never lists copies that are not there yet.
-    subprocess.run(['gcloud', 'storage', 'cp', str(stage / scene_id / 'index.json'), f'{bucket_root}/{scene_id}/index.json',
-                    '--cache-control=public,max-age=300', '--content-type=application/json'], check=True)
+    run(['gcloud', 'storage', 'cp', str(stage / scene_id / 'index.json'), f'{bucket_root}/{scene_id}/index.json',
+         '--cache-control=public,max-age=300', '--content-type=application/json'])
 
 
 def main():
@@ -193,7 +207,7 @@ def main():
     prepared = dict(item.split('=', 1) for item in args.model_copy)
     for scene in args.scenes:
         version = make(scene, catalog, args.stage, args.origin.rstrip('/'), args.reconstructions.rstrip('/'), prepared)
-        if args.upload:
+        if args.upload and version:
             upload(scene, version, args.stage, args.bucket_root.rstrip('/'))
 
 
