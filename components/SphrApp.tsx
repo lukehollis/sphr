@@ -159,6 +159,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         if (cancelled) return;
         console.error(error);
         editor?.onReady(null, error instanceof Error ? error.message : 'Unable to load scene.');
+        // A page framing this one (mused.com's tours) can offer another tour instead.
+        if (!editor && window.parent !== window) window.parent.postMessage({ type: "spacery:error", page: window.location.pathname }, "*");
         setRuntimeState((current) => ({
           ...current,
           loading: {

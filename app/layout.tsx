@@ -14,6 +14,12 @@ export function generateMetadata(): Metadata {
   };
 }
 
+/**
+ * Tells a page framing this one (mused.com's tours) that it arrived, before anything heavy loads. A frame that
+ * never says so was stopped on the way (a school's web filter, say), and that page can fall back to another tour.
+ */
+const arrivedScript = `try{if(parent!==window)parent.postMessage({type:"spacery:page",page:location.pathname},"*")}catch(x){}`;
+
 export default function RootLayout({
   children
 }: Readonly<{
@@ -21,7 +27,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" data-theme="dark">
-      <head><script dangerouslySetInnerHTML={{ __html: missingPartScript(process.env.NEXT_PUBLIC_SPHR_ANALYTICS === "1") }} /></head>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: arrivedScript }} />
+        <script dangerouslySetInnerHTML={{ __html: missingPartScript(process.env.NEXT_PUBLIC_SPHR_ANALYTICS === "1") }} />
+      </head>
       <body>{children}<GoogleAnalytics /><Analytics /></body>
     </html>
   );
