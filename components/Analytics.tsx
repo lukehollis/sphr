@@ -44,6 +44,12 @@ export function googleEvent(name: string, params?: Record<string, unknown>) {
 
 let reported = 0;
 
+/** Where in our code an error was thrown (file:line:column of its first frame in a script of ours), from its stack. */
+function thrownAt(error: unknown) {
+  const stack = error instanceof Error ? error.stack ?? "" : "";
+  return /(\/_next\/[^\s()]+:\d+:\d+)/.exec(stack)?.[1] ?? "";
+}
+
 /** Sends a JavaScript error (a few per page at most) so failures on some browser or device show up. */
 export function reportError(kind: string, error: unknown, source = "") {
   const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? "")).slice(0, 200);
@@ -56,8 +62,10 @@ export default function Analytics() {
   const pathname = usePathname();
   useEffect(() => { if (pathname) send("page_view"); }, [pathname]);
   useEffect(() => {
-    const failed = (event: ErrorEvent) => reportError("error", event.error ?? event.message, event.filename ? `${event.filename}:${event.lineno}` : "");
-    const rejected = (event: PromiseRejectionEvent) => reportError("promise", event.reason);
+    // The column matters: production scripts are one line long.
+    const failed = (event: ErrorEvent) => reportError("error", event.error ?? event.message,
+      event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : thrownAt(event.error));
+    const rejected = (event: PromiseRejectionEvent) => reportError("promise", event.reason, thrownAt(event.reason));
     window.addEventListener("error", failed);
     window.addEventListener("unhandledrejection", rejected);
     return () => { window.removeEventListener("error", failed); window.removeEventListener("unhandledrejection", rejected); };
