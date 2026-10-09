@@ -108,7 +108,11 @@ export async function collect(request: Request) {
   // Renewed on each visit; the domain lets a sibling site (the homepage) share it.
   const domain = cookieDomain();
   const host = new URL(ownOrigin()).hostname;
-  response.cookies.set(visitorCookie, visitor, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/",
+  const secure = process.env.NODE_ENV === "production";
+  // In a frame on another site (mused.com's tours) browsers refuse a SameSite=Lax cookie, and every event
+  // there came in as a new visitor. A framed page's cookie is SameSite=None, kept apart for the framing site.
+  const framed = secure && body.framed === true;
+  response.cookies.set(visitorCookie, visitor, { httpOnly: true, secure, sameSite: framed ? "none" : "lax", ...(framed ? { partitioned: true } : {}), path: "/",
     maxAge: keepDays * 86400, ...(domain && (host === domain || host.endsWith(`.${domain}`)) ? { domain } : {}) });
   return response;
 }

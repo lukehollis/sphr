@@ -23,10 +23,15 @@ function pageUrl() {
   return `${window.location.origin}${window.location.pathname}${kept.length ? `?${new URLSearchParams(kept)}` : ""}`;
 }
 
+/** Whether the page is in a frame (another site's, as on mused.com), where the visitor cookie needs SameSite=None. */
+function framed() {
+  try { return window.top !== window.self; } catch { return true; }
+}
+
 function send(name: string, props?: Props) {
   if (!enabled || operatorPage(window.location.pathname)) return;
   const body = JSON.stringify({ events: [{ name, path: `${window.location.host}${window.location.pathname}`, props }],
-    referrer: document.referrer || null, url: pageUrl() });
+    referrer: document.referrer || null, url: pageUrl(), ...(framed() ? { framed: true } : {}) });
   try { if (navigator.sendBeacon?.(endpoint, body)) return; } catch { /* falls back to fetch */ }
   void fetch(endpoint, { method: "POST", body, keepalive: true }).catch(() => undefined);
 }
