@@ -8,6 +8,7 @@ import HudControls, { type SpaceDetails, type TourHeart } from "@/components/Hud
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
 import LoadingScreen from "@/components/LoadingScreen";
+import { reportError } from "@/components/Analytics";
 import ViewLoadingIndicator from "@/components/ViewLoadingIndicator";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import type { ViewerHost } from "@/lib/host-link";
@@ -141,7 +142,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           onObjectTransform: editor?.onObjectTransform,
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
-          }
+          },
+          onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details)
         });
         runtimeRef.current = runtime;
         if (process.env.NODE_ENV !== "production") {
@@ -257,6 +259,22 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     if (!guidedTour || editor || !tourReady || window.parent === window) return;
     window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, guided: runtimeState.guided }, "*");
   }, [guidedTour, editor, tourReady, tourStop, tourStops, runtimeState.guided]);
+  // The browser took the WebGL context away and kept it: open the page again where the visitor stood.
+  const graphicsLost = started && Boolean(runtimeState.graphicsLost);
+  const reopenHere = () => {
+    const url = new URL(window.location.href);
+    for (const key of ["stop", "at", "look", "fov"]) url.searchParams.delete(key);
+    const view = runtimeRef.current?.cameraView();
+    // A guided tour picks up at its stop (linkEntry reads stops in the first space); otherwise the
+    // same panorama, looking the same way.
+    if (guidedTour && runtimeState.guided && runtimeState.activeSpaceIndex === 0) url.searchParams.set("stop", String(runtimeState.activePointIndex + 1));
+    else if (view?.nodeId) {
+      url.searchParams.set("at", view.nodeId);
+      url.searchParams.set("look", `${Math.round(view.rotation.azimuth)},${Math.round(view.rotation.polar)}`);
+    }
+    window.location.replace(url.toString());
+  };
+
   const tellFrameContinue = (url: string) => {
     if (window.parent !== window) window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, continue: url }, "*");
   };
@@ -265,8 +283,10 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
       <LoadingScreen
-        loading={runtimeState.loading}
-        visible={!started}
+        loading={graphicsLost ? { ...runtimeState.loading, error: "Your browser stopped drawing this space. That can happen when graphics memory runs low." } : runtimeState.loading}
+        visible={!started || graphicsLost}
+        stopped={graphicsLost}
+        onRetry={graphicsLost ? reopenHere : undefined}
         title={preview?.title || bootstrap?.space.title}
         image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
       />

@@ -463,6 +463,8 @@ export type RuntimeState = {
   hunt?: { found: string[]; stepFound: boolean; hint: boolean };
   /** The 3D map is in view; its data providers must be credited on screen. */
   earth?: { credits: string };
+  /** The browser took the WebGL context away and has not given it back: nothing draws until a reload. */
+  graphicsLost?: boolean;
   /**
    * The space has a reconstruction: whether it can still show (it has not failed to load),
    * whether it is shown in the current view, whether it is loading, and its title and credit.
@@ -480,4 +482,6 @@ export type RuntimeCallbacks = {
   onObjectSelect?: (id: string | null) => void;
   /** Editor: the gizmo moved, turned or scaled an object. */
   onObjectTransform?: (id: string, transform: ObjectTransform) => void;
+  /** The browser took the WebGL context away (with what was in graphics memory, for the error notice). */
+  onContextLost?: (details: string) => void;
 };

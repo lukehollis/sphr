@@ -17,6 +17,7 @@ import type {
 import { TextureCache } from "@/lib/three/TextureCache";
 import { prefersLight } from "@/lib/three/light";
 import { ktx2Loader } from "@/lib/three/ktx2";
+import { modelTextureLimit } from "@/lib/three/textureLimit";
 import { AudioController } from "@/lib/three/AudioController";
 import { AnnotationLayer } from "@/lib/three/layers/AnnotationLayer";
 import { CursorLayer } from "@/lib/three/layers/CursorLayer";
@@ -126,6 +127,12 @@ export class SphrRuntime {
   /** The latest pointer over a splat space, hit-tested once a frame. */
   private splatHover: THREE.Vector2 | null = null;
   private lastFrameTime = 0;
+  /**
+   * The browser has taken the WebGL context back: graphics memory ran low, or the GPU reset.
+   * three.js asks for it again and draws everything anew once it returns; until then nothing draws.
+   */
+  private contextLost = false;
+  private contextLostTimer: ReturnType<typeof setTimeout> | null = null;
   private controls: OrbitControls;
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
@@ -307,7 +314,8 @@ export class SphrRuntime {
       this.iiif = new IiifImageLayer(this.scene, this.textureCache, iiifConfigs);
     }
 
-    this.sceneGraph = new SceneGraphLayer(this.scene, this.tour.sceneGraph, this.light ? this.bootstrap.space.space_data.light?.models : undefined, ktx2Loader(this.renderer));
+    this.sceneGraph = new SceneGraphLayer(this.scene, this.tour.sceneGraph, this.light ? this.bootstrap.space.space_data.light?.models : undefined, ktx2Loader(this.renderer),
+      modelTextureLimit(this.light));
     this.cursor = new CursorLayer();
     this.annotations = new AnnotationLayer(this.scene, this.textureCache, this.tour.annotationGraph);
 
@@ -627,9 +635,10 @@ export class SphrRuntime {
 
   setFullscreen() {
     if (document.fullscreenElement) {
-      void document.exitFullscreen();
+      void document.exitFullscreen().catch(() => {});
     } else {
-      void document.documentElement.requestFullscreen();
+      // Refused in a frame without allowfullscreen, or outside a click.
+      void document.documentElement.requestFullscreen().catch(() => {});
     }
   }
 
@@ -728,7 +737,10 @@ export class SphrRuntime {
     this.cubeRenderTarget = null;
     this.cubeCamera = null;
     this.cubeScene = null;
+    if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
     this.renderer.dispose();
+    // Gives the context back now: Safari keeps a few per page and takes the oldest open one's.
+    this.renderer.forceContextLoss();
   }
 
   private setupScene() {
@@ -856,6 +868,8 @@ export class SphrRuntime {
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);
     window.addEventListener("blur", this.handleWindowBlur);
+    this.canvas.addEventListener("webglcontextlost", this.handleContextLost);
+    this.canvas.addEventListener("webglcontextrestored", this.handleContextRestored);
   }
 
   private detachEvents() {
@@ -868,7 +882,33 @@ export class SphrRuntime {
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
     window.removeEventListener("blur", this.handleWindowBlur);
+    this.canvas.removeEventListener("webglcontextlost", this.handleContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.handleContextRestored);
   }
+
+  private handleContextLost = () => {
+    if (this.disposed) return;
+    this.contextLost = true;
+    const { textures, geometries } = this.renderer.info.memory;
+    this.callbacks.onContextLost?.(`${textures} textures, ${geometries} geometries`);
+    if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
+    // It usually comes back within a moment. If it doesn't, the visitor is told rather than left with a still picture.
+    this.contextLostTimer = setTimeout(() => {
+      this.contextLostTimer = null;
+      if (!this.contextLost || this.disposed) return;
+      this.state.graphicsLost = true;
+      this.emitState();
+    }, 3000);
+  };
+
+  private handleContextRestored = () => {
+    this.contextLost = false;
+    if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
+    this.contextLostTimer = null;
+    if (!this.state.graphicsLost || this.disposed) return;
+    this.state.graphicsLost = false;
+    this.emitState();
+  };
 
   private handlePointerDown = (event: PointerEvent) => {
     if (!event.isPrimary || this.activePointerId !== null) { this.pointerMoved = true; return; }
@@ -1851,7 +1891,8 @@ export class SphrRuntime {
     if (this.animationStarted) return;
     this.animationStarted = true;
     this.renderer.setAnimationLoop(() => {
-      if (this.disposed) return;
+      // The context can be gone a moment before the browser says so.
+      if (this.disposed || this.contextLost || this.renderer.getContext().isContextLost()) return;
       const now = performance.now();
       const elapsed = Math.min(0.1, Math.max(0, (now - (this.lastFrameTime || now)) / 1000));
       this.lastFrameTime = now;
@@ -1879,9 +1920,15 @@ export class SphrRuntime {
       this.updateNearPlane();
       if (this.splatHover) { this.hoverSplat(this.splatHover); this.splatHover = null; }
       this.cursor?.update(now);
-      if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
-      else this.renderScene();
-      this.cursor?.render(this.renderer, this.camera);
+      try {
+        if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
+        else this.renderScene();
+        this.cursor?.render(this.renderer, this.camera);
+      } catch (error) {
+        // Losing the context mid-frame fails the frame's next WebGL call (Safari: "shaderSource must be an
+        // instance of WebGLShader"); the loss itself is what gets reported.
+        if (!this.renderer.getContext().isContextLost()) throw error;
+      }
     });
   }
 

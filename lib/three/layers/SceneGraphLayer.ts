@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { SceneGraphNode } from "@/lib/types";
 import { applyTransform } from "@/lib/three/math";
+import { fitModelTextures, modelTextures } from "@/lib/three/textureLimit";
 
 type SceneGraphRecord = {
   node: SceneGraphNode;
@@ -55,12 +56,14 @@ export class SceneGraphLayer {
   /**
    * @param lighter published model addresses and lighter copies to load in their place
    * @param ktx2 reads GPU-compressed textures (the lighter copies use them)
+   * @param textureLimit the longest side a model's texture is drawn at (see modelTextureLimit)
    */
   constructor(
     private readonly scene: THREE.Scene,
     private readonly nodes: SceneGraphNode[],
     private readonly lighter: Record<string, string> = {},
-    ktx2?: KTX2Loader
+    ktx2?: KTX2Loader,
+    private readonly textureLimit = 4096
   ) {
     this.root.name = "scene-graph";
     this.loader = new GLTFLoader();
@@ -394,11 +397,15 @@ export class SceneGraphLayer {
     if (node.type === "model" && node.file) {
       const gltf = await this.loader.loadAsync(this.lighter[node.file] ?? node.file);
       if (this.disposed) return;
+      const decoded = modelTextures(gltf.scene);
+      const record = this.createRecord(node, gltf.scene);
+      // Before it is first drawn: oversized textures shrink, and maps an unlit copy left out are let go.
+      await fitModelTextures(gltf.scene, this.textureLimit, decoded);
+      if (this.disposed) return;
       gltf.scene.name = node.id;
       applyTransform(gltf.scene, node);
       parent.add(gltf.scene);
       this.lookup.set(node.id, gltf.scene);
-      const record = this.createRecord(node, gltf.scene);
       this.records.set(node.id, record);
       if (node.raycast) this.raycastObjects.push(gltf.scene);
     }

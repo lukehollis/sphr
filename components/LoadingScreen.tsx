@@ -8,15 +8,18 @@ type Props = {
   visible: boolean;
   title?: string;
   image?: string | null;
+  /** The space had opened and then stopped drawing, rather than failing to open. */
+  stopped?: boolean;
+  onRetry?: () => void;
 };
 
 /** The scene opens automatically as soon as its real assets are ready. */
-export default function LoadingScreen({ loading, visible, title, image }: Props) {
+export default function LoadingScreen({ loading, visible, title, image, stopped, onRetry }: Props) {
   const gridId = useId();
   const [failedImage, setFailedImage] = useState<string | null>(null);
   if (!visible) return null;
   const progress = Number.isFinite(loading.progress) ? Math.round(Math.max(0, Math.min(1, loading.progress)) * 100) : 0;
-  const status = loading.error ? "Unable to open space" : progress === 100 ? "Opening space" : "Loading space";
+  const status = loading.error ? (stopped ? "The view stopped" : "Unable to open space") : progress === 100 ? "Opening space" : "Loading space";
 
   return (
     <div className={`scene-load-screen${loading.error ? " has-error" : ""}`}>
@@ -57,7 +60,7 @@ export default function LoadingScreen({ loading, visible, title, image }: Props)
         {loading.error ? <>
           <p className="scene-load-error">{loading.error}</p>
           <div className="scene-load-recovery">
-            <button type="button" className="primary-action" onClick={() => window.location.reload()}>Retry</button>
+            <button type="button" className="primary-action" onClick={onRetry ?? (() => window.location.reload())}>Retry</button>
             <a href="/">All spaces</a>
           </div>
         </> : <div className="scene-load-progress" role="progressbar" aria-label="Loading space" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
