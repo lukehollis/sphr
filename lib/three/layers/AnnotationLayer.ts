@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { AnnotationConfig } from "@/lib/types";
 import { TextureCache } from "@/lib/three/TextureCache";
+import { refusesPlayback } from "@/lib/three/AudioController";
 
 type ManagedAnnotation = {
   config: AnnotationConfig;
@@ -25,6 +26,9 @@ export class AnnotationLayer {
   private playVideo(annotation: ManagedAnnotation) {
     const video = annotation.video!;
     video.muted = this.muted;
+    // Muted, the animation can run before the visitor interacts; a browser that blocks even that is left alone.
+    if (refusesPlayback(video)) video.muted = true;
+    if (refusesPlayback(video)) return;
     void video.play().catch(() => {
       // Keep the animation running when autoplay blocks its soundtrack.
       // Normal interaction retries the requested audio state.

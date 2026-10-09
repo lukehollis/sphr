@@ -19,6 +19,9 @@ globalThis.Audio = class {
   pause() { this.paused=true; }
 };
 const config = { narration:{url:'/narration.mp3'}, other:{url:'/other.mp3'} };
+const ownNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+const policy = (answer) => Object.defineProperty(globalThis, 'navigator', { value: { getAutoplayPolicy: () => answer() }, configurable: true, writable: true });
+const restoreNavigator = () => ownNavigator ? Object.defineProperty(globalThis, 'navigator', ownNavigator) : delete globalThis.navigator;
 
 test('automatically started narration resumes on ordinary interaction after browser rejection', async () => {
   playbackAllowed=false;
@@ -45,6 +48,21 @@ test('leaving a tour point never replays its blocked narration on a later gestur
   assert.equal(narration.paused,true);
   assert.equal(narration.attempts,1);
   controller.dispose();
+});
+test('a browser that says it will refuse sound is not asked until the visitor interacts', async () => {
+  playbackAllowed=false;
+  policy(() => playbackAllowed ? 'allowed' : 'allowed-muted');
+  const controller=new AudioController(config);
+  const narration=audio.at(-2);
+  controller.updateForPoint({sounds:['narration']});
+  await Promise.resolve();
+  assert.equal(narration.attempts,0, 'no refused play() for an extension to leave unhandled');
+  playbackAllowed=true;
+  window.dispatchEvent(new Event('pointerup'));
+  assert.equal(narration.paused,false);
+  assert.equal(narration.attempts,1);
+  controller.dispose();
+  restoreNavigator();
 });
 test('disposing a scene removes its deferred audio playback', async () => {
   playbackAllowed=false;

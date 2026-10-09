@@ -177,6 +177,8 @@ try {
   // A wallet's or in-app browser's injected script failing is recorded, but it isn't this site's error.
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'error', message: "TypeError: undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')", source: '/account:1' } }]);
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'promise', message: "TypeError: undefined is not an object (evaluating 'top.webkit.messageHandlers.foregroundToBackground.postMessage')" } }]);
+  // Every play() of the viewer's handles its refusal; one left unhandled comes from an extension wrapping play().
+  await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'promise', message: 'NotAllowedError: The play method is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.' } }]);
   // Paying in another browser: signing in there still lands on the payment's result.
   assert.equal(location(await new Browser().get('/account?checkout=cs_test_elsewhere')), `/account/login?next=${encodeURIComponent('/account?checkout=cs_test_elsewhere')}`);
   // Someone who opens the agent address in a browser gets directions instead of an error.
@@ -772,6 +774,7 @@ try {
   assert.equal(about("Error in a visitor's browser").filter(item => item.description === 'TypeError: x is undefined').length, 1, 'a repeated browser error is reported once');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('window.ethereum')), 'injected scripts are not reported');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('messageHandlers')), 'Safari extension channels are not reported');
+  assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('play method')), 'autoplay refusals are not reported');
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');

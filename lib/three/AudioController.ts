@@ -1,5 +1,20 @@
 import type { AudioConfig, TourPoint } from "@/lib/types";
 
+type AutoplayNavigator = Navigator & { getAutoplayPolicy?: (target: HTMLMediaElement) => "allowed" | "allowed-muted" | "disallowed" };
+
+/**
+ * Whether the browser says beforehand that it would refuse to play this element until the visitor
+ * interacts (Firefox can say so). Asking anyway only earns the refusal, and some extensions wrap
+ * play() so that refusal is left unhandled and lands in the error notices.
+ */
+export function refusesPlayback(element: HTMLMediaElement) {
+  try {
+    const policy = (navigator as AutoplayNavigator).getAutoplayPolicy?.(element);
+    // Firefox answers "allowed-muted" for an element too, its default until the visitor interacts.
+    return policy === "disallowed" || (policy === "allowed-muted" && !element.muted);
+  } catch { return false; }
+}
+
 type ManagedAudio = {
   config: AudioConfig;
   element: HTMLAudioElement;
@@ -45,6 +60,10 @@ export class AudioController {
     const sound = this.sounds.get(id);
     if (!sound) return;
     sound.element.muted = this.muted;
+    if (refusesPlayback(sound.element)) {
+      if (!this.disposed && this.activePointSounds.has(id)) this.blockedSounds.add(id);
+      return;
+    }
     void sound.element.play().catch((error: unknown) => {
       if (!this.disposed && this.activePointSounds.has(id) && error instanceof Error && error.name === "NotAllowedError") this.blockedSounds.add(id);
     });
