@@ -48,7 +48,7 @@ writeFileSync(path.join(state, 'library.json'), JSON.stringify({ models: [
 
 const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accounts-test', SPHR_PUBLIC_URL: base, SPHR_STATE_DIR: state,
   SPHR_ACCESS_CONTROL: '1', SPHR_ACCOUNTS: '1', SPHR_CATALOG_URL: '', SPHR_ASSET_BASE_URL: '', NEXT_PUBLIC_SPHR_ASSET_BASE_URL: '',
-  SPHR_SMTP_URL: `smtp://127.0.0.1:${mail.port}`, SPHR_MAIL_FROM: 'Spaces <no-reply@example.com>',
+  SPHR_SMTP_URL: `smtp://127.0.0.1:${mail.port}`, SPHR_MAIL_FROM: 'Spaces <no-reply@example.com>', SPHR_CONTACT_EMAIL: 'help@example.com',
   SPHR_OAUTH_TEST_BASE: idpServer.base, SPHR_GOOGLE_CLIENT_ID: clients.google.id, SPHR_GOOGLE_CLIENT_SECRET: clients.google.secret,
   SPHR_APPLE_CLIENT_ID: clients.apple.id, SPHR_APPLE_TEAM_ID: 'TEAM123456', SPHR_APPLE_KEY_ID: 'KEY1234567',
   SPHR_APPLE_PRIVATE_KEY: apple.privateKey.export({ format: 'pem', type: 'pkcs8' }).replace(/\n/g, '\\n'),
@@ -201,6 +201,9 @@ try {
   assert.ok(alice.cookies.has('sphr-session'));
   assert.equal((await alice.post('/api/account/spaces', { title: 'Too soon' })).status, 403, 'unverified accounts cannot add spaces');
   const verification = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Confirm the email address'));
+  assert.match(verification, /^Reply-To: help@example\.com$/m, 'replies to account emails reach the contact address');
+  assert.match(verification, /guided tours and scavenger hunts/, 'confirmation speaks of tours and hunts too');
+  assert.ok((await (await anonymous.get('/terms')).text()).includes('mailto:help@example.com'), 'the terms name the contact address');
   const verifyToken = verification.match(/\/account\/verify\?token=([a-f0-9]{64})/)[1];
   // Opening the link (or a scanner prefetching it) only shows a confirmation page.
   assert.equal(location(await anonymous.get(`/api/account/verify?token=${verifyToken}`)), `${base}/account/verify?token=${verifyToken}`);
@@ -308,7 +311,8 @@ try {
   assert.equal(body.space.message, 'Built a panorama tour from your 360 photo.');
   assert.equal(body.space.scene.sceneId, reserved, 'the space is published under the reserved ID');
   assert.equal(body.space.scene.public, false, 'new spaces start private');
-  await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('is ready'));
+  const readyMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Riverside studio is ready'));
+  assert.ok(readyMail.includes('It is private for now'), 'a new space is called private');
   const scenePath = body.space.scene.path;
   // Only the listed runtime files are installed, and the space is not added to a shared index.
   const installed = path.join(datasets, `customer-${studio.id}`);
@@ -332,6 +336,10 @@ try {
   subscription.status = 'canceled';
   assert.equal((await webhook({ id: 'evt_bad', type: 'customer.subscription.deleted', data: { object: { id: subscription.id } } }, 'whsec_wrong')).status, 400);
   assert.equal((await webhook({ id: 'evt_cancel', type: 'customer.subscription.deleted', data: { object: { id: subscription.id } } })).status, 200);
+  // The customer is told too, once, however many events report the same end.
+  assert.equal((await webhook({ id: 'evt_cancel_again', type: 'customer.subscription.updated', data: { object: { id: subscription.id } } })).status, 200);
+  const offlineMail = message => message.includes('To: alice@example.com') && message.includes('Subject: Your spaces are offline');
+  assert.ok((await mail.waitFor(offlineMail)).includes('Restart billing'), 'the email says how to bring the spaces back');
   assert.equal((await anonymous.get(publicPath)).status, 404);
   assert.equal((await alice.get(publicPath)).status, 404);
   assert.ok((await (await alice.get('/account')).text()).includes('Restart billing'));
@@ -344,6 +352,7 @@ try {
   assert.equal((await webhook({ id: 'evt_paid', type: 'checkout.session.completed', data: { object: { id: restart.id, object: 'checkout.session' } } })).status, 200);
   assert.equal((await webhook({ id: 'evt_paid', type: 'checkout.session.completed', data: { object: { id: restart.id, object: 'checkout.session' } } })).status, 200, 'redelivery is harmless');
   assert.equal((await anonymous.get(publicPath)).status, 200, 'hosting resumes after payment');
+  assert.equal(mail.messages.filter(offlineMail).length, 1, 'hosting stopping is emailed once');
 
   // Deleting a space lowers the quantity and takes it offline.
   assert.equal((await alice.request(`/api/account/spaces/${gallery.id}`, { method: 'DELETE', json: {} })).status, 200);
@@ -611,6 +620,31 @@ try {
   body = await (await aliceLaptop.get(`/api/account/spaces/${odd.id}`)).json();
   assert.equal(body.space.status, 'failed');
   assert.equal(body.space.message, 'Please upload the E57 export instead of the raw capture.');
+  const heldMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention'));
+  assert.ok(heldMail.includes('or write to help@example.com if it keeps happening'), 'the held space names the contact address, not just "support"');
+  const failedMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention')
+    && message.includes('Please upload the E57 export instead'));
+  assert.ok(failedMail.includes('Reply to this email or write to help@example.com.'), 'the needs-attention email says how to reach a person');
+
+  // A worker that vanishes on the last attempt: the next sweep marks the space failed and emails its owner, once.
+  const stalledSpace = (await (await aliceLaptop.post('/api/account/spaces', { title: 'Stalled capture' })).json()).space;
+  const stalledUpload = await (await aliceLaptop.post(`/api/account/spaces/${stalledSpace.id}/uploads`, { name: 'stalled.bin', size: 4 })).json();
+  await fetch(base + stalledUpload.url, { method: 'PUT', body: 'data', headers: { Origin: base, 'Content-Range': 'bytes 0-3/4',
+    Cookie: [...aliceLaptop.cookies].map(([name, value]) => `${name}=${value}`).join('; ') } });
+  await aliceLaptop.post(`/api/account/uploads/${stalledUpload.upload.id}/complete`);
+  assert.equal((await aliceLaptop.post(`/api/account/spaces/${stalledSpace.id}/submit`, {})).status, 200);
+  const stalledMail = message => message.includes('To: alice@example.com') && message.includes('Subject: Stalled capture needs attention');
+  await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Processing started for Stalled capture'));
+  database().prepare("UPDATE jobs SET status='running', attempts=3, worker='gone', started='2000-01-01T00:00:00.000Z' WHERE space_id=?").run(stalledSpace.id);
+  database().prepare("UPDATE customer_spaces SET status='processing' WHERE id=?").run(stalledSpace.id);
+  assert.equal((await worker('/api/worker/jobs?status=queued')).status, 200);
+  const stalledNotice = await mail.waitFor(stalledMail);
+  assert.ok(stalledNotice.includes('or write to help@example.com if it keeps happening') && stalledNotice.includes('Reply to this email or write to help@example.com.'));
+  body = await (await aliceLaptop.get(`/api/account/spaces/${stalledSpace.id}`)).json();
+  assert.equal(body.space.status, 'failed', 'the stalled space stops processing');
+  for (let sweep = 0; sweep < 2; sweep++) assert.equal((await worker('/api/worker/jobs?status=queued')).status, 200);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(mail.messages.filter(stalledMail).length, 1, 'later sweeps do not email again');
 
   // An agent that adds files after packaging is caught by the runner's own validator.
   const tampered = (await (await aliceLaptop.post('/api/account/spaces', { title: 'Tampered' })).json()).space;
@@ -782,6 +816,8 @@ try {
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));
+  assert.equal(about('Space held for review', 'Title', 'Stalled capture').length, 1, 'a stalled job is announced once');
+  assert.equal(about('Space held for review', 'Title', 'Stalled capture')[0].description, 'Stopped after 3 attempts without a result.');
   assert.ok(about('New subscription', 'Account', 'alice@example.com').length >= 1);
   assert.equal(about('New subscription', 'Account', 'grace@example.com').length, 1, 'a subscription is announced once however often Stripe reports it');
   assert.equal(about('Hosting stopped', 'Account', 'alice@example.com').length, 1);

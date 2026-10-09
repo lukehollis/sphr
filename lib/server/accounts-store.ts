@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { db, hashPassword, verifyPassword } from "./admin-store";
+import { contactEmail } from "./brand";
 import { formatBytes } from "../bytes";
 
 // Customer accounts share the admin state database so one backup covers visibility,
@@ -505,7 +506,10 @@ export class PlanLimitError extends AccountError {}
 export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null) {
   return transaction(() => {
     const { count } = store().prepare("SELECT count(*) AS count FROM customer_spaces WHERE user_id=? AND status<>'deleted'").get(userId) as { count: number };
-    if (count >= maxSpacesPerAccount) throw new AccountError("This account has reached its space limit. Contact support to add more.");
+    if (count >= maxSpacesPerAccount) {
+      const contact = contactEmail();
+      throw new AccountError(`This account has reached its space limit. ${contact ? `Write to ${contact}` : "Contact support"} to add more.`);
+    }
     if (planSpaces !== null && count >= planSpaces) {
       throw new PlanLimitError(`Your plan covers ${planSpaces} ${planSpaces === 1 ? "space" : "spaces"}. Change plans to add another.`);
     }
@@ -612,7 +616,10 @@ const toJob = (row: JobRow): Job => ({ id: row.id, spaceId: row.space_id, sceneI
   worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished });
 export const maxJobAttempts = 3;
 /** Shown on a space whose job was held or gave up, so the customer sees a reason rather than endless processing. */
-export const heldSpaceMessage = "We couldn't finish building this space. Check that your files are a capture and try again, or contact support if it keeps happening.";
+export function heldSpaceMessage() {
+  const contact = contactEmail();
+  return `We couldn't finish building this space. Check that your files are a capture and try again, or ${contact ? `write to ${contact}` : "contact support"} if it keeps happening.`;
+}
 
 function unusedSceneId() {
   for (;;) {
@@ -705,7 +712,7 @@ export function holdJob(id: string, message: string | null) {
     const before = readCustomerSpace(job.spaceId)!;
     const transitioned = before.status === "processing" || before.status === "queued";
     if (transitioned) {
-      store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=?").run(heldSpaceMessage, now(), job.spaceId);
+      store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=?").run(heldSpaceMessage(), now(), job.spaceId);
     }
     return { space: readCustomerSpace(job.spaceId)!, transitioned };
   });
@@ -713,22 +720,27 @@ export function holdJob(id: string, message: string | null) {
 
 /**
  * A crashed or stalled worker leaves its job running. After the lease, the job returns to
- * the queue, or waits for an operator once it has used every attempt.
+ * the queue, or waits for an operator once it has used every attempt. Returns the jobs that
+ * gave up and the spaces they moved out of processing, each once: a held job is not swept again.
  */
 export function expireJobLeases(hours: number) {
   const cutoff = new Date(Date.now() - hours * 3600000).toISOString();
-  transaction(() => {
+  return transaction(() => {
     const stale = store().prepare("SELECT * FROM jobs WHERE status='running' AND started < ?").all(cutoff) as JobRow[];
+    const stopped: { job: Job; space: CustomerSpace }[] = [];
     for (const job of stale) {
       if (job.attempts >= maxJobAttempts) {
         store().prepare("UPDATE jobs SET status='held', message=? WHERE id=?").run(`Stopped after ${job.attempts} attempts without a result.`, job.id);
         // Don't leave the customer's space processing forever once the job has given up.
-        store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=? AND status IN ('processing','queued')").run(heldSpaceMessage, now(), job.space_id);
+        const moved = store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=? AND status IN ('processing','queued')")
+          .run(heldSpaceMessage(), now(), job.space_id).changes > 0;
+        if (moved) stopped.push({ job: readJob(job.id)!, space: readCustomerSpace(job.space_id)! });
       } else {
         store().prepare("UPDATE jobs SET status='queued', worker=NULL, started=NULL WHERE id=?").run(job.id);
         store().prepare("UPDATE customer_spaces SET status='queued', updated=? WHERE id=? AND status='processing'").run(now(), job.space_id);
       }
     }
+    return stopped;
   });
 }
 

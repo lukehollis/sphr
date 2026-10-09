@@ -1,5 +1,5 @@
 import { listJobs, type JobStatus } from "@/lib/server/accounts-store";
-import { accountsEnabled } from "@/lib/server/accounts";
+import { accountsEnabled, publicOrigin } from "@/lib/server/accounts";
 import { jobDetails, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { waitForJob } from "@/lib/server/job-signal";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   if (!accountsEnabled() || !workerAuthorized(request)) return workerResponse({ error: "Unauthorized." }, 401);
   const requested = (new URL(request.url).searchParams.get("status") ?? "queued").split(",");
   if (!requested.every(status => statuses.includes(status as JobStatus))) return workerResponse({ error: "Unknown status." }, 400);
-  releaseStaleJobs();
+  releaseStaleJobs(publicOrigin(request));
   // ?wait=N holds the request up to N seconds until a job is queued, so workers start at once.
   // At most 25, under the 30 seconds systemd gives the server to stop during a deploy.
   const wait = Math.min(25, Math.max(0, Number(new URL(request.url).searchParams.get("wait") ?? 0) || 0));

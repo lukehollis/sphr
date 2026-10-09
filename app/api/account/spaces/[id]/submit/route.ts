@@ -4,7 +4,7 @@ import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin,
 import { describeSpace } from "@/lib/server/customer-spaces";
 import { announceJob } from "@/lib/server/job-signal";
 import { filesReceivedEmail } from "@/lib/server/emails";
-import { siteBrand } from "@/lib/server/brand";
+import { contactEmail, siteBrand } from "@/lib/server/brand";
 import { filesSummary, notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
 
@@ -18,7 +18,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!spaceHosted(space)) return accountResponse({ error: "Update your billing details to continue." }, 402);
   // Each submission runs an agent; the limits survive deleting and recreating spaces.
   if (!allowAttempt([[attemptKey("submit", user.id), 20], [attemptKey("submit-space", space.id), 5]], 24 * 60 * 60 * 1000)) {
-    return accountResponse({ error: "This space has been submitted many times today. Try again tomorrow, or contact support." }, 429);
+    const contact = contactEmail();
+    return accountResponse({ error: `This space has been submitted many times today. Try again tomorrow, or ${contact ? `write to ${contact}` : "contact support"}.` }, 429);
   }
   try {
     if (body?.output !== undefined && parseSpaceOutput(body.output) === undefined) {

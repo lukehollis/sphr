@@ -1,5 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { expireJobLeases, listUploads, readCustomerSpace, type Job } from "./accounts-store";
+import { expireJobLeases, listUploads, readCustomerSpace, readUser, type CustomerSpace, type Job } from "./accounts-store";
+import { notifyOwner } from "./accounts";
+import { saveEvent } from "./analytics-store";
+import { contactEmail, siteBrand } from "./brand";
+import { spaceFailedEmail } from "./emails";
+import { notifyTeam } from "./team-notify";
 import { uploadBucket } from "./uploads";
 import { parseSceneCatalog } from "../scene-catalog-data";
 
@@ -13,9 +18,23 @@ export function jobListing(job: Job, value: unknown) {
   return listing;
 }
 
-/** Jobs whose worker went quiet return to the queue after this many hours. */
-export function releaseStaleJobs() {
-  expireJobLeases(Number(process.env.SPHR_JOB_LEASE_HOURS ?? 12));
+/**
+ * Jobs whose worker went quiet return to the queue after this many hours. A job that has used
+ * every attempt waits for an operator, and its owner is told, as the processing email promised.
+ * Not awaited: the worker asking for jobs never waits on the mail server.
+ */
+export function releaseStaleJobs(origin: string) {
+  for (const { job, space } of expireJobLeases(Number(process.env.SPHR_JOB_LEASE_HOURS ?? 12))) {
+    void announceStalled(job, space, origin).catch(error => console.error(`Unable to announce stalled job ${job.id}:`, error instanceof Error ? error.message : error));
+  }
+}
+
+async function announceStalled(job: Job, space: CustomerSpace, origin: string) {
+  const owner = readUser(space.userId);
+  saveEvent("space_failed", { userId: space.userId, props: { stalled: true } });
+  void notifyTeam({ title: "Space held for review", tone: "warn", description: job.message ?? undefined,
+    fields: [["Title", space.title], ["Account", owner?.email]] });
+  await notifyOwner(owner, spaceFailedEmail(siteBrand(), origin, space, space.message ?? "", contactEmail()));
 }
 
 /** Processing workers authenticate with one shared bearer token of at least 32 characters. */

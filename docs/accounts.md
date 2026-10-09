@@ -22,7 +22,7 @@ The flow for a customer:
    subscribers, above their spaces. Sign-in, sign-up and an account without spaces leave
    them out, because many visitors sign in only to open a space. When `SPHR_SOURCE_URL`
    is set, the plan choice notes that the service is open source and links to its code, and
-   when `SPHR_SALES_EMAIL` is set it offers larger customers an enterprise plan by email.
+   when `SPHR_SALES_EMAIL` (or else `SPHR_CONTACT_EMAIL`) is set it offers larger customers an enterprise plan by email.
 3. Capture files of any kind upload from the sheet: Matterport or other E57 exports, Gaussian
    splats, 360 photos or video, ordinary video, lidar point clouds, scanned meshes. Browsers
    upload directly to a private Cloud Storage bucket in resumable 8 MiB chunks, so interrupted
@@ -33,13 +33,18 @@ The flow for a customer:
    Files added later to a hosted space wait until the customer reprocesses it. A waiting agent
    runner picks the job up within seconds, and the cards and the space page show the agent's
    latest step as it works. The customer is emailed when processing starts, when the space is
-   published (with its preview image) and when it cannot be finished, and can then preview
+   published (with its preview image) and when it cannot be finished (including a job that
+   stops after its last attempt without a result), and can then preview
    it, make it public, and edit its title, start view and thumbnail. If the upload cannot
    become a space, the page says what to upload instead.
 
-Account emails (address confirmation, password resets, sign-in changes and the processing
-notices above) are sent as HTML with a plain-text alternative, laid out after the 1975 NASA
-Graphics Standards Manual. The templates are in `lib/server/emails.ts`.
+Account emails (address confirmation, password resets, sign-in changes, the processing
+notices above, and billing notices when a payment fails, a cancellation is scheduled or hosting
+stops) are sent as HTML with a plain-text alternative, laid out after the 1975 NASA
+Graphics Standards Manual. The templates are in `lib/server/emails.ts`. Every email carries a
+Reply-To of `SPHR_MAIL_REPLY_TO`, or else `SPHR_CONTACT_EMAIL`, and the notices that ask the
+customer to act name the contact address. A failed send is logged and never fails the request,
+webhook or job that prompted it.
 
 Customer spaces are listed from the application database, never from the shared
 `index.json` catalog, so they do not appear in any public listing. *Private* means the
@@ -159,7 +164,8 @@ accounts, spaces created, tours and scavenger hunts started, spaces submitted fo
 that are ready or need attention, deleted spaces, linked agents, and billing changes: a new
 subscription, a plan change, a failed payment, a scheduled or withdrawn cancellation, and hosting
 stopping. Billing notices compare the saved subscription with Stripe's latest state in one
-transaction, so repeated webhooks and returns from Checkout announce each change once. Delivery is
+transaction, so repeated webhooks and returns from Checkout announce each change once, and the
+customer's own billing emails follow the same rule. Delivery is
 best effort, queued one message at a time and retried when Discord asks to slow down; a failure is
 logged and never affects the customer. Notices never mention anyone, whatever a title says.
 
@@ -177,7 +183,9 @@ SPHR_PUBLIC_URL=https://app.example.com
 # Email: verification, password resets and "your space is ready" notices.
 # Without it, email sign-up is hidden and only the providers below are offered.
 SPHR_SMTP_URL=smtps://user:password@smtp.example.com:465
-SPHR_MAIL_FROM="Example Spaces <no-reply@example.com>"
+SPHR_MAIL_FROM="Example Spaces <no-reply@example.com>"   # an address the mail provider may send as
+# Replies go here; without it, to SPHR_CONTACT_EMAIL.
+# SPHR_MAIL_REPLY_TO=support@example.com
 
 # Sign-in providers. Each appears only when fully configured.
 SPHR_GOOGLE_CLIENT_ID=...
@@ -212,6 +220,8 @@ SPHR_CUSTOMER_ASSET_BUCKET=example-customer-assets
 
 # Privacy and terms pages (/privacy, /terms), linked from sign-in. Review their wording.
 SPHR_OPERATOR_NAME="Example Spaces"
+# Where customers write for help: the policies, account emails, Reply-To and error messages use it,
+# and so does the enterprise plan offer unless SPHR_SALES_EMAIL names another address.
 SPHR_CONTACT_EMAIL=support@example.com
 # Where the code this deployment runs is published. The plan choice links to it.
 # SPHR_SOURCE_URL=https://github.com/example/sphr

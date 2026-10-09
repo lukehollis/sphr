@@ -5,9 +5,9 @@ import { createUserSession, createUserToken, deleteUserSession, hostingActive, r
   type CustomerSpace, type User } from "./accounts-store";
 import { adminResponse, cookieOptions, isAdmin, readAdminBody, sameOrigin } from "./auth";
 import { billingEnabled } from "./billing";
-import { sendMail, type MailContent } from "./mail";
+import { sendMail, sendNotice, type MailContent } from "./mail";
 import { verificationEmail } from "./emails";
-import { siteBrand } from "./brand";
+import { siteBrand, siteOrigin } from "./brand";
 
 /** Customer accounts are optional and build on the private-by-default access control. */
 export function accountsEnabled() {
@@ -52,7 +52,7 @@ export async function endUserSession() {
 }
 
 export function publicOrigin(request?: Request) {
-  return new URL(process.env.SPHR_PUBLIC_URL || (request ? new URL(request.url).origin : "http://localhost:3002")).origin;
+  return request && !process.env.SPHR_PUBLIC_URL ? new URL(request.url).origin : siteOrigin();
 }
 
 // Nginx overwrites X-Real-IP. The Node service only listens on loopback.
@@ -80,10 +80,9 @@ export async function sendVerification(user: User, origin: string) {
   await sendMail(user.email, verificationEmail(siteBrand(), origin, `${origin}/account/verify?token=${token}`));
 }
 
+/** Emails a space's or account's owner. A failure is logged and never fails the caller. */
 export async function notifyOwner(user: User | undefined, content: MailContent) {
-  if (!user) return;
-  try { await sendMail(user.email, content); }
-  catch (error) { console.error("Unable to send account email:", error instanceof Error ? error.message : error); }
+  if (user) await sendNotice(user.email, content, user.id);
 }
 
 export { adminResponse as accountResponse, readAdminBody as readAccountBody, sameOrigin };

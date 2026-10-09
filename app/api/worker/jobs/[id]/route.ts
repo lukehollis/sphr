@@ -1,10 +1,10 @@
-import { setScenePublic } from "@/lib/server/admin-store";
+import { isScenePublic, setScenePublic } from "@/lib/server/admin-store";
 import { AccountError, claimJob, cleanText, finishJob, holdJob, readJob, readUser, releaseJob, setJobProgress } from "@/lib/server/accounts-store";
 import { accountsEnabled, notifyOwner, publicOrigin } from "@/lib/server/accounts";
 import { jobDetails, jobListing, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { listingRevision, removePublishedScene } from "@/lib/server/published-assets";
 import { spaceFailedEmail, spaceReadyEmail } from "@/lib/server/emails";
-import { siteBrand } from "@/lib/server/brand";
+import { contactEmail, siteBrand } from "@/lib/server/brand";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
 
@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: Params) {
   if (!accountsEnabled() || !workerAuthorized(request)) return workerResponse({ error: "Unauthorized." }, 401);
   let body;
   try { body = await readBody(request); } catch { return workerResponse({ error: "Invalid request." }, 400); }
-  releaseStaleJobs();
+  releaseStaleJobs(publicOrigin(request));
   const job = readJob((await params).id);
   if (!job) return workerResponse({ error: "Job not found." }, 404);
   const message = cleanText(body?.message, 2000);
@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_failed", { userId: held.space.userId });
         void notifyTeam({ title: "Space held for review", tone: "warn", description: message ?? undefined,
           fields: [["Title", held.space.title], ["Account", readUser(held.space.userId)?.email]] });
-        await notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? ""));
+        await notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "", contactEmail()));
       }
       return workerResponse({ job: jobDetails(readJob(job.id)!) });
     }
@@ -74,8 +74,9 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_ready", { userId: result.space.userId });
         void notifyTeam({ title: "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
           ["Account", readUser(result.space.userId)?.email], ["Link", `${publicOrigin(request)}${listing.scenePath}`], ["Note", message]] });
+        // A space processed again keeps its scene ID and the visibility its owner chose.
         await notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
-          { path: listing.scenePath, thumbnail: listing.thumbnail }));
+          { path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(job.sceneId) }));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }
@@ -86,7 +87,7 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_failed", { userId: result.space.userId });
         void notifyTeam({ title: "Space needs attention", tone: "bad", description: message,
           fields: [["Title", result.space.title], ["Account", readUser(result.space.userId)?.email]] });
-        await notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message));
+        await notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message, contactEmail()));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }

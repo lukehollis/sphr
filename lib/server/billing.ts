@@ -4,6 +4,9 @@ import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
 import { saveEvent } from "./analytics-store";
+import { contactEmail, siteBrand, siteOrigin } from "./brand";
+import { cancellationScheduledEmail, hostingStoppedEmail, paymentFailedEmail, type HostingStop } from "./emails";
+import { sendNotice, type MailContent } from "./mail";
 
 let client: Stripe | undefined;
 const env = (name: string) => process.env[name]?.trim() || undefined;
@@ -242,18 +245,28 @@ export async function syncSubscription(id: string) {
   const next = { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
     periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, plan: subscriptionPlan(item.price) };
   const { saved, previous } = saveSubscription(userId, next);
-  if (saved) void announceBillingChange(userId, previous, next);
+  if (saved) {
+    void announceBillingChange(userId, previous, next)
+      .catch(error => console.error(`Unable to announce a billing change for account ${userId}:`, error instanceof Error ? error.message : error));
+  }
   if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
     activateUnpaidSpaces(userId);
     await syncQuantity(userId);
   }
 }
 
-/** Tells the operator when hosting starts, changes plan, stops paying, is cancelled or ends. Repeated events change nothing and say nothing. */
+/**
+ * Tells the operator when hosting starts, changes plan, stops paying, is cancelled or ends, and
+ * tells the customer when a payment fails, a cancellation is scheduled or hosting stops. Each
+ * change is seen once: `saveSubscription` compares Stripe's state with the saved copy in one
+ * transaction, so repeated events, redelivered webhooks and returns from Checkout say nothing.
+ */
 async function announceBillingChange(userId: string, previous: Subscription | undefined, next: Subscription) {
-  const email = readUser(userId)?.email ?? userId;
+  const user = readUser(userId);
+  const email = user?.email ?? userId;
   const plans = await readPlans().catch(() => []);
   const price = describePrice(next.plan, plans);
+  const tell = (content: MailContent) => { if (user) void sendNotice(user.email, content, user.id); };
   const wasHosting = Boolean(previous && previous.id === next.id && hostingStatuses.has(previous.status));
   const hosting = hostingStatuses.has(next.status);
   const fields: [string, string | number | null][] = [["Account", email], ["Plan", price], ["Status", next.status]];
@@ -264,15 +277,23 @@ async function announceBillingChange(userId: string, previous: Subscription | un
   if (!previous || previous.id !== next.id) return;
   if (wasHosting && !hosting) {
     saveEvent("subscription_ended", { userId, props: { status: next.status } });
+    // As the account page does: a subscription that still exists unpaid is repaired with a new payment
+    // method, an ended one by restarting billing. A plan cancelled for the period's end ended as asked.
+    const fix: HostingStop["fix"] = ["unpaid", "incomplete", "paused"].includes(next.status) ? "payment" : "restart";
+    const why: HostingStop["why"] = previous.cancelAtPeriodEnd && next.status === "canceled" ? "cancelled"
+      : previous.status === "past_due" || fix === "payment" ? "unpaid" : "ended";
+    tell(hostingStoppedEmail(siteBrand(), siteOrigin(), contactEmail(), { why, fix }, price));
     return notifyTeam({ title: "Hosting stopped", tone: "bad", description: `The subscription is now ${next.status}, so this account's spaces are offline.`, fields });
   }
   if (previous.status !== "past_due" && next.status === "past_due") {
+    tell(paymentFailedEmail(siteBrand(), siteOrigin(), contactEmail(), price));
     return notifyTeam({ title: "Payment failed", tone: "warn", description: "Stripe is retrying the payment; spaces stay online meanwhile.", fields });
   }
   if (previous.plan?.price !== next.plan?.price && hosting) {
     return notifyTeam({ title: "Plan changed", tone: "money", fields: [["Account", email], ["From", describePrice(previous.plan, plans)], ["To", price]] });
   }
   if (!previous.cancelAtPeriodEnd && next.cancelAtPeriodEnd) {
+    if (hosting) tell(cancellationScheduledEmail(siteBrand(), siteOrigin(), contactEmail(), next.periodEnd, price));
     return notifyTeam({ title: "Cancellation scheduled", tone: "warn",
       fields: [...fields, ["Ends", next.periodEnd ? new Date(next.periodEnd * 1000).toISOString().slice(0, 10) : null]] });
   }

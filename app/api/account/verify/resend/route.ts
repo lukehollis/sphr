@@ -9,7 +9,10 @@ export async function POST(request: Request) {
   if (user.emailVerified) return accountResponse({ ok: true });
   if (!allowAttempt([[attemptKey("verify", user.id), 3]], 60 * 60 * 1000)) return accountResponse({ error: "A link was sent recently. Check your inbox or try again later." }, 429);
   try { await sendVerification(user, publicOrigin(request)); }
-  catch { return accountResponse({ error: "The email could not be sent. Try again later." }, 502); }
+  catch (failure) {
+    console.error(`Unable to send a confirmation email to account ${user.id}:`, failure instanceof Error ? failure.message : failure);
+    return accountResponse({ error: "The email could not be sent. Try again later." }, 502);
+  }
   await recordEvent("verify_sent", { userId: user.id, props: { resend: true } });
   return accountResponse({ ok: true });
 }

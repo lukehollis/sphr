@@ -135,11 +135,14 @@ ${escape(email.brand)} sends these emails about your account and your spaces.<br
   return { subject: email.subject, text, html };
 }
 
+/** A line that tells the reader how to reach a person, when the deployment has a contact address (replies go there too). */
+const help = (support: string | undefined, text = "Questions?"): Block[] => support ? [{ kind: "text", text: `${text} Reply to this email or write to ${support}.` }] : [];
+
 export function verificationEmail(brand: string, origin: string, link: string) {
   return render({
-    brand, origin, subject: "Confirm your email address", preheader: "Confirm your address and you can start adding spaces.",
+    brand, origin, subject: "Confirm your email address", preheader: "Confirm your address to start building guided tours and scavenger hunts and hosting your spaces.",
     heading: "Confirm your email address",
-    blocks: [{ kind: "text", text: `Confirm the email address for your account at ${origin} and you can start adding spaces.` }],
+    blocks: [{ kind: "text", text: `Confirm the email address for your account at ${origin}. Then you can build guided tours and scavenger hunts, and upload captures to host as your own spaces.` }],
     action: { label: "Confirm email address", url: link }, showActionUrl: true,
     after: [{ kind: "text", text: "The link works for 7 days. If you did not create an account, you can ignore this email." }]
   });
@@ -183,31 +186,99 @@ export function filesReceivedEmail(brand: string, origin: string, space: SpaceRe
   });
 }
 
-export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, scene?: { path: string; thumbnail?: string }) {
+/** `scene.public` is the space's visibility now: a space processed again keeps the visibility its owner chose. */
+export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, scene?: { path: string; thumbnail?: string; public?: boolean }) {
   const viewer = scene ? `${origin}${scene.path}` : spacePage(origin, space);
   // Installations that publish locally list the thumbnail by path; mail needs the full address.
   const thumbnail = scene?.thumbnail?.startsWith("/") ? `${origin}${scene.thumbnail}` : scene?.thumbnail;
+  const shared = scene?.public === true;
   return render({
-    brand, origin, subject: `${space.title} is ready`, preheader: "Your space is hosted. Only you can open it until you make it public.",
+    brand, origin, subject: `${space.title} is ready`,
+    preheader: shared ? "Your space is hosted, and anyone with its link can open it." : "Your space is hosted. Only you can open it until you make it public.",
     eyebrow: space.title, heading: "Your space is ready",
     blocks: [
       ...(thumbnail ? [{ kind: "image" as const, src: thumbnail, href: viewer, alt: space.title }] : []),
-      { kind: "text", text: "It is private for now, so only you can open it. Make it public on the space page whenever you want to share the link." }
+      { kind: "text", text: shared ? "It is public, so anyone with the link can open it. Change who can see it on the space page."
+        : "It is private for now, so only you can open it. Make it public on the space page whenever you want to share the link." }
     ],
     action: { label: "Open the space", url: viewer },
     secondary: { label: "Sharing and settings", url: spacePage(origin, space) }
   });
 }
 
-export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string) {
+export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string, support?: string) {
   return render({
     brand, origin, subject: `${space.title} needs attention`, preheader: "Processing stopped before the space was finished.",
     eyebrow: space.title, heading: "We could not finish this space",
     blocks: [
       { kind: "text", text: "Processing stopped with this note." },
       { kind: "quote", text: message },
-      { kind: "text", text: "Add or replace files on the space page and processing starts again." }
+      { kind: "text", text: "Add or replace files on the space page and processing starts again." },
+      ...help(support, "Stuck, or not sure what to change?")
     ],
     action: { label: "Open the space page", url: spacePage(origin, space) }
+  });
+}
+
+// ---- Billing ----
+// Sent when Stripe's state for a subscription changes; each change is announced once (see billing.ts).
+
+const day = (seconds: number) => new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" }).format(new Date(seconds * 1000));
+const planRows = (plan: string | undefined): Block[] => plan ? [{ kind: "details", rows: [["Plan", plan]] }] : [];
+
+/** A renewal payment failed; Stripe retries it while the spaces stay online. */
+export function paymentFailedEmail(brand: string, origin: string, support: string | undefined, plan?: string) {
+  return render({
+    brand, origin, subject: "Your payment did not go through", preheader: "Your spaces are still online. Update your payment method to keep them there.",
+    heading: "Your payment did not go through",
+    blocks: [
+      { kind: "text", text: "We could not collect the latest payment for hosting your spaces. Your spaces are still online, and the payment will be tried again over the next few days." },
+      { kind: "text", text: "If it keeps failing, hosting stops and your spaces, with the tours and scavenger hunts on them, go offline until a payment goes through. To avoid that, update your payment method on your account page." },
+      ...planRows(plan)
+    ],
+    action: { label: "Update payment method", url: `${origin}/account` },
+    after: help(support)
+  });
+}
+
+/**
+ * Why hosting stopped (the plan ended as cancelled, a payment was never collected, or it ended
+ * otherwise) and what brings it back: paying the subscription that still exists, or restarting billing.
+ */
+export type HostingStop = { why: "cancelled" | "unpaid" | "ended"; fix: "payment" | "restart" };
+
+/** A subscription stopped covering hosting, so the customer's spaces went offline. */
+export function hostingStoppedEmail(brand: string, origin: string, support: string | undefined, { why, fix }: HostingStop, plan?: string) {
+  return render({
+    brand, origin, subject: "Your spaces are offline", preheader: "Hosting has stopped. Nothing has been deleted, and your spaces come back once billing does.",
+    heading: "Your spaces are offline",
+    blocks: [
+      { kind: "text", text: why === "cancelled" ? "Your plan was cancelled and has now ended, so hosting has stopped."
+        : why === "unpaid" ? "We could not collect the payment for your plan, so hosting has stopped."
+        : "Your plan has ended, so hosting has stopped." },
+      { kind: "text", text: "Your spaces, and the tours and scavenger hunts on them, no longer open for anyone, including people with a public link. Nothing has been deleted." },
+      { kind: "text", text: fix === "payment" ? "Update your payment method on your account page and they come back online as soon as the payment goes through."
+        : "Restart billing on your account page and they come back online as soon as you have paid." },
+      ...planRows(plan)
+    ],
+    action: { label: fix === "payment" ? "Update payment method" : "Restart billing", url: `${origin}/account` },
+    after: help(support)
+  });
+}
+
+/** A cancellation was scheduled for the end of the paid period. `ends` is in seconds, as Stripe gives it. */
+export function cancellationScheduledEmail(brand: string, origin: string, support: string | undefined, ends: number | null, plan?: string) {
+  const until = ends ? `until ${day(ends)}, the end of the period already paid for` : "until the end of the period already paid for";
+  return render({
+    brand, origin, subject: "Your plan is set to end", preheader: `Your spaces stay online ${until}.`,
+    heading: "Your plan is set to end",
+    blocks: [
+      { kind: "text", text: `Your plan has been cancelled. Nothing changes yet: your spaces stay online ${until}.` },
+      { kind: "text", text: "After that, your spaces and the tours and scavenger hunts on them go offline until billing restarts. Nothing is deleted." },
+      { kind: "text", text: "Changed your mind? Renew the plan under Billing and invoices on your account page before it ends, and nothing changes." },
+      ...planRows(plan)
+    ],
+    action: { label: "Open your account", url: `${origin}/account` },
+    after: help(support)
   });
 }

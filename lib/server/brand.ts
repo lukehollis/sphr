@@ -3,6 +3,11 @@ export function siteBrand() {
   return process.env.SPHR_OPERATOR_NAME?.trim() || "SPHR";
 }
 
+/** The site's public origin, for links made outside a request (emails from webhooks and sweeps). */
+export function siteOrigin() {
+  return new URL(process.env.SPHR_PUBLIC_URL || "http://localhost:3002").origin;
+}
+
 /** The operator's own website. When set, the viewer names the site above each space's title and links there. */
 export function siteHome() {
   const value = process.env.SPHR_OPERATOR_URL?.trim();
@@ -15,10 +20,19 @@ export function viewerHost() {
   return href ? { name: siteBrand(), href } : undefined;
 }
 
-/** Where larger customers write to arrange an enterprise plan. The plan choice offers it when set. */
+const emailAddress = (value: string | undefined) => value && /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(value) ? value : undefined;
+
+/**
+ * Where customers write for help. The policies, account emails and error messages name it,
+ * and replies to account emails go there unless `SPHR_MAIL_REPLY_TO` says otherwise.
+ */
+export function contactEmail() {
+  return emailAddress(process.env.SPHR_CONTACT_EMAIL?.trim());
+}
+
+/** Where larger customers write to arrange an enterprise plan, the contact address unless another is set. The plan choice offers it when there is one. */
 export function salesEmail() {
-  const value = process.env.SPHR_SALES_EMAIL?.trim();
-  return value && /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(value) ? value : undefined;
+  return emailAddress(process.env.SPHR_SALES_EMAIL?.trim()) ?? contactEmail();
 }
 
 /** Where the source code this deployment runs is published. The plan choice links to it when set. */
