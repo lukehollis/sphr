@@ -140,6 +140,8 @@ export class SphrRuntime {
    */
   private contextLost = false;
   private contextLostTimer: ReturnType<typeof setTimeout> | null = null;
+  private contextLostAt = 0;
+  private contextLostDetails = "";
   private controls: OrbitControls;
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
@@ -1085,28 +1087,54 @@ export class SphrRuntime {
     window.removeEventListener("blur", this.handleWindowBlur);
     this.canvas.removeEventListener("webglcontextlost", this.handleContextLost);
     this.canvas.removeEventListener("webglcontextrestored", this.handleContextRestored);
+    document.removeEventListener("visibilitychange", this.handleShownWhileLost);
   }
 
   private handleContextLost = () => {
     if (this.disposed) return;
     this.contextLost = true;
+    this.contextLostAt = performance.now();
     const { textures, geometries } = this.renderer.info.memory;
-    this.callbacks.onContextLost?.(`${textures} textures, ${geometries} geometries`);
+    this.contextLostDetails = `${textures} textures, ${geometries} geometries, open ${Math.round(this.contextLostAt / 60000)} min`;
+    this.waitForContext();
+  };
+
+  /**
+   * It usually comes back within a moment: Safari takes a phone's background tab's context and returns it when the
+   * tab is shown again. If it doesn't come back while the page is in view, the visitor is told rather than left with
+   * a still picture, and only then is it an error worth a notice.
+   */
+  private waitForContext() {
     if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
-    // It usually comes back within a moment. If it doesn't, the visitor is told rather than left with a still picture.
+    document.removeEventListener("visibilitychange", this.handleShownWhileLost);
+    if (document.hidden) {
+      this.contextLostTimer = null;
+      document.addEventListener("visibilitychange", this.handleShownWhileLost);
+      return;
+    }
     this.contextLostTimer = setTimeout(() => {
       this.contextLostTimer = null;
       if (!this.contextLost || this.disposed) return;
+      if (document.hidden) { this.waitForContext(); return; }
       this.state.graphicsLost = true;
       this.emitState();
+      this.callbacks.onContextLost?.(this.contextLostDetails);
     }, 3000);
+  }
+
+  private handleShownWhileLost = () => {
+    if (!this.contextLost || this.disposed) document.removeEventListener("visibilitychange", this.handleShownWhileLost);
+    else if (!document.hidden) this.waitForContext();
   };
 
   private handleContextRestored = () => {
     this.contextLost = false;
     if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
     this.contextLostTimer = null;
-    if (!this.state.graphicsLost || this.disposed) return;
+    document.removeEventListener("visibilitychange", this.handleShownWhileLost);
+    if (this.disposed) return;
+    this.callbacks.onContextRestored?.(`${this.contextLostDetails}, back after ${((performance.now() - this.contextLostAt) / 1000).toFixed(1)} s`);
+    if (!this.state.graphicsLost) return;
     this.state.graphicsLost = false;
     this.emitState();
   };

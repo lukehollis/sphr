@@ -497,8 +497,13 @@ export type RuntimeCallbacks = {
   onObjectSelect?: (id: string | null) => void;
   /** Editor: the gizmo moved, turned or scaled an object. */
   onObjectTransform?: (id: string, transform: ObjectTransform) => void;
-  /** The browser took the WebGL context away (with what was in graphics memory, for the error notice). */
+  /**
+   * The browser took the WebGL context away and hasn't given it back while the page was in view (with what was
+   * in graphics memory and how long the page had been open, for the error notice).
+   */
   onContextLost?: (details: string) => void;
   /** In a VR headset: a button on the tour panel was pressed, or a controller button asked for next/previous. */
   onXrAction?: (id: string) => void;
+  /** The browser gave a lost WebGL context back, and the space drew again. */
+  onContextRestored?: (details: string) => void;
 };

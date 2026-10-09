@@ -49,16 +49,29 @@ export function googleEvent(name: string, params?: Record<string, unknown>) {
 
 let reported = 0;
 
-/** Where in our code an error was thrown (file:line:column of its first frame in a script of ours), from its stack. */
+const stackOf = (error: unknown) => (error instanceof Error ? error.stack ?? "" : "");
+// Frames with an address: "https://…/chunk.js:1:2345", Safari's "webkit-masked-url://hidden/:2:39" for extensions.
+const framePattern = /[a-z][\w+.-]*:\/\/[^\s()@]*?:\d+:\d+/gi;
+
+/** Where an error was thrown: file:line:column of its first frame in a script of ours, else of its first frame. */
 function thrownAt(error: unknown) {
-  const stack = error instanceof Error ? error.stack ?? "" : "";
-  return /(\/_next\/[^\s()]+:\d+:\d+)/.exec(stack)?.[1] ?? "";
+  const stack = stackOf(error);
+  return /(\/_next\/[^\s()]+:\d+:\d+)/.exec(stack)?.[1] ?? stack.match(framePattern)?.[0] ?? "";
+}
+
+/**
+ * An error none of whose frames is in this site's scripts: one thrown by a script an extension or app runs in the
+ * page (iPhone Safari reported "undefined is not an object (evaluating 'e.optionsAutoSave')" from one).
+ */
+function foreign(error: unknown) {
+  const frames = stackOf(error).match(framePattern) ?? [];
+  return frames.length > 0 && !frames.some(frame => frame.includes("/_next/") || frame.startsWith(window.location.origin));
 }
 
 /** Sends a JavaScript error (a few per page at most) so failures on some browser or device show up. */
 export function reportError(kind: string, error: unknown, source = "") {
   const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? "")).slice(0, 200);
-  if (!message || isBrowserNoise(message) || isBrowserNoise(source) || reported >= 5) return;
+  if (!message || isBrowserNoise(message) || isBrowserNoise(source) || foreign(error) || reported >= 5) return;
   reported++;
   send("client_error", { kind, message, source: source.replace(window.location.origin, "").slice(0, 120) });
 }

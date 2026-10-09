@@ -163,7 +163,9 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             setRuntimeState((current) => ({ ...current, loading }));
           },
           onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
-          onXrAction: (id) => xrAction.current(id)
+          onXrAction: (id) => xrAction.current(id),
+          // Recovered, so not an error: kept with the analytics to show how often it happens.
+          onContextRestored: (details) => track("graphics_restored", { details })
         });
         runtimeRef.current = runtime;
         if (process.env.NODE_ENV !== "production") {

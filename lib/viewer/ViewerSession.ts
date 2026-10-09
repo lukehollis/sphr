@@ -83,7 +83,8 @@ export class ViewerSession {
         onObjectSelect: id => this.callbacks.onObjectSelect?.(id),
         onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform),
         onContextLost: details => this.callbacks.onContextLost?.(details),
-        onXrAction: id => this.callbacks.onXrAction?.(id)
+        onXrAction: id => this.callbacks.onXrAction?.(id),
+        onContextRestored: details => this.callbacks.onContextRestored?.(details)
       });
       if (this.editing) stage.three.setEditing(true);
       stage.three.setViewInset(this.viewInset);

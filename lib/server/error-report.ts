@@ -40,7 +40,7 @@ export function reportClientError(props: Record<string, string | number | boolea
   // A page that reloaded itself after part of it didn't arrive usually recovers. It stays in the analytics,
   // and the operator hears about it only if it is still failing after the reload. Scripts that apps and
   // extensions inject into the page stay in the analytics too, but they aren't this site's errors.
-  if (!message || props.source === "reloaded the page" || isBrowserNoise(message)) return;
+  if (!message || props.source === "reloaded the page" || isBrowserNoise(message) || isBrowserNoise(String(props.source ?? ""))) return;
   noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
     fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null]] });
 }
