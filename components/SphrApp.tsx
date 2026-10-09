@@ -8,11 +8,12 @@ import HudControls, { type SpaceDetails, type TourHeart } from "@/components/Hud
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
 import LoadingScreen from "@/components/LoadingScreen";
-import { reportError } from "@/components/Analytics";
+import { reportError, track } from "@/components/Analytics";
 import ViewLoadingIndicator from "@/components/ViewLoadingIndicator";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import type { ViewerHost } from "@/lib/host-link";
 import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
+import { vrAvailable, xrPanelFor } from "@/lib/xr-panel";
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -118,6 +119,24 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
   const [frame, setFrame] = useState(false);
   useEffect(() => { setFrame(new URLSearchParams(window.location.search).has("frame")); }, []);
   const chrome = withChrome && !frame;
+  // A headset can show the space where the browser offers VR (Quest Browser, Vision Pro and others).
+  const [vr, setVr] = useState(false);
+  const [vrError, setVrError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const check = () => { void vrAvailable().then((available) => { if (live) setVr(available); }); };
+    check();
+    // A headset plugged into a computer later can still be offered.
+    navigator.xr?.addEventListener?.("devicechange", check);
+    return () => { live = false; navigator.xr?.removeEventListener?.("devicechange", check); };
+  }, []);
+  useEffect(() => {
+    if (!vrError) return;
+    const timer = setTimeout(() => setVrError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [vrError]);
+  // Buttons on the tour panel in the headset, and its controllers' A/B buttons, come here.
+  const xrAction = useRef<(id: string) => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +162,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
           },
-          onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details)
+          onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
+          onXrAction: (id) => xrAction.current(id)
         });
         runtimeRef.current = runtime;
         if (process.env.NODE_ENV !== "production") {
@@ -279,6 +299,52 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     if (window.parent !== window) window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, continue: url }, "*");
   };
 
+  const restartTour = () => { runtimeRef.current?.restartHunt(); runtimeRef.current?.dismissFinale(); runtimeRef.current?.start(true); void runtimeRef.current?.goTo(0, 0); };
+  const enterVr = () => {
+    setVrError(null);
+    // Asked for inside the click, as browsers require.
+    runtimeRef.current?.enterXr()
+      .then(() => track("vr_enter", { tour: Boolean(tour?.hasGuidedTour) }))
+      .catch((error: unknown) => setVrError(error instanceof Error && error.message ? `Unable to open VR. ${error.message}` : "Unable to open VR."));
+  };
+  xrAction.current = (id) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    if (id === "next") runtime.next();
+    else if (id === "previous") runtime.previous();
+    else if (id === "hint") runtime.requestHint();
+    else if (id === "guide") runtime.start(true);
+    else if (id === "explore") runtime.dismissFinale();
+    else if (id === "restart") restartTour();
+    else if (id === "continue" && tour?.continueTo) {
+      tellFrameContinue(tour.continueTo.url);
+      // The next page opens on screen; the headset's session ends with this one.
+      const url = new URL(tour.continueTo.url, window.location.href);
+      if (url.origin === window.location.origin) window.location.assign(url.toString());
+      else (window.top ?? window).location.assign(url.toString());
+    }
+  };
+
+  // In a headset the tour's text and buttons show on a panel in the space instead of over the screen.
+  const inVr = Boolean(runtimeState.xr);
+  const xrPanel = useMemo(() => !inVr || !tour ? null : xrPanelFor({
+    state: runtimeState,
+    point: activePoint,
+    hasGuidedTour: tour.hasGuidedTour,
+    title: tour.title || bootstrap?.space.title,
+    description: bootstrap?.tour?.description,
+    ui: bootstrap?.ui,
+    isLastPoint,
+    stop: guidedTour && tourStops > 1 ? { index: tourStop, count: tourStops } : undefined,
+    hunt: hunt ? { step: Math.max(1, huntStep), steps: huntSteps.length, found: runtimeState.hunt?.found.length ?? 0 } : undefined,
+    finale: tour.finale,
+    continueTo: tour.continueTo
+  }), [inVr, tour, runtimeState, activePoint, bootstrap, isLastPoint, guidedTour, tourStop, tourStops, hunt, huntStep, huntSteps.length]);
+  const xrPanelKey = JSON.stringify(xrPanel);
+  useEffect(() => {
+    runtimeRef.current?.setXrPanel(xrPanelKey === "null" ? null : JSON.parse(xrPanelKey));
+  }, [xrPanelKey]);
+
   return (
     <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
@@ -293,7 +359,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
       <ViewLoadingIndicator busy={started && (Boolean(runtimeState.loading.busy) ||
         Boolean(runtimeState.reconstruction?.visible && runtimeState.reconstruction.loading))} />
 
-      {started && runtimeState.navigationError && <div className="navigation-status" role="alert">{runtimeState.navigationError}</div>}
+      {started && (vrError || runtimeState.navigationError) && <div className="navigation-status" role="alert">{vrError ?? runtimeState.navigationError}</div>}
       {started && runtimeState.earth && <div className="earth-credit">
         {/* Google asks for its logo and the map's data providers whenever its 3D map is in view. */}
         <img src="https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png" alt="Google" width={59} height={18} />
@@ -307,7 +373,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         text={tour?.finale}
         hunt={hunt ? { found: runtimeState.hunt?.found.length ?? 0, steps: huntSteps.length } : undefined}
         onExplore={() => runtimeRef.current?.dismissFinale()}
-        onRestart={() => { runtimeRef.current?.restartHunt(); runtimeRef.current?.dismissFinale(); runtimeRef.current?.start(true); void runtimeRef.current?.goTo(0, 0); }}
+        onRestart={restartTour}
       />}
       {started && chrome && activePoint && (
         <>
@@ -326,6 +392,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onToggleGuide={() => runtimeRef.current?.start(!runtimeState.guided)}
             onToggleReconstruction={() => runtimeRef.current?.toggleReconstruction()}
             onSelectReconstructionVariant={(id) => runtimeRef.current?.selectReconstructionVariant(id)}
+            onEnterVr={vr && runtimeState.loading.ready ? enterVr : undefined}
           />
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}

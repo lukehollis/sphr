@@ -69,6 +69,11 @@ double-click empty background to return to the current scan.
 Splat spaces without panoramas walk freely: the ring cursor lies on the splat surface, a
 click walks there (stood at the measured eye height), WASD walk with Q/E to sink and rise,
 Shift to run and the side arrows to turn, and double-clicking from the dollhouse steps in.
+Where the browser offers immersive VR (not on phones), a headset icon button opens the space
+in the headset (see docs/tours-and-effects.md). Moves in a headset fade through black instead
+of gliding, the horizon never tilts, and the tour's text and buttons show on a panel in the
+space. Hover tests in a headset stay cheap (rings, object boxes, the floor); exact mesh and
+splat tests run only on a press.
 
 Check real asset integrity and source alignment, then inspect actual browser behavior.
 When host browser tools are provided, follow their interaction policy; standalone

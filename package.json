@@ -24,7 +24,7 @@
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
     "test:agents": "node scripts/test-agent-connector.mjs",
     "worker": "node scripts/worker/agent-runner.mjs",
-    "test:experience": "node --experimental-transform-types --test scripts/test-experience.mjs"
+    "test:experience": "node --experimental-transform-types --test scripts/test-experience.mjs scripts/test-xr-panel.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

@@ -45,6 +45,8 @@ type Props = {
   onToggleGuide: () => void;
   onToggleReconstruction?: () => void;
   onSelectReconstructionVariant?: (id: string) => void;
+  /** Offered where the browser can show the space in a VR headset. */
+  onEnterVr?: () => void;
 };
 
 export default function HudControls({
@@ -61,7 +63,8 @@ export default function HudControls({
   onToggleMute,
   onToggleGuide,
   onToggleReconstruction,
-  onSelectReconstructionVariant
+  onSelectReconstructionVariant,
+  onEnterVr
 }: Props) {
   const reconstruction = state.reconstruction?.available && onToggleReconstruction ? state.reconstruction : null;
   return (
@@ -73,7 +76,7 @@ export default function HudControls({
       </div>}
       <header className="viewer-header">
         <SceneHeading title={title} details={details} />
-        {(hasGuidedTour || hasAudio || heart || reconstruction) && <div className="hud-right" aria-label="Viewer settings">
+        {(hasGuidedTour || hasAudio || heart || reconstruction || onEnterVr) && <div className="hud-right" aria-label="Viewer settings">
           {heart && <HeartButton heart={heart} />}
           {/* Guided tours set it per stop; the visitor can still compare the site then and now. */}
           {reconstruction && <ControlButton label={reconstruction.visible ? "Show the capture" : "Show the reconstruction"} active={reconstruction.visible} onClick={onToggleReconstruction!}>
@@ -90,6 +93,9 @@ export default function HudControls({
           </button>}
           {hasAudio && <ControlButton label={state.muted ? "Unmute audio" : "Mute audio"} onClick={onToggleMute}>
             {state.muted ? <VolumeX size={22} aria-hidden="true" /> : <Volume2 size={22} aria-hidden="true" />}
+          </ControlButton>}
+          {onEnterVr && <ControlButton label="View in VR" active={state.xr} onClick={onEnterVr}>
+            <HeadsetIcon />
           </ControlButton>}
         </div>}
       </header>
@@ -110,6 +116,17 @@ function TempleIcon() {
       <path d="M3 9h18L12 4Z" />
       <path d="M6 12v6M10 12v6M14 12v6M18 12v6" />
       <path d="M3 21h18" />
+    </svg>
+  );
+}
+
+/** A VR headset seen from the front, its two lenses either side of the nose, drawn like the other control icons. */
+function HeadsetIcon() {
+  return (
+    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4.5l-2.2-2.6a1.7 1.7 0 0 0-2.6 0L8.5 17H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+      <circle cx="7.5" cy="12" r="1.5" />
+      <circle cx="16.5" cy="12" r="1.5" />
     </svg>
   );
 }

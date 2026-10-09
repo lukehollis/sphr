@@ -6,6 +6,7 @@ import type { RuntimeState, TourContinue, TourPoint, TourUiText } from "@/lib/ty
 import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
 import { sanitizeTourHtml } from "@/lib/tour-html";
 import { paragraphs } from "@/lib/experience/types";
+import { nextButtonLabel } from "@/lib/xr-panel";
 
 type Props = {
   point: TourPoint;
@@ -115,9 +116,7 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
   const text = useMemo(() => plain ? rawText : sanitizeTourHtml(rawText), [rawText, plain]);
   const secondaryText = useMemo(() => plain ? point.secondaryText : sanitizeTourHtml(point.secondaryText), [point.secondaryText, plain]);
 
-  const nextLabel = locked ? "Find it to go on"
-    : hunt ? (isLastPoint ? "Finish" : "Next clue")
-    : isLastPoint ? ui?.continueExploringButtonText ?? "Continue exploring" : ui?.nextButtonText ?? "Next";
+  const nextLabel = nextButtonLabel({ locked, hunt: Boolean(hunt), isLastPoint, ui });
 
   const side = point.textPosition === "right" || point.textPosition === "center" ? point.textPosition : "left";
   const styleClass = textStyle === "gradient" ? ` tour-gradient tour-side-${side}` : "";

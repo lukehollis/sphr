@@ -136,6 +136,23 @@ export class ObjectLayer {
     return out;
   }
 
+  /**
+   * The nearest visible object whose box a ray meets, among those `accept` allows: quick
+   * enough to test every frame (a headset's pointer); exact picking waits for a press.
+   */
+  pickBox(ray: THREE.Ray, accept: (id: string) => boolean) {
+    let best: { id: string; distance: number; point: THREE.Vector3 } | null = null;
+    const box = new THREE.Box3();
+    for (const [id, record] of this.records) {
+      if (!record.holder.visible || !record.content || record.shown <= 0.5 || record.collect !== null || !accept(id)) continue;
+      const point = ray.intersectBox(this.bounds(id, box), new THREE.Vector3());
+      if (!point) continue;
+      const distance = point.distanceTo(ray.origin);
+      if (!best || distance < best.distance) best = { id, distance, point };
+    }
+    return best;
+  }
+
   /** The visible object under a ray, by ID. */
   pick(raycaster: THREE.Raycaster) {
     const targets: THREE.Object3D[] = [];

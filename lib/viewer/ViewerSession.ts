@@ -1,5 +1,5 @@
 import { normalizeTour } from '@/lib/bootstrap';
-import type { RuntimeCallbacks, RuntimeState, SphrBootstrap } from '@/lib/types';
+import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, XrPanel } from '@/lib/types';
 import { SphrRuntime, type EntryView, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
 import { assertNativeBootstrap } from './native';
 import { nextTourLocation, tourSegment } from './segments';
@@ -18,6 +18,7 @@ export class ViewerSession {
   private retiring = new Map<Stage, ReturnType<typeof setTimeout>>();
   private state: RuntimeState;
   private preferences: { guided: boolean; muted: boolean; showText: boolean };
+  private xrPanel: XrPanel | null = null;
 
   constructor(private readonly container: HTMLElement, private readonly bootstrap: SphrBootstrap, private readonly callbacks: RuntimeCallbacks) {
     const tour = normalizeTour(bootstrap);
@@ -81,7 +82,8 @@ export class ViewerSession {
         },
         onObjectSelect: id => this.callbacks.onObjectSelect?.(id),
         onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform),
-        onContextLost: details => this.callbacks.onContextLost?.(details)
+        onContextLost: details => this.callbacks.onContextLost?.(details),
+        onXrAction: id => this.callbacks.onXrAction?.(id)
       });
       if (this.editing) stage.three.setEditing(true);
       stage.three.setViewInset(this.viewInset);
@@ -90,6 +92,11 @@ export class ViewerSession {
       stage.three.start(this.preferences.guided);
       if (stage.three.getState().muted !== this.preferences.muted) stage.three.toggleMute();
       if (stage.three.getState().showText !== this.preferences.showText) stage.three.toggleText();
+      if (this.disposed) return;
+      stage.three.setXrPanel(this.xrPanel);
+      // In a headset the tour goes on in it: the next space's viewer takes the session over.
+      const handoff = await previous?.three?.releaseXr();
+      if (handoff) await stage.three.enterXr(handoff).catch(() => handoff.session.end().catch(() => {}));
       if (this.disposed) return;
       this.active = stage;
       this.pending = undefined;
@@ -172,6 +179,15 @@ export class ViewerSession {
   /** The site's reconstruction in place of the capture in the current view, or the capture again. */
   toggleReconstruction() { this.active?.three?.toggleReconstruction(); }
   selectReconstructionVariant(id: string) { this.active?.three?.selectReconstructionVariant(id); }
+
+  /** Show the space in a VR headset; call from the visitor's click. */
+  enterXr() { return this.active?.three?.enterXr() ?? Promise.reject(new Error('The space is still loading.')); }
+  exitXr() { this.active?.three?.exitXr(); }
+  /** What the tour panel in the headset shows. */
+  setXrPanel(panel: XrPanel | null) {
+    this.xrPanel = panel;
+    this.active?.three?.setXrPanel(panel);
+  }
 
   /** Close the closing card after a tour or hunt ends. */
   dismissFinale() { this.state = { ...this.state, finished: false }; this.emit(); }

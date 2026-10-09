@@ -12,7 +12,8 @@ import type {
   SceneGraphNode,
   SphrBootstrap,
   SplatConfig,
-  TourPoint
+  TourPoint,
+  XrPanel
 } from "@/lib/types";
 import { TextureCache } from "@/lib/three/TextureCache";
 import { prefersLight } from "@/lib/three/light";
@@ -40,6 +41,7 @@ import { freeMoveDirection, selectDirectionalTarget, selectNavigationTarget, sel
 import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
+import { ImmersiveRig, type ImmersiveHost, type XrHover } from "@/lib/three/xr/ImmersiveRig";
 import type { StartView } from '@/lib/scene-edits';
 import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopLook, StopSky, StopView, Vec3 } from "@/lib/experience/types";
 
@@ -86,6 +88,11 @@ const WALK_REACH = 8;
 const WALK_SPEED = 1.6;
 const RUN_FACTOR = 3;
 const DOWN = new THREE.Vector3(0, -1, 0);
+// In a headset each move is hidden behind a fade to black, so it only needs to be quick.
+const XR_MOVE_MS = 320;
+// What the headset asks for besides the basics: three.js draws to a projection layer where it can,
+// and hands point and pinch on headsets that track them.
+const XR_FEATURES = ["layers", "hand-tracking"];
 
 function isTypingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
@@ -190,15 +197,27 @@ export class SphrRuntime {
   private resizeObserver: ResizeObserver | null = null;
   private readonly state: RuntimeState;
   private atmosphereExposure = 1.15;
+  /** The space in a VR headset, once a visitor has asked for it. */
+  private xr: ImmersiveRig | null = null;
+  /** The way a guided stop wants the visitor to face, handed to the headset when the move lands. */
+  private xrFacing: THREE.Vector3 | null = null;
+  /** The headset's stick walking a space without panorama locations this frame: forward, right. */
+  private readonly xrWalk = new THREE.Vector2();
+  private xrPanel: XrPanel | null = null;
+  private resizeRenderer: (() => void) | null = null;
   /** Stable callback; a look can render the same atmosphere into its own frame. */
   private readonly renderScene = () => {
+    this.lightForReconstruction();
+    if (!this.reconstruction?.render(this.renderer, this.camera)) this.renderer.render(this.scene, this.camera);
+  };
+
+  private lightForReconstruction() {
     const amount = this.reconstruction?.environmentOpacity ?? 0;
     this.ambientLight.intensity = 1.7 * (1 - amount);
     this.sunLight.intensity = 3.2 * (1 - amount);
     this.renderer.toneMapping = amount > 0.001 ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(this.atmosphereExposure, 1, amount);
-    if (!this.reconstruction?.render(this.renderer, this.camera)) this.renderer.render(this.scene, this.camera);
-  };
+  }
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -521,9 +540,10 @@ export class SphrRuntime {
     const returningFromOverview = fromOverview && nextViewMode === "FPV" && !instant;
     // Moves the visitor chose are always in sight; only tour steps between unlinked scans cut.
     const teleport = nodeChanged && !fromOverview && !preserveHeading && Boolean(outgoingNode && this.nav && !this.nav.canFlyTo(node!.uuid));
-    const navigationMs = teleport ? 700 : this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
+    const navigationMs = this.immersive ? XR_MOVE_MS : teleport ? 700 : this.navigationMs();
     // With the reconstruction in view the camera simply flies there; the photographs load behind it.
-    const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV" && !this.reconstructionMove()
+    // A headset hides the move behind a fade, so it skips the projected photograph.
+    const navigationTransition = nodeChanged && !fromOverview && !teleport && !instant && this.state.viewMode === "FPV" && !this.reconstructionMove() && !this.immersive
       ? this.beginNavigationTransition(outgoingNode)
       : null;
 
@@ -531,7 +551,7 @@ export class SphrRuntime {
       this.currentNode = node;
       // Climbing, the photograph the visitor stands in stays until it fades; the next one loads on landing.
       if (!climbing) this.panorama?.navigate(node, navigationMs, {
-        replaceImmediately: returningFromOverview || instant,
+        replaceImmediately: returningFromOverview || instant || this.immersive,
         fadeStart: navigationTransition?.fadeStart
       });
       this.nav?.setActive(node.uuid);
@@ -547,13 +567,15 @@ export class SphrRuntime {
       pose.target.copy(pose.position).addScaledVector(heading, 0.1);
       pose.fov = this.camera.fov;
     }
+    // In a headset a guided stop turns the visitor toward its view once the move lands.
+    this.xrFacing = preserveHeading ? null : pose.target.clone().sub(pose.position);
     if (climbing) this.flyToEarth(pose);
     else if (returningFromOverview) this.flyFromOverview(pose);
     else if (earth && !instant && (earthPoint || earth.visible)) this.glideOverEarth(pose, earthPoint);
     else {
       if (instant) earth?.setOpacity(earthPoint ? 1 : 0);
       const reconstruction = this.reconFlight(fromOverview ? "ORBIT" : "FPV", nextViewMode);
-      this.flyTo(pose, instant || teleport, reconstruction?.done, reconstruction?.update);
+      this.flyTo(pose, instant || (teleport && !this.immersive), reconstruction?.done, reconstruction?.update);
       if (this.isNavigating && !instant) this.scheduleNavigationTransitionEnd(navigationMs);
       else if (this.isNavigating) this.endNavigationTransition();
     }
@@ -570,6 +592,7 @@ export class SphrRuntime {
       return;
     }
     const newMode = this.state.viewMode === "FPV" ? "ORBIT" : "FPV";
+    this.xrFacing = null;
     // Walking a space freely, the dollhouse returns to where the visitor stood.
     if (newMode === "ORBIT" && this.walksFreely()) this.freeView = { position: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov };
     this.nav?.beginTransition();
@@ -633,6 +656,175 @@ export class SphrRuntime {
     this.emitState();
   }
 
+  // ---- VR headsets ----
+
+  /** The space is showing in a VR headset. */
+  get immersive() {
+    return Boolean(this.xr?.presenting && this.renderer.xr.isPresenting);
+  }
+
+  /**
+   * Show the space in a VR headset (Quest Browser, Vision Pro, any WebXR browser). Without a
+   * session to take over this asks the browser for one, so it must run inside the visitor's click.
+   */
+  async enterXr(handoff?: { session: XRSession; yaw: number }) {
+    if (this.xr?.presenting || this.disposed) return;
+    const asking = handoff ? null : navigator.xr?.requestSession("immersive-vr", { optionalFeatures: XR_FEATURES });
+    if (!handoff && !asking) throw new Error("This browser cannot show VR.");
+    const session = handoff?.session ?? await asking!;
+    if (this.disposed) { await session.end().catch(() => {}); return; }
+    this.xr ??= new ImmersiveRig(this.renderer, this.scene, this.xrHost());
+    this.xr.setPanel(this.xrPanel);
+    // A new visit opens facing what the screen showed; a tour going on to this space faces its stop.
+    if (!handoff) this.xrFacing = this.camera.getWorldDirection(new THREE.Vector3());
+    this.cursor?.hide();
+    this.nav?.setHovered(null);
+    if (this.tooltip) this.tooltip.dataset.visible = "false";
+    this.hoverObjectId = null;
+    this.moveKeys.clear();
+    this.turnKeys.clear();
+    // Nothing shows behind the space in a headset.
+    this.renderer.setClearColor(0x0a0c10, 1);
+    try { await this.xr.start(session, handoff?.yaw); }
+    catch (error) {
+      this.renderer.setClearColor(0x0a0c10, 0);
+      await session.end().catch(() => {});
+      throw error;
+    }
+    this.emitState();
+  }
+
+  exitXr() {
+    this.xr?.stop();
+  }
+
+  /** Hand the headset to the next space's viewer (a tour going on to another space), once this one has faded out. */
+  async releaseXr() {
+    if (!this.xr?.presenting) return null;
+    await this.xr.darken();
+    const handoff = this.xr?.release() ?? null;
+    if (handoff) this.xrEnded();
+    return handoff;
+  }
+
+  /** The tour's text and buttons for the headset; null shows none. */
+  setXrPanel(panel: XrPanel | null) {
+    this.xrPanel = panel;
+    this.xr?.setPanel(panel);
+  }
+
+  private xrEnded() {
+    this.renderer.setClearColor(0x0a0c10, 0);
+    this.nav?.setHovered(null);
+    this.xrWalk.set(0, 0);
+    // The screen picks up where the headset looked; the page's size comes back once three.js has let go.
+    setTimeout(() => { if (!this.disposed) this.resizeRenderer?.(); }, 0);
+    this.emitState();
+  }
+
+  private renderImmersive(now: number) {
+    const xr = this.xr!;
+    xr.place(now);
+    // Close enough for hands and the panel; further out with a reconstruction or the map in view.
+    const near = THREE.MathUtils.clamp(this.camera.near, 0.03, 0.25);
+    if (xr.camera.near !== near || xr.camera.far !== this.camera.far) {
+      xr.camera.near = near;
+      xr.camera.far = this.camera.far;
+      xr.camera.updateProjectionMatrix();
+    }
+    // Looks and the reconstruction's atmosphere are drawn over the screen's picture, so a headset goes without them.
+    this.lightForReconstruction();
+    this.renderer.render(this.scene, xr.camera);
+  }
+
+  private xrHost(): ImmersiveHost {
+    const forward = new THREE.Vector3();
+    return {
+      eye: () => this.camera.position,
+      flying: () => Boolean(this.cameraTween),
+      takeFacing: () => {
+        const facing = this.xrFacing;
+        this.xrFacing = null;
+        return facing;
+      },
+      look: (quaternion) => {
+        this.camera.quaternion.copy(quaternion);
+        forward.set(0, 0, -1).applyQuaternion(quaternion);
+        const distance = this.state.viewMode === "ORBIT" ? Math.max(0.1, this.camera.position.distanceTo(this.controls.target)) : 0.1;
+        this.controls.target.copy(this.camera.position).addScaledVector(forward, distance);
+        this.camera.updateMatrixWorld();
+      },
+      walksFreely: () => this.walksFreely(),
+      hover: (ray, primary) => this.hoverAlongRay(ray, primary),
+      select: (ray) => this.selectAlongRay(ray),
+      step: (direction) => {
+        if (this.state.viewMode === "FPV" && this.state.loading.ready) void this.stepInDirection(direction);
+      },
+      walk: (forwardAmount, right) => {
+        if (this.state.loading.ready) this.xrWalk.set(forwardAmount, right);
+      },
+      action: (id) => this.callbacks.onXrAction?.(id),
+      ended: () => this.xrEnded()
+    };
+  }
+
+  private pointRaycaster(ray: THREE.Ray) {
+    this.raycaster.ray.copy(ray);
+    this.raycaster.camera = this.camera;
+    this.raycaster.near = 0;
+    this.raycaster.far = Infinity;
+  }
+
+  /**
+   * What a hand points at in the headset, tested every frame or two, so only quick tests: a
+   * placed object that answers a press (by its box), a location's ring, else the ground under
+   * the visitor. Testing a capture mesh or the splats takes a headset a whole frame, so the
+   * exact test waits for the press, hidden by the move it starts.
+   */
+  private hoverAlongRay(ray: THREE.Ray, primary: boolean): XrHover | null {
+    if (this.isNavigating || !this.state.loading.ready) return null;
+    const object = this.objects?.pickBox(ray, (id) => this.isInteractive(id));
+    if (object) {
+      if (primary) this.nav?.setHovered(null);
+      return { point: object.point, distance: object.distance, active: true };
+    }
+    this.pointRaycaster(ray);
+    const node = this.nav?.getIntersectedNode(this.raycaster) ?? null;
+    const target = node && node.uuid !== this.currentNode?.uuid ? node : null;
+    if (primary) this.nav?.setHovered(target?.uuid ?? null);
+    if (target && this.nav) {
+      const point = this.nav.getWorldFloorPosition(target);
+      return { point, normal: WORLD_UP.clone(), distance: point.distanceTo(ray.origin), active: true };
+    }
+    if (this.state.viewMode !== "FPV" || ray.direction.y > -0.02) return null;
+    const ground = this.xrGround();
+    if (ground === null) return null;
+    const distance = (ground - ray.origin.y) / ray.direction.y;
+    // Far off, the floor under the visitor no longer says where the press lands.
+    if (!(distance > 0) || distance > this.eyeHeight() * 40) return null;
+    return { point: ray.at(distance, new THREE.Vector3()), normal: WORLD_UP.clone(), distance, active: true };
+  }
+
+  /** The floor under the visitor: the current location's measured floor, or an eye height below the eye. */
+  private xrGround() {
+    if (this.currentNode && this.nav && !this.currentNode.floorUnobserved) return this.nav.getWorldFloorPosition(this.currentNode).y;
+    if (this.walksOnSplats()) return this.camera.position.y - this.eyeHeight();
+    const click = this.bootstrap.space.space_data.clickNavigation;
+    if (this.walksFreely() && click?.enabled !== false) return this.camera.position.y - (click?.yOffset ?? 1.8);
+    return null;
+  }
+
+  /** A press in the headset: the same as a click on screen along the hand's ray. */
+  private selectAlongRay(ray: THREE.Ray) {
+    if (this.isNavigating || this.cameraTween || !this.state.loading.ready) return;
+    this.pointRaycaster(ray);
+    this.xrFacing = null;
+    if (this.state.viewMode === "FPV") { this.clickInView(ray); return; }
+    const picked = this.pickObject();
+    if (picked && this.handleObjectClick(picked)) return;
+    this.enterFromOverview(ray);
+  }
+
   setFullscreen() {
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {});
@@ -643,7 +835,8 @@ export class SphrRuntime {
   }
 
   getState() {
-    return { ...this.state, activeNodeId: this.currentNode?.uuid, loading: { ...this.state.loading }, reconstruction: this.reconstructionState() };
+    return { ...this.state, activeNodeId: this.currentNode?.uuid, loading: { ...this.state.loading }, reconstruction: this.reconstructionState(),
+      ...(this.xr?.presenting ? { xr: true } : {}) };
   }
 
   getDebugSnapshot() {
@@ -678,6 +871,7 @@ export class SphrRuntime {
         hunt: this.state.hunt ?? null
       },
       splats: this.splats?.getDebugSnapshot() ?? null,
+      xr: this.xr?.getDebugSnapshot() ?? null,
       camera: {
         position: this.camera.position.toArray(),
         target: this.controls.target.toArray(),
@@ -692,6 +886,10 @@ export class SphrRuntime {
 
   dispose() {
     this.disposed = true;
+    // Leaving the page ends the headset's session, unless the next space has taken it over.
+    this.xr?.stop();
+    this.xr?.dispose();
+    this.xr = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.detachEvents();
@@ -843,6 +1041,8 @@ export class SphrRuntime {
 
   private setupRendererSize() {
     const resize = () => {
+      // The headset sets the drawing size while it shows the space; the page's size comes back after.
+      if (this.renderer.xr.isPresenting) return;
       const rect = this.canvas.getBoundingClientRect();
       const width = Math.max(1, Math.floor(rect.width || window.innerWidth));
       const height = Math.max(1, Math.floor(rect.height || window.innerHeight));
@@ -853,6 +1053,7 @@ export class SphrRuntime {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     };
     resize();
+    this.resizeRenderer = resize;
     this.resizeObserver = new ResizeObserver(resize);
     this.resizeObserver.observe(this.canvas);
 
@@ -975,6 +1176,11 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    this.clickInView(pointer);
+  };
+
+  /** A click in first person along the raycaster's ray: an object, a location to move to, or a spot to walk to. */
+  private clickInView(at: THREE.Vector2 | THREE.Ray) {
     const picked = this.pickObject();
     if (picked && this.editing) { this.selectObject(picked); return; }
     if (picked && this.handleObjectClick(picked)) return;
@@ -990,9 +1196,9 @@ export class SphrRuntime {
       return;
     }
 
-    if (this.walkToSplat(pointer)) return;
+    if (this.walkToSplat(at)) return;
     this.handleMeshFloorNavigation();
-  };
+  }
 
   private handleDoubleClick = (event: MouseEvent) => {
     if (event.button !== 0 || this.state.viewMode !== "ORBIT" || this.isNavigating) return;
@@ -1005,9 +1211,14 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    this.enterFromOverview(pointer);
+  };
+
+  /** From the dollhouse, along the raycaster's ray: into the scan nearest the spot, or back to the current one. */
+  private enterFromOverview(at: THREE.Vector2 | THREE.Ray) {
     const hit = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
     // A splat space steps down into the capture where it was double-clicked.
-    if (!hit && !this.nav && this.walksOnSplats() && this.enterSplatAt(pointer)) return;
+    if (!hit && !this.nav && this.walksOnSplats() && this.enterSplatAt(at)) return;
     let node = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     // Markers behind the visible surface must not select a different room or floor.
     if (node && hit && this.nav && this.camera.position.distanceTo(this.nav.getWorldFloorPosition(node)) > hit.distance + 0.2) node = null;
@@ -1022,7 +1233,7 @@ export class SphrRuntime {
     node ??= this.currentNode;
     if (node) void this.navigateToNode(node);
     else this.toggleViewMode();
-  };
+  }
 
   private handleWheel = (event: WheelEvent) => {
     if (this.state.viewMode !== "FPV" || this.isNavigating) return;
@@ -1106,11 +1317,12 @@ export class SphrRuntime {
    * moved onto the plane the splats around it lie on, and that plane's normal.
    * Until those are bucketed (just after loading) the surface faces the camera.
    */
-  private splatSurface(pointer: THREE.Vector2): SplatSurface | null {
+  private splatSurface(at: THREE.Vector2 | THREE.Ray): SplatSurface | null {
     const meshes = this.splats?.getMeshes() ?? [];
     if (!meshes.length) return null;
     const ray = this.surfaceRaycaster;
-    ray.setFromCamera(pointer, this.camera);
+    if (at instanceof THREE.Ray) { ray.ray.copy(at); ray.camera = this.camera; }
+    else ray.setFromCamera(at, this.camera);
     const hit = ray.intersectObjects(meshes, false)[0];
     if (!hit) return null;
     const direction = ray.ray.direction.clone();
@@ -1191,9 +1403,9 @@ export class SphrRuntime {
   }
 
   /** In first person, a click on the splats walks there, keeping the heading. */
-  private walkToSplat(pointer: THREE.Vector2) {
+  private walkToSplat(at: THREE.Vector2 | THREE.Ray) {
     if (!this.walksOnSplats()) return false;
-    const surface = this.splatSurface(pointer);
+    const surface = this.splatSurface(at);
     if (!surface) return false;
     const eye = this.eyeHeight();
     const position = this.splatStandingSpot(surface);
@@ -1216,8 +1428,8 @@ export class SphrRuntime {
   }
 
   /** From the dollhouse, a double click on the splats steps down into the capture there. */
-  private enterSplatAt(pointer: THREE.Vector2) {
-    const surface = this.splatSurface(pointer);
+  private enterSplatAt(at: THREE.Vector2 | THREE.Ray) {
+    const surface = this.splatSurface(at);
     if (!surface) return false;
     const position = this.splatStandingSpot(surface);
     // Facing on across the space the way the dollhouse looked, a little down.
@@ -1241,20 +1453,23 @@ export class SphrRuntime {
    * above the space it glides at a pace set by how far away the camera looks.
    */
   private moveFreely(elapsed: number, now: number) {
-    if (!this.moveKeys.size && this.moveVelocity.lengthSq() === 0) return;
+    const stick = this.xrWalk.lengthSq() > 0;
+    if (!this.moveKeys.size && !stick && this.moveVelocity.lengthSq() === 0) return;
     if (this.cameraTween || this.isNavigating || !this.controls.enabled || !this.state.loading.ready) {
       this.moveVelocity.set(0, 0, 0);
       return;
     }
     const input = { forward: 0, right: 0, up: 0 };
     for (const [forward, right, up] of this.moveKeys.values()) { input.forward += forward; input.right += right; input.up += up; }
+    input.forward += this.xrWalk.x;
+    input.right += this.xrWalk.y;
     const orbit = this.state.viewMode === "ORBIT";
     const speed = (orbit ? this.camera.position.distanceTo(this.controls.target) * 0.8 : this.eyeHeight() * WALK_SPEED) * (this.running ? RUN_FACTOR : 1);
     const look = this.camera.getWorldDirection(new THREE.Vector3());
     const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
     const wanted = freeMoveDirection(look, screenUp, input).multiplyScalar(speed);
     this.moveVelocity.lerp(wanted, 1 - Math.exp(-elapsed * 9));
-    if (!this.moveKeys.size && this.moveVelocity.length() < speed * 0.01) { this.moveVelocity.set(0, 0, 0); return; }
+    if (!this.moveKeys.size && !stick && this.moveVelocity.length() < speed * 0.01) { this.moveVelocity.set(0, 0, 0); return; }
     const step = this.moveVelocity.clone().multiplyScalar(elapsed);
     if (!orbit && this.splats && now - this.lastGroundSample > 100 && Math.hypot(step.x, step.z) > 0) {
       // Follow the change in the ground below, not its height, so rising with E sticks.
@@ -1345,12 +1560,13 @@ export class SphrRuntime {
       return;
     }
     if (this.disposed) return;
+    this.xrFacing = null;
     const direction = this.camera.getWorldDirection(new THREE.Vector3());
-    const transition = fromOverview || this.reconstructionMove() ? null : this.beginNavigationTransition(this.currentNode);
-    const navigationMs = this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
+    const transition = fromOverview || this.reconstructionMove() || this.immersive ? null : this.beginNavigationTransition(this.currentNode);
+    const navigationMs = this.immersive ? XR_MOVE_MS : this.navigationMs();
     this.nav?.beginTransition();
     this.currentNode = node;
-    this.panorama?.navigate(node, navigationMs, { replaceImmediately: fromOverview, fadeStart: transition?.fadeStart });
+    this.panorama?.navigate(node, navigationMs, { replaceImmediately: fromOverview || this.immersive, fadeStart: transition?.fadeStart });
     this.panorama?.setVisible(true);
     this.state.viewMode = "FPV";
     this.updateControlsForViewMode();
@@ -1365,7 +1581,7 @@ export class SphrRuntime {
     if (fromOverview) this.flyFromOverview(pose);
     else {
       const reconstruction = this.reconFlight("FPV", "FPV");
-      this.flyTo(pose, false, reconstruction?.done, reconstruction?.update);
+      this.flyTo(pose, false, reconstruction?.done, reconstruction?.update, navigationMs);
       this.scheduleNavigationTransitionEnd(navigationMs);
     }
     this.emitState();
@@ -1896,7 +2112,11 @@ export class SphrRuntime {
       const now = performance.now();
       const elapsed = Math.min(0.1, Math.max(0, (now - (this.lastFrameTime || now)) / 1000));
       this.lastFrameTime = now;
-      const turn = Math.sign([...this.turnKeys.values()].reduce((sum, value) => sum + value, 0));
+      // In a headset the head turns the view and the hands point; the rig reads them first.
+      const immersive = this.immersive;
+      this.xrWalk.set(0, 0);
+      if (immersive) this.xr!.update(elapsed, now);
+      const turn = immersive ? 0 : Math.sign([...this.turnKeys.values()].reduce((sum, value) => sum + value, 0));
       if (turn && !this.cameraTween && this.controls.enabled && this.state.viewMode === "FPV") this.turnView(turn * KEY_TURN_SPEED * elapsed);
       else if (turn && !this.cameraTween && this.controls.enabled && this.walksFreely()) this.orbitView(turn * KEY_TURN_SPEED * elapsed);
       this.moveFreely(elapsed, now);
@@ -1905,13 +2125,14 @@ export class SphrRuntime {
       if (this.transitionMeshTween && !this.transitionMeshTween.update(now)) this.transitionMeshTween = null;
       if (this.navigationReleaseTween && !this.navigationReleaseTween.update(now)) this.navigationReleaseTween = null;
       if (this.reconTween && !this.reconTween.update(now)) this.reconTween = null;
-      // OrbitControls clamps FPV distance to 0.1m. It must not rewrite an in-flight pose.
-      if (!this.cameraTween) this.controls.update();
+      // OrbitControls clamps FPV distance to 0.1m. It must not rewrite an in-flight pose, nor the head's.
+      if (!this.cameraTween && !immersive) this.controls.update();
       this.skybox?.update(this.camera);
       if (this.tourSky?.update(this.camera, elapsed)) this.applySkyLight();
       this.panorama?.update(this.camera);
       this.reconstruction?.update(this.camera);
-      this.nav?.update(this.camera, this.canvas.clientHeight);
+      // A headset's eye is about as many pixels tall as this, at the viewer's field of view.
+      this.nav?.update(this.camera, immersive ? 1200 : this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);
       this.effects?.update(now / 1000, elapsed);
       this.looks?.update(elapsed);
@@ -1921,9 +2142,10 @@ export class SphrRuntime {
       if (this.splatHover) { this.hoverSplat(this.splatHover); this.splatHover = null; }
       this.cursor?.update(now);
       try {
-        if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
+        if (immersive) this.renderImmersive(now);
+        else if (this.looks) this.looks.render(this.scene, this.camera, now / 1000, this.renderScene);
         else this.renderScene();
-        this.cursor?.render(this.renderer, this.camera);
+        if (!immersive) this.cursor?.render(this.renderer, this.camera);
       } catch (error) {
         // Losing the context mid-frame fails the frame's next WebGL call (Safari: "shaderSource must be an
         // instance of WebGLShader"); the loss itself is what gets reported.
@@ -2009,6 +2231,7 @@ export class SphrRuntime {
    * side to the other on the way.
    */
   private flyArc(pose: CameraPose, duration: number, onUpdate?: (progress: number) => void, onComplete?: () => void) {
+    if (this.immersive) duration = Math.min(duration, XR_MOVE_MS * 1.5);
     const fromTarget = this.controls.target.clone();
     const fromOffset = this.camera.position.clone().sub(fromTarget);
     const toOffset = pose.position.clone().sub(pose.target);
@@ -2046,7 +2269,8 @@ export class SphrRuntime {
   }
 
   private flyTo(pose: CameraPose, instant = false, onComplete?: () => void, onUpdate?: (progress: number) => void,
-    duration = this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100) {
+    duration = this.navigationMs()) {
+    if (this.immersive) duration = Math.min(duration, XR_MOVE_MS);
     if (instant) {
       this.cameraTween?.cancel();
       this.cameraTween = null;
@@ -2071,6 +2295,11 @@ export class SphrRuntime {
       },
       onComplete
     });
+  }
+
+  /** How long a step between panoramas takes on screen. */
+  private navigationMs() {
+    return this.bootstrap.space.space_data.navigationTransition?.navigationMs ?? 1100;
   }
 
   private setCameraPose(pose: CameraPose, updateControls = false) {

@@ -471,6 +471,21 @@ export type RuntimeState = {
    */
   reconstruction?: { available: boolean; visible: boolean; loading: boolean; title?: string; credit?: string;
     variant?: string; variants?: { id: string; title: string }[] };
+  /** The space is showing in a VR headset. */
+  xr?: boolean;
+};
+
+/** A button on the tour panel shown in a VR headset; pressing it sends its id to `onXrAction`. */
+export type XrPanelButton = { id: string; label: string; enabled?: boolean; primary?: boolean };
+
+/** What the tour panel in a VR headset shows: the stop's text and its buttons, in plain text. */
+export type XrPanel = {
+  eyebrow?: string;
+  title?: string;
+  paragraphs: string[];
+  /** A hint or other aside, set apart under the text. */
+  note?: string;
+  buttons: XrPanelButton[];
 };
 
 export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };
@@ -484,4 +499,6 @@ export type RuntimeCallbacks = {
   onObjectTransform?: (id: string, transform: ObjectTransform) => void;
   /** The browser took the WebGL context away (with what was in graphics memory, for the error notice). */
   onContextLost?: (details: string) => void;
+  /** In a VR headset: a button on the tour panel was pressed, or a controller button asked for next/previous. */
+  onXrAction?: (id: string) => void;
 };

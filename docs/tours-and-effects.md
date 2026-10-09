@@ -387,6 +387,31 @@ gone: once the space is ready and at each stop it posts
 counted across the tour's spaces), and `continue: <url>` when the visitor takes
 the onward link. Scavenger hunts post `spacery:hunt` instead.
 
+## VR headsets
+
+Where the browser can show immersive VR (Quest Browser, Pico, Vision Pro, a
+computer browser with a headset), the viewer's header offers a headset button;
+phones and browsers without VR never see it, nor does a frame that does not
+allow `xr-spatial-tracking` (a framing page adds `allow="xr-spatial-tracking"`
+to offer it). The space opens in the headset facing what the screen showed.
+
+The viewer keeps flying its own camera as it does on screen, and
+`lib/three/xr/ImmersiveRig.ts` carries the headset to it: the head turns the view,
+each move fades to black and lands with the eyes at the panorama's centre, and a
+guided stop turns the visitor toward its view as it lands. A hand ray (a
+controller's trigger, a pinch, or Vision Pro's look and pinch) does what a click
+does: rings and the floor move, placed objects answer, hunt finds count. The
+thumbstick turns in 30° steps and steps to the next location ahead, or walks
+spaces without panorama locations (left stick walks and strafes there); A or X
+is Next and B or Y Previous.
+
+The tour's text shows on a panel low and to the left in the space
+(`TourPanel.ts`), built by `xrPanelFor` in `lib/xr-panel.ts` from the same state
+as the screen's tour box: the stop's text, a hunt's clue, hint and finds, the
+closing card, and its buttons. A tour that goes on to another space hands the
+headset to that space's viewer. Looks and a reconstruction's atmosphere are drawn
+over the screen's picture, so a headset shows the space without them.
+
 ## Sound
 
 Two effects make sound. `sound` plays a clip when a stop opens, loops it
@@ -459,3 +484,7 @@ view, and spots in them are placed on the server.
 npm run test:experience
 npm run typecheck
 ```
+
+Headsets can be emulated in a desktop browser with Meta's Immersive Web
+Emulation Runtime (`iwer`), which also drives controllers and hands from a
+script for automated checks.

@@ -31,6 +31,9 @@ registerHooks({
         toggleMute() { this.state.muted = !this.state.muted; this.callbacks.onState(this.getState()); }
         toggleText() { this.state.showText = !this.state.showText; this.callbacks.onState(this.getState()); }
         setViewInset() {}
+        setXrPanel(panel) { this.xrPanel = panel; }
+        async enterXr(handoff) { this.xr = handoff ?? { session: 'headset', yaw: 0 }; }
+        releaseXr() { const handoff = this.xr ?? null; this.xr = null; return handoff; }
         dispose() { this.disposed = true; }
       }
     ` };
@@ -101,6 +104,22 @@ test('a delayed model keeps the outgoing view and caption until the incoming sce
   session.dispose();
   assert.equal(outgoing.disposed, true, 'disposal also releases canvases still fading out');
   assert.equal(renderers[1].disposed, true);
+});
+
+test('a headset goes on into the next space with its turn and the tour panel', async t => {
+  const { session } = setup(t);
+  await open(session);
+  await session.enterXr();
+  renderers[0].xr.yaw = 1.2;
+  const panel = { eyebrow: 'Stop 1 of 2', paragraphs: ['Gallery'], buttons: [{ id: 'next', label: 'Next', primary: true }] };
+  session.setXrPanel(panel);
+  assert.deepEqual(renderers[0].xrPanel, panel);
+  const transition = session.goTo(0, 1);
+  assert.equal(renderers[0].xr.yaw, 1.2, 'the outgoing space keeps the headset while the next one loads');
+  renderers[1].complete(); await transition;
+  assert.deepEqual(renderers[1].xr, { session: 'headset', yaw: 1.2 });
+  assert.equal(renderers[0].xr, null);
+  assert.deepEqual(renderers[1].xrPanel, panel);
 });
 
 test('a failed later load clears the indicator, retains the current stop and can retry', async t => {
