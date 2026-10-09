@@ -80,7 +80,7 @@ export async function sendVerification(user: User, origin: string) {
   await sendMail(user.email, verificationEmail(siteBrand(), origin, `${origin}/account/verify?token=${token}`));
 }
 
-/** Emails a space's or account's owner. A failure is logged and never fails the caller. */
+/** Emails a space's or account's owner. Never rejects: a failure is logged, so callers may fire it without awaiting. */
 export async function notifyOwner(user: User | undefined, content: MailContent) {
   if (user) await sendNotice(user.email, content, user.id);
 }

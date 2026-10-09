@@ -206,15 +206,22 @@ export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, 
   });
 }
 
-export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string, support?: string) {
+/**
+ * `stalled` is processing that stopped on our side (the worker went quiet on every attempt), so the
+ * email asks for another try rather than other files. A note that already names the contact
+ * address is not followed by it again.
+ */
+export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string, { support, stalled = false }: { support?: string; stalled?: boolean } = {}) {
   return render({
     brand, origin, subject: `${space.title} needs attention`, preheader: "Processing stopped before the space was finished.",
     eyebrow: space.title, heading: "We could not finish this space",
     blocks: [
       { kind: "text", text: "Processing stopped with this note." },
       { kind: "quote", text: message },
-      { kind: "text", text: "Add or replace files on the space page and processing starts again." },
-      ...help(support, "Stuck, or not sure what to change?")
+      { kind: "text", text: stalled ? "Your files are still there. Choose Start processing on the space page to try again."
+        : "Add or replace files on the space page and processing starts again." },
+      ...(support && message.includes(support) ? [{ kind: "text" as const, text: "You can also reply to this email." }]
+        : help(support, stalled ? "Questions?" : "Stuck, or not sure what to change?"))
     ],
     action: { label: "Open the space page", url: spacePage(origin, space) }
   });
@@ -226,14 +233,19 @@ export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef,
 const day = (seconds: number) => new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "UTC" }).format(new Date(seconds * 1000));
 const planRows = (plan: string | undefined): Block[] => plan ? [{ kind: "details", rows: [["Plan", plan]] }] : [];
 
-/** A renewal payment failed; Stripe retries it while the spaces stay online. */
-export function paymentFailedEmail(brand: string, origin: string, support: string | undefined, plan?: string) {
+/** A renewal payment failed; Stripe retries it while the spaces stay online. `spaces` is how many the account has. */
+export function paymentFailedEmail(brand: string, origin: string, support: string | undefined, { plan, spaces }: { plan?: string; spaces: number }) {
   return render({
-    brand, origin, subject: "Your payment did not go through", preheader: "Your spaces are still online. Update your payment method to keep them there.",
+    brand, origin, subject: "Your payment did not go through",
+    preheader: spaces ? "Your spaces are still online. Update your payment method to keep them there." : "Update your payment method to keep your plan.",
     heading: "Your payment did not go through",
-    blocks: [
+    blocks: spaces ? [
       { kind: "text", text: "We could not collect the latest payment for hosting your spaces. Your spaces are still online, and the payment will be tried again over the next few days." },
       { kind: "text", text: "If it keeps failing, hosting stops and your spaces, with the tours and scavenger hunts on them, go offline until a payment goes through. To avoid that, update your payment method on your account page." },
+      ...planRows(plan)
+    ] : [
+      { kind: "text", text: "We could not collect the latest payment for your plan. It will be tried again over the next few days." },
+      { kind: "text", text: "If it keeps failing, your plan ends. To avoid that, update your payment method on your account page." },
       ...planRows(plan)
     ],
     action: { label: "Update payment method", url: `${origin}/account` },
@@ -266,15 +278,24 @@ export function hostingStoppedEmail(brand: string, origin: string, support: stri
   });
 }
 
-/** A cancellation was scheduled for the end of the paid period. `ends` is in seconds, as Stripe gives it. */
-export function cancellationScheduledEmail(brand: string, origin: string, support: string | undefined, ends: number | null, plan?: string) {
-  const until = ends ? `until ${day(ends)}, the end of the period already paid for` : "until the end of the period already paid for";
+/**
+ * A cancellation was scheduled, for the period's end or a date. `ends` is in seconds, as Stripe gives
+ * it. `paid` is false while a payment is overdue: the time until the end is then not paid for.
+ */
+export function cancellationScheduledEmail(brand: string, origin: string, support: string | undefined,
+  { ends, paid, spaces, plan }: { ends: number | null; paid: boolean; spaces: number; plan?: string }) {
+  const date = ends ? `on ${day(ends)}` : "at the end of the current billing period";
+  const lead = paid
+    ? `Your plan has been cancelled. Nothing changes yet: it ends ${date}${ends ? ", the end of the period already paid for" : ""}.`
+    : `Your plan has been cancelled and ends ${date}.`;
   return render({
-    brand, origin, subject: "Your plan is set to end", preheader: `Your spaces stay online ${until}.`,
+    brand, origin, subject: "Your plan is set to end", preheader: `Your plan ends ${date}.`,
     heading: "Your plan is set to end",
     blocks: [
-      { kind: "text", text: `Your plan has been cancelled. Nothing changes yet: your spaces stay online ${until}.` },
-      { kind: "text", text: "After that, your spaces and the tours and scavenger hunts on them go offline until billing restarts. Nothing is deleted." },
+      { kind: "text", text: lead },
+      ...(!paid ? [{ kind: "text" as const, text: spaces ? "Your latest payment has not gone through yet. Your spaces stay online while it is tried again, but if it is not paid they go offline sooner. Update your payment method on your account page to keep them online until then."
+        : "Your latest payment has not gone through yet. Update your payment method on your account page." }] : []),
+      ...(spaces ? [{ kind: "text" as const, text: "When it ends, your spaces and the tours and scavenger hunts on them go offline until billing restarts. Nothing is deleted." }] : []),
       { kind: "text", text: "Changed your mind? Renew the plan under Billing and invoices on your account page before it ends, and nothing changes." },
       ...planRows(plan)
     ],

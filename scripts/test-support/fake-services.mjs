@@ -80,6 +80,15 @@ export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
         if (form.has('items[0][quantity]')) item.quantity = Number(form.get('items[0][quantity]'));
         state.planChanges.push({ price: item.price.id, quantity: item.quantity, proration: form.get('proration_behavior') });
       }
+      if (request.method === 'GET' && state.nextRead) {
+        // A held read answers with what Stripe had when the request arrived, once the test releases it.
+        const { arrived, gate } = state.nextRead;
+        state.nextRead = undefined;
+        const snapshot = structuredClone(subscription);
+        arrived();
+        await gate;
+        return send(snapshot);
+      }
       return send(subscription);
     }
     if (request.method === 'POST' && parts[1] === 'subscription_items') {
@@ -105,6 +114,14 @@ export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
     state.subscriptions.set(subscription.id, subscription);
     Object.assign(session, { status: 'complete', subscription: subscription.id });
     return subscription;
+  };
+  // Holds the next subscription read, to overlap two syncs: `reached` resolves when it arrives, `release` sends its reply.
+  state.holdNextRead = () => {
+    let arrived, release;
+    const reached = new Promise(resolve => { arrived = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    state.nextRead = { arrived, gate };
+    return { reached, release };
   };
   // Simulates a customer saving a card in a setup-mode Checkout.
   state.saveCard = sessionId => {

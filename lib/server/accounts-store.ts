@@ -51,6 +51,10 @@ function store() {
   if (!(connection.prepare("PRAGMA table_info(customer_spaces)").all() as { name: string }[]).some(column => column.name === "output")) {
     connection.exec("ALTER TABLE customer_spaces ADD COLUMN output TEXT");
   }
+  // A cancellation set for a date (`cancel_at`), which Stripe's Dashboard and portal may schedule instead of one at the period's end.
+  if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "cancel_at")) {
+    connection.exec("ALTER TABLE subscriptions ADD COLUMN cancel_at INTEGER");
+  }
   // When a customer saved a card without hosting anything yet, which is enough to build tours.
   if (!(connection.prepare("PRAGMA table_info(users)").all() as { name: string }[]).some(column => column.name === "card_saved")) {
     connection.exec("ALTER TABLE users ADD COLUMN card_saved TEXT");
@@ -407,10 +411,24 @@ export function setCheckoutSession(userId: string, session: string | null) {
 export const hostingStatuses = new Set(["active", "trialing", "past_due"]);
 /** The price a subscription pays. `spaces` is how many spaces a plan covers; null means billed per space. */
 export type SubscriptionPlan = { price: string; amount: number | null; currency: string; interval: string; intervalCount: number; spaces: number | null };
+/**
+ * `cancelAtPeriodEnd` and `cancelAt` (seconds) are Stripe's two ways to schedule a cancellation: at
+ * the period's end, or at a date. See `cancellationScheduled` and `cancellationDate`.
+ */
 export type Subscription = { id: string; item: string | null; status: string; quantity: number; periodEnd: number | null; cancelAtPeriodEnd: boolean;
-  plan: SubscriptionPlan | null };
+  cancelAt: number | null; plan: SubscriptionPlan | null };
 type SubscriptionRow = { subscription: string; item: string | null; status: string; quantity: number; period_end: number | null; cancel_at_period_end: number;
-  plan: string | null };
+  cancel_at: number | null; plan: string | null };
+
+/** Whether the subscription is set to end, at the period's end or at a date. */
+export function cancellationScheduled(subscription: Subscription) {
+  return subscription.cancelAtPeriodEnd || subscription.cancelAt !== null;
+}
+
+/** When a scheduled cancellation ends the subscription (seconds), or null when none is scheduled or its date is unknown. */
+export function cancellationDate(subscription: Subscription) {
+  return subscription.cancelAt ?? (subscription.cancelAtPeriodEnd ? subscription.periodEnd : null);
+}
 
 function parsePlan(value: string | null): SubscriptionPlan | null {
   try { return value ? JSON.parse(value) as SubscriptionPlan : null; } catch { return null; }
@@ -419,7 +437,7 @@ function parsePlan(value: string | null): SubscriptionPlan | null {
 export function readSubscription(userId: string): Subscription | undefined {
   const row = store().prepare("SELECT * FROM subscriptions WHERE user_id=?").get(userId) as SubscriptionRow | undefined;
   return row && { id: row.subscription, item: row.item, status: row.status, quantity: row.quantity, periodEnd: row.period_end,
-    cancelAtPeriodEnd: row.cancel_at_period_end === 1, plan: parsePlan(row.plan) };
+    cancelAtPeriodEnd: row.cancel_at_period_end === 1, cancelAt: row.cancel_at ?? null, plan: parsePlan(row.plan) };
 }
 
 /** How many spaces the customer's plan covers, or null when each space is billed. */
@@ -435,12 +453,12 @@ export function saveSubscription(userId: string, subscription: Subscription) {
     // A late event for an older, ended subscription must not replace a live one.
     if (current && current.id !== subscription.id && hostingStatuses.has(current.status) && !hostingStatuses.has(subscription.status)) return { saved: false, previous: current };
     store().prepare("DELETE FROM subscriptions WHERE subscription=? AND user_id<>?").run(subscription.id, userId);
-    store().prepare(`INSERT INTO subscriptions(user_id, subscription, item, status, quantity, period_end, cancel_at_period_end, updated, plan)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
+    store().prepare(`INSERT INTO subscriptions(user_id, subscription, item, status, quantity, period_end, cancel_at_period_end, cancel_at, updated, plan)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET
       subscription=excluded.subscription, item=excluded.item, status=excluded.status, quantity=excluded.quantity,
-      period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, updated=excluded.updated, plan=excluded.plan`)
+      period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, cancel_at=excluded.cancel_at, updated=excluded.updated, plan=excluded.plan`)
       .run(userId, subscription.id, subscription.item, subscription.status, subscription.quantity, subscription.periodEnd,
-        Number(subscription.cancelAtPeriodEnd), now(), subscription.plan ? JSON.stringify(subscription.plan) : null);
+        Number(subscription.cancelAtPeriodEnd), subscription.cancelAt, now(), subscription.plan ? JSON.stringify(subscription.plan) : null);
     return { saved: true, previous: current };
   });
 }
@@ -615,10 +633,17 @@ type JobRow = { id: string; space_id: string; scene_id: string; status: JobStatu
 const toJob = (row: JobRow): Job => ({ id: row.id, spaceId: row.space_id, sceneId: row.scene_id, status: row.status, attempts: row.attempts,
   worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished });
 export const maxJobAttempts = 3;
-/** Shown on a space whose job was held or gave up, so the customer sees a reason rather than endless processing. */
+/** Shown on a space whose job the agent held for an operator, so the customer sees a reason rather than endless processing. */
 export function heldSpaceMessage() {
   const contact = contactEmail();
   return `We couldn't finish building this space. Check that your files are a capture and try again, or ${contact ? `write to ${contact}` : "contact support"} if it keeps happening.`;
+}
+
+/** Shown on a space whose worker stopped answering on every attempt: our failure, not the customer's files. */
+export function stalledSpaceMessage() {
+  const contact = contactEmail();
+  return `Our processing stopped before this space was finished. The problem was on our side, not with your files, and we are looking into it. `
+    + `You can start processing again from the space page${contact ? `, or write to ${contact}` : ""}.`;
 }
 
 function unusedSceneId() {
@@ -733,7 +758,7 @@ export function expireJobLeases(hours: number) {
         store().prepare("UPDATE jobs SET status='held', message=? WHERE id=?").run(`Stopped after ${job.attempts} attempts without a result.`, job.id);
         // Don't leave the customer's space processing forever once the job has given up.
         const moved = store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=? AND status IN ('processing','queued')")
-          .run(heldSpaceMessage(), now(), job.space_id).changes > 0;
+          .run(stalledSpaceMessage(), now(), job.space_id).changes > 0;
         if (moved) stopped.push({ job: readJob(job.id)!, space: readCustomerSpace(job.space_id)! });
       } else {
         store().prepare("UPDATE jobs SET status='queued', worker=NULL, started=NULL WHERE id=?").run(job.id);

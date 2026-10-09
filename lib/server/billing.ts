@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { AccountError, activateUnpaidSpaces, billableSpaceCount, hostingStatuses, payableSpaceCount, readSubscription, readUser,
+import { AccountError, activateUnpaidSpaces, billableSpaceCount, cancellationDate, cancellationScheduled, hostingStatuses, payableSpaceCount, readSubscription, readUser,
   saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
@@ -226,46 +226,64 @@ function planPath(build: string) {
   return `/account/plan?build=${scene ?? "1"}`;
 }
 
-/** Copies Stripe's current subscription state; event payloads may arrive out of order, so they are never trusted directly. */
+/** The account a Stripe subscription belongs to: its customer's, unless its metadata names another account. */
+function subscriptionUser(subscription: Stripe.Subscription) {
+  const userId = userIdForCustomer(typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id);
+  return userId && !(subscription.metadata?.sphr_user && subscription.metadata.sphr_user !== userId) ? userId : undefined;
+}
+
+/**
+ * Copies Stripe's current subscription state; event payloads may arrive out of order, so they are
+ * never trusted directly. A first read finds the account; the state that is saved is read again
+ * under that account's lock, so a sync that read Stripe earlier can never save an older state over
+ * a newer one (and have the next event announce the same change again).
+ */
 export async function syncSubscription(id: string) {
-  const subscription = await stripe().subscriptions.retrieve(id);
-  const customer = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
-  const userId = userIdForCustomer(customer);
-  if (!userId || (subscription.metadata?.sphr_user && subscription.metadata.sphr_user !== userId)) return;
-  // Existing customers keep the price they subscribed at when the configured prices change.
-  const stored = readSubscription(userId);
-  const offered = new Set([priceId(), ...planPriceIds()]);
-  const item = subscription.items.data.find(entry => entry.id === stored?.item) ?? subscription.items.data.find(entry => offered.has(entry.price.id))
-    ?? subscription.items.data[0];
-  if (!item) return;
-  if (stored && stored.id !== subscription.id && hostingStatuses.has(stored.status) && hostingStatuses.has(subscription.status)) {
-    console.error(`Customer ${userId} has two live subscriptions (${stored.id}, ${subscription.id}); keeping ${stored.id}. Cancel one in Stripe.`);
-    return;
-  }
-  const next = { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
-    periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, plan: subscriptionPlan(item.price) };
-  const { saved, previous } = saveSubscription(userId, next);
-  if (saved) {
-    void announceBillingChange(userId, previous, next)
-      .catch(error => console.error(`Unable to announce a billing change for account ${userId}:`, error instanceof Error ? error.message : error));
-  }
-  if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
-    activateUnpaidSpaces(userId);
-    await syncQuantity(userId);
-  }
+  const userId = subscriptionUser(await stripe().subscriptions.retrieve(id));
+  if (!userId) return;
+  await serialized(`subscription:${userId}`, async () => {
+    const subscription = await stripe().subscriptions.retrieve(id);
+    if (subscriptionUser(subscription) !== userId) return;
+    // Existing customers keep the price they subscribed at when the configured prices change.
+    const stored = readSubscription(userId);
+    const offered = new Set([priceId(), ...planPriceIds()]);
+    const item = subscription.items.data.find(entry => entry.id === stored?.item) ?? subscription.items.data.find(entry => offered.has(entry.price.id))
+      ?? subscription.items.data[0];
+    if (!item) return;
+    if (stored && stored.id !== subscription.id && hostingStatuses.has(stored.status) && hostingStatuses.has(subscription.status)) {
+      console.error(`Customer ${userId} has two live subscriptions (${stored.id}, ${subscription.id}); keeping ${stored.id}. Cancel one in Stripe.`);
+      return;
+    }
+    const next = { id: subscription.id, item: item.id, status: subscription.status, quantity: item.quantity ?? 0,
+      periodEnd: item.current_period_end ?? null, cancelAtPeriodEnd: subscription.cancel_at_period_end, cancelAt: subscription.cancel_at ?? null,
+      plan: subscriptionPlan(item.price) };
+    const { saved, previous } = saveSubscription(userId, next);
+    if (saved) {
+      void announceBillingChange(userId, previous, next)
+        .catch(error => console.error(`Unable to announce a billing change for account ${userId}:`, error instanceof Error ? error.message : error));
+    }
+    // Quantity updates take the account's own lock (`userId`), never this one, so they cannot wait on each other.
+    if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
+      activateUnpaidSpaces(userId);
+      await syncQuantity(userId);
+    }
+  });
 }
 
 /**
  * Tells the operator when hosting starts, changes plan, stops paying, is cancelled or ends, and
  * tells the customer when a payment fails, a cancellation is scheduled or hosting stops. Each
  * change is seen once: `saveSubscription` compares Stripe's state with the saved copy in one
- * transaction, so repeated events, redelivered webhooks and returns from Checkout say nothing.
+ * transaction, and syncs for one account run one at a time, so repeated events, redelivered
+ * webhooks and returns from Checkout say nothing. Customers without spaces (a plan taken to
+ * build tours) are not told that spaces went offline; the account page says nothing then either.
  */
 async function announceBillingChange(userId: string, previous: Subscription | undefined, next: Subscription) {
   const user = readUser(userId);
   const email = user?.email ?? userId;
   const plans = await readPlans().catch(() => []);
   const price = describePrice(next.plan, plans);
+  const spaces = payableSpaceCount(userId);
   const tell = (content: MailContent) => { if (user) void sendNotice(user.email, content, user.id); };
   const wasHosting = Boolean(previous && previous.id === next.id && hostingStatuses.has(previous.status));
   const hosting = hostingStatuses.has(next.status);
@@ -278,26 +296,28 @@ async function announceBillingChange(userId: string, previous: Subscription | un
   if (wasHosting && !hosting) {
     saveEvent("subscription_ended", { userId, props: { status: next.status } });
     // As the account page does: a subscription that still exists unpaid is repaired with a new payment
-    // method, an ended one by restarting billing. A plan cancelled for the period's end ended as asked.
+    // method, an ended one by restarting billing. A plan whose cancellation was scheduled ended as asked.
     const fix: HostingStop["fix"] = ["unpaid", "incomplete", "paused"].includes(next.status) ? "payment" : "restart";
-    const why: HostingStop["why"] = previous.cancelAtPeriodEnd && next.status === "canceled" ? "cancelled"
+    const why: HostingStop["why"] = cancellationScheduled(previous) && next.status === "canceled" ? "cancelled"
       : previous.status === "past_due" || fix === "payment" ? "unpaid" : "ended";
-    tell(hostingStoppedEmail(siteBrand(), siteOrigin(), contactEmail(), { why, fix }, price));
+    if (spaces) tell(hostingStoppedEmail(siteBrand(), siteOrigin(), contactEmail(), { why, fix }, price));
     return notifyTeam({ title: "Hosting stopped", tone: "bad", description: `The subscription is now ${next.status}, so this account's spaces are offline.`, fields });
   }
   if (previous.status !== "past_due" && next.status === "past_due") {
-    tell(paymentFailedEmail(siteBrand(), siteOrigin(), contactEmail(), price));
+    tell(paymentFailedEmail(siteBrand(), siteOrigin(), contactEmail(), { plan: price, spaces }));
     return notifyTeam({ title: "Payment failed", tone: "warn", description: "Stripe is retrying the payment; spaces stay online meanwhile.", fields });
   }
   if (previous.plan?.price !== next.plan?.price && hosting) {
     return notifyTeam({ title: "Plan changed", tone: "money", fields: [["Account", email], ["From", describePrice(previous.plan, plans)], ["To", price]] });
   }
-  if (!previous.cancelAtPeriodEnd && next.cancelAtPeriodEnd) {
-    if (hosting) tell(cancellationScheduledEmail(siteBrand(), siteOrigin(), contactEmail(), next.periodEnd, price));
+  const ends = cancellationDate(next);
+  if (!cancellationScheduled(previous) && cancellationScheduled(next)) {
+    // A payment still overdue means the period is not paid for; the email does not claim it is.
+    if (hosting) tell(cancellationScheduledEmail(siteBrand(), siteOrigin(), contactEmail(), { ends, paid: next.status !== "past_due", spaces, plan: price }));
     return notifyTeam({ title: "Cancellation scheduled", tone: "warn",
-      fields: [...fields, ["Ends", next.periodEnd ? new Date(next.periodEnd * 1000).toISOString().slice(0, 10) : null]] });
+      fields: [...fields, ["Ends", ends ? new Date(ends * 1000).toISOString().slice(0, 10) : null]] });
   }
-  if (previous.cancelAtPeriodEnd && !next.cancelAtPeriodEnd && hosting) return notifyTeam({ title: "Cancellation withdrawn", tone: "good", fields });
+  if (cancellationScheduled(previous) && !cancellationScheduled(next) && hosting) return notifyTeam({ title: "Cancellation withdrawn", tone: "good", fields });
 }
 
 /**

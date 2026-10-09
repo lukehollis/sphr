@@ -34,7 +34,7 @@ async function announceStalled(job: Job, space: CustomerSpace, origin: string) {
   saveEvent("space_failed", { userId: space.userId, props: { stalled: true } });
   void notifyTeam({ title: "Space held for review", tone: "warn", description: job.message ?? undefined,
     fields: [["Title", space.title], ["Account", owner?.email]] });
-  await notifyOwner(owner, spaceFailedEmail(siteBrand(), origin, space, space.message ?? "", contactEmail()));
+  await notifyOwner(owner, spaceFailedEmail(siteBrand(), origin, space, space.message ?? "", { support: contactEmail(), stalled: true }));
 }
 
 /** Processing workers authenticate with one shared bearer token of at least 32 characters. */

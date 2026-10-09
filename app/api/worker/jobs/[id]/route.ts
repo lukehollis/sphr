@@ -53,7 +53,8 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_failed", { userId: held.space.userId });
         void notifyTeam({ title: "Space held for review", tone: "warn", description: message ?? undefined,
           fields: [["Title", held.space.title], ["Account", readUser(held.space.userId)?.email]] });
-        await notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "", contactEmail()));
+        // Not awaited, like every owner email here: the worker never waits on the mail server, and notifyOwner logs its own failures.
+        void notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "", { support: contactEmail() }));
       }
       return workerResponse({ job: jobDetails(readJob(job.id)!) });
     }
@@ -75,7 +76,7 @@ export async function POST(request: Request, { params }: Params) {
         void notifyTeam({ title: "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
           ["Account", readUser(result.space.userId)?.email], ["Link", `${publicOrigin(request)}${listing.scenePath}`], ["Note", message]] });
         // A space processed again keeps its scene ID and the visibility its owner chose.
-        await notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
+        void notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
           { path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(job.sceneId) }));
       }
       return workerResponse({ job: jobDetails(result.job) });
@@ -87,7 +88,7 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_failed", { userId: result.space.userId });
         void notifyTeam({ title: "Space needs attention", tone: "bad", description: message,
           fields: [["Title", result.space.title], ["Account", readUser(result.space.userId)?.email]] });
-        await notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message, contactEmail()));
+        void notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message, { support: contactEmail() }));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }

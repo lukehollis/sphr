@@ -622,6 +622,7 @@ try {
   assert.equal(body.space.message, 'Please upload the E57 export instead of the raw capture.');
   const heldMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention'));
   assert.ok(heldMail.includes('or write to help@example.com if it keeps happening'), 'the held space names the contact address, not just "support"');
+  assert.equal(heldMail.split('Content-Type: text/html')[0].split('help@example.com').length - 1, 2, 'once in the body (and once as Reply-To)');
   const failedMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention')
     && message.includes('Please upload the E57 export instead'));
   assert.ok(failedMail.includes('Reply to this email or write to help@example.com.'), 'the needs-attention email says how to reach a person');
@@ -639,7 +640,11 @@ try {
   database().prepare("UPDATE customer_spaces SET status='processing' WHERE id=?").run(stalledSpace.id);
   assert.equal((await worker('/api/worker/jobs?status=queued')).status, 200);
   const stalledNotice = await mail.waitFor(stalledMail);
-  assert.ok(stalledNotice.includes('or write to help@example.com if it keeps happening') && stalledNotice.includes('Reply to this email or write to help@example.com.'));
+  const stalledText = stalledNotice.split('Content-Type: text/html')[0];
+  assert.ok(stalledText.includes('The problem was on our side, not with your files'), 'a worker that went quiet is not blamed on the files');
+  assert.ok(!stalledText.includes('Check that your files'));
+  assert.ok(stalledText.includes('Choose Start processing on the space page to try again'));
+  assert.equal(stalledText.split('help@example.com').length - 1, 2, 'the contact address appears once in the body (and once as Reply-To)');
   body = await (await aliceLaptop.get(`/api/account/spaces/${stalledSpace.id}`)).json();
   assert.equal(body.space.status, 'failed', 'the stalled space stops processing');
   for (let sweep = 0; sweep < 2; sweep++) assert.equal((await worker('/api/worker/jobs?status=queued')).status, 200);

@@ -214,12 +214,17 @@ test('spaces, uploads and the processing queue', async () => {
     assert.deepEqual(stopped.map(item => [item.job.id, item.space.id, item.space.status]), attempt < store.maxJobAttempts ? [] : [[lease.id, stalled.id, 'failed']]);
   }
   assert.equal(store.readCustomerSpace(stalled.id).status, 'failed', 'a job that gives up stops the space processing');
+  assert.equal(store.readCustomerSpace(stalled.id).message, store.stalledSpaceMessage(), 'a stalled job has its own message');
+  assert.match(store.stalledSpaceMessage(), /on our side, not with your files/);
+  assert.doesNotMatch(store.stalledSpaceMessage(), /Check that your files/, 'a worker that went quiet is not blamed on the files');
   assert.deepEqual(store.expireJobLeases(-1), [], 'later sweeps report nothing again');
-  // The message on the space names the contact address when the deployment has one.
+  // The messages on the space name the contact address, once, when the deployment has one.
   process.env.SPHR_CONTACT_EMAIL = 'help@example.com';
   assert.match(store.heldSpaceMessage(), /or write to help@example\.com if it keeps happening\.$/);
+  assert.match(store.stalledSpaceMessage(), /start processing again from the space page, or write to help@example\.com\.$/);
   delete process.env.SPHR_CONTACT_EMAIL;
   assert.match(store.heldSpaceMessage(), /or contact support if it keeps happening\.$/);
+  assert.match(store.stalledSpaceMessage(), /start processing again from the space page\.$/);
 });
 
 test('ID tokens: signature, issuer, audience, lifetime, nonce and key rotation', async () => {
@@ -294,18 +299,27 @@ test('account emails: what to make, visibility, the contact address and billing 
   assert.match(shared.text, /It is public, so anyone with the link can open it/);
   assert.match(shared.html, /anyone with its link can open it/, 'the preheader says so too');
 
-  const failed = emails.spaceFailedEmail('Spaces', origin, space, 'Upload the E57 export.', 'help@example.com');
+  const failed = emails.spaceFailedEmail('Spaces', origin, space, 'Upload the E57 export.', { support: 'help@example.com' });
   assert.match(failed.text, /Reply to this email or write to help@example\.com\./);
   assert.match(failed.html, /help@example\.com/);
   assert.doesNotMatch(emails.spaceFailedEmail('Spaces', origin, space, 'Upload the E57 export.').text, /Reply to this email/,
     'without a contact address the email does not invite replies');
+  const named = emails.spaceFailedEmail('Spaces', origin, space, 'Try again, or write to help@example.com if it keeps happening.', { support: 'help@example.com' });
+  assert.equal(named.text.split('help@example.com').length - 1, 1, 'a note that names the contact address is not followed by it again');
+  assert.match(named.text, /You can also reply to this email\./);
+  const stalled = emails.spaceFailedEmail('Spaces', origin, space, 'Our processing stopped.', { support: 'help@example.com', stalled: true });
+  assert.match(stalled.text, /Your files are still there\. Choose Start processing on the space page to try again\./);
+  assert.doesNotMatch(stalled.text, /Add or replace files/, 'processing that stopped on our side does not ask for other files');
 
-  const payment = emails.paymentFailedEmail('Spaces', origin, 'help@example.com', 'Starter, $8.00 a month');
+  const payment = emails.paymentFailedEmail('Spaces', origin, 'help@example.com', { plan: 'Starter, $8.00 a month', spaces: 2 });
   assert.equal(payment.subject, 'Your payment did not go through');
   assert.match(payment.text, /still online/);
   assert.match(payment.text, /Update payment method\nhttps:\/\/app\.example\/account/);
   assert.match(payment.text, /Starter, \$8\.00 a month/);
   assert.match(payment.text, /write to help@example\.com/);
+  const planOnly = emails.paymentFailedEmail('Spaces', origin, 'help@example.com', { plan: 'Starter, $8.00 a month', spaces: 0 });
+  assert.doesNotMatch(planOnly.text + planOnly.html, /spaces are still online|go offline/, 'an account without spaces is not told about spaces');
+  assert.match(planOnly.text, /If it keeps failing, your plan ends\./);
 
   const lapsed = emails.hostingStoppedEmail('Spaces', origin, 'help@example.com', { why: 'unpaid', fix: 'payment' });
   assert.match(lapsed.text, /could not collect the payment/);
@@ -315,10 +329,17 @@ test('account emails: what to make, visibility, the contact address and billing 
   assert.match(ended.text, /cancelled and has now ended/);
   assert.match(ended.text, /Restart billing\nhttps:\/\/app\.example\/account/);
 
-  const cancelling = emails.cancellationScheduledEmail('Spaces', origin, 'help@example.com', 1900000000);
-  assert.match(cancelling.text, /stay online until March 17, 2030/);
+  const cancelling = emails.cancellationScheduledEmail('Spaces', origin, 'help@example.com', { ends: 1900000000, paid: true, spaces: 2 });
+  assert.match(cancelling.text, /Nothing changes yet: it ends on March 17, 2030, the end of the period already paid for\./);
+  assert.match(cancelling.text, /your spaces and the tours and scavenger hunts on them go offline/);
   assert.match(cancelling.text, /Renew the plan/);
-  for (const message of [payment, lapsed, ended, cancelling]) {
+  const overdue = emails.cancellationScheduledEmail('Spaces', origin, 'help@example.com', { ends: 1900000000, paid: false, spaces: 2 });
+  assert.match(overdue.text, /Your plan has been cancelled and ends on March 17, 2030\./);
+  assert.doesNotMatch(overdue.text + overdue.html, /paid for/, 'a cancellation while a payment is overdue does not claim the period is paid');
+  assert.match(overdue.text, /Your latest payment has not gone through yet/);
+  const toursOnly = emails.cancellationScheduledEmail('Spaces', origin, 'help@example.com', { ends: 1900000000, paid: true, spaces: 0 });
+  assert.doesNotMatch(toursOnly.text + toursOnly.html, /go offline|spaces stay|your spaces and/, 'an account without spaces is not told about spaces');
+  for (const message of [payment, planOnly, lapsed, ended, cancelling, overdue, toursOnly]) {
     assert.ok(message.html.includes('<!doctype html>') && message.html.includes(`${origin}/account`), `${message.subject} has an HTML part with the account link`);
   }
 });
@@ -383,7 +404,7 @@ test('billing follows the number of hosted spaces', async () => {
   await billing.syncSubscription(subscription.id);
   await billing.syncSubscription(subscription.id);
   const [cancelling] = await mail.waitFor(() => mailTo('billing@example.com', 'Your plan is set to end').length).then(() => mailTo('billing@example.com', 'Your plan is set to end'));
-  assert.match(cancelling, /stay online until March 17, 2030/);
+  assert.match(cancelling, /it ends on March 17, 2030, the end of the period already paid for/);
   assert.match(cancelling, /^Reply-To: help@example\.com$/m, 'replies reach a person');
   assert.match(cancelling, /^From: Spaces <no-reply@example\.com>$/m);
   subscription.cancel_at_period_end = false;
@@ -507,6 +528,64 @@ test('plans cover a set number of spaces for one price', async () => {
   const ended = await mail.waitFor(message => message.includes('To: plans@example.com') && message.includes('Subject: Your spaces are offline'));
   assert.match(ended, /Your plan has ended, so hosting has stopped\./, 'a plan cancelled at once simply ended');
   assert.match(ended, /Pay as you go/, 'the email names the plan');
+});
+
+test('overlapping syncs keep the newest state and announce it once; a cancellation set for a date is scheduled too', async () => {
+  const billing = await import('../lib/server/billing.ts');
+  const origin = 'https://app.example';
+  const user = await store.createPasswordUser('overlap@example.com', 'password one', null);
+  store.markEmailVerified(user.id);
+  store.createCustomerSpace(user.id, 'Porch', 'unpaid');
+  const started = await billing.startCheckout(store.readUser(user.id), origin);
+  const subscription = fake.state.pay([...fake.state.sessions.values()].find(item => item.url === started.url).id);
+  await billing.syncSubscription(subscription.id);
+  assert.equal(store.readSubscription(user.id).status, 'active');
+
+  // One sync reads Stripe before the cancellation is set (its reply is held); another reads it after and finishes first.
+  const { reached, release } = fake.state.holdNextRead();
+  const slow = billing.syncSubscription(subscription.id);
+  await reached;
+  subscription.cancel_at = 1950000000;
+  await billing.syncSubscription(subscription.id);
+  release();
+  await slow;
+  assert.equal(store.readSubscription(user.id).cancelAt, 1950000000, 'the sync that read Stripe first never saves its older state last');
+  assert.equal(store.cancellationScheduled(store.readSubscription(user.id)), true);
+  assert.equal(store.cancellationDate(store.readSubscription(user.id)), 1950000000);
+  await billing.syncSubscription(subscription.id);
+  const scheduled = await mail.waitFor(message => message.includes('To: overlap@example.com') && message.includes('Subject: Your plan is set to end'));
+  assert.match(scheduled, /it ends on October 17, 2031/, 'a cancellation set for a date (cancel_at) is announced with that date');
+  await settle();
+  assert.equal(mailTo('overlap@example.com', 'Your plan is set to end').length, 1, 'once, however the syncs overlap and whatever events follow');
+
+  // When the date comes, the plan ended as cancelled, not merely "ended".
+  subscription.status = 'canceled';
+  await billing.syncSubscription(subscription.id);
+  const ended = await mail.waitFor(message => message.includes('To: overlap@example.com') && message.includes('Subject: Your spaces are offline'));
+  assert.match(ended, /Your plan was cancelled and has now ended/);
+
+  // A plan taken to build tours, before any space: its emails never speak of spaces going offline.
+  const builder = await store.createPasswordUser('builder@example.com', 'password one', null);
+  store.markEmailVerified(builder.id);
+  const plan = await billing.startCheckout(store.readUser(builder.id), origin, 'price_starter', false, '/account/tours/new');
+  const tours = fake.state.pay([...fake.state.sessions.values()].find(item => item.url === plan.url).id);
+  await billing.syncSubscription(tours.id);
+  assert.equal(store.readSubscription(builder.id).status, 'active');
+  tours.status = 'past_due';
+  await billing.syncSubscription(tours.id);
+  const failed = await mail.waitFor(message => message.includes('To: builder@example.com') && message.includes('Subject: Your payment did not go through'));
+  assert.match(failed, /If it keeps failing, your plan ends\./);
+  assert.doesNotMatch(failed, /spaces are still online/);
+  tours.cancel_at_period_end = true;
+  await billing.syncSubscription(tours.id);
+  const overdue = await mail.waitFor(message => message.includes('To: builder@example.com') && message.includes('Subject: Your plan is set to end'));
+  assert.match(overdue, /Your plan has been cancelled and ends on March 17, 2030\./);
+  assert.doesNotMatch(overdue, /paid for/, 'a cancellation while a payment is overdue does not call the period paid');
+  tours.status = 'canceled';
+  await billing.syncSubscription(tours.id);
+  await settle();
+  assert.equal(mailTo('builder@example.com', 'Your spaces are offline').length, 0, 'an account without spaces is not told its spaces are offline');
+  assert.equal(store.readSubscription(builder.id).status, 'canceled');
 });
 
 test('a failed email is logged with its subject and account, and never fails the work that sent it', async () => {

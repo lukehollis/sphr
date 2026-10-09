@@ -1,6 +1,6 @@
 import { readSceneEdits, readSceneTourTitles } from "./admin-store";
 import { isScenePublic, sceneBuildersChoice } from "./admin-store";
-import { latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
+import { cancellationDate, cancellationScheduled, latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
 import { salesEmail, sourceUrl } from "./brand";
@@ -32,8 +32,9 @@ export function describeAccount(user: User) {
     billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null, salesEmail: salesEmail() ?? null,
     /** Spaces that count toward a plan: every space not deleted. */
     spaceCount: payableSpaceCount(user.id),
-    subscription: subscription ? { status: subscription.status, quantity: subscription.quantity, periodEnd: subscription.periodEnd,
-      cancelAtPeriodEnd: subscription.cancelAtPeriodEnd, plan: subscription.plan } : null
+    // A cancellation scheduled for a date shows that date as the end, like one at the period's end.
+    subscription: subscription ? { status: subscription.status, quantity: subscription.quantity, periodEnd: cancellationDate(subscription) ?? subscription.periodEnd,
+      cancelAtPeriodEnd: cancellationScheduled(subscription), plan: subscription.plan } : null
   };
 }
 export type AccountView = ReturnType<typeof describeAccount>;

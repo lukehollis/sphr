@@ -33,8 +33,8 @@ The flow for a customer:
    Files added later to a hosted space wait until the customer reprocesses it. A waiting agent
    runner picks the job up within seconds, and the cards and the space page show the agent's
    latest step as it works. The customer is emailed when processing starts, when the space is
-   published (with its preview image) and when it cannot be finished (including a job that
-   stops after its last attempt without a result), and can then preview
+   published (with its preview image) and when it cannot be finished (including a job whose
+   worker went quiet on its last attempt, which is worded as our failure, not the files'), and can then preview
    it, make it public, and edit its title, start view and thumbnail. If the upload cannot
    become a space, the page says what to upload instead.
 
@@ -164,8 +164,11 @@ accounts, spaces created, tours and scavenger hunts started, spaces submitted fo
 that are ready or need attention, deleted spaces, linked agents, and billing changes: a new
 subscription, a plan change, a failed payment, a scheduled or withdrawn cancellation, and hosting
 stopping. Billing notices compare the saved subscription with Stripe's latest state in one
-transaction, so repeated webhooks and returns from Checkout announce each change once, and the
-customer's own billing emails follow the same rule. Delivery is
+transaction, and syncs for one account read Stripe and save one at a time, so repeated webhooks and
+returns from Checkout announce each change once, and the customer's own billing emails follow the
+same rule. A cancellation counts as scheduled whether Stripe sets it for the period's end
+(`cancel_at_period_end`) or for a date (`cancel_at`, which the Dashboard and newer portals use).
+Customers without spaces (a plan taken to build tours) are never told that spaces went offline. Delivery is
 best effort, queued one message at a time and retried when Discord asks to slow down; a failure is
 logged and never affects the customer. Notices never mention anyone, whatever a title says.
 
