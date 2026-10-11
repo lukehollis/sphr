@@ -2,7 +2,7 @@ import { AccountError, hostingStatuses, payableSpaceCount, readSubscription } fr
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout } from "@/lib/server/billing";
 import { recordEvent } from "@/lib/server/analytics";
-import { buildReturnPath } from "@/lib/server/user-tours";
+import { buildReturnPath, readUserTour } from "@/lib/server/user-tours";
 import { reportProblem } from "@/lib/server/error-report";
 
 /**
@@ -16,12 +16,14 @@ export async function POST(request: Request) {
   if (!billingEnabled()) return accountResponse({ error: "Billing is unavailable." }, 404);
   const subscription = readSubscription(user.id);
   if (subscription && hostingStatuses.has(subscription.status)) return accountResponse({ error: "Billing is already active." }, 409);
-  // Choosing a plan to build tours comes before any space; payment then leads back to building.
-  const build = body?.build === undefined ? undefined : buildReturnPath(body.build);
+  // Choosing a plan to build tours, or to see a tour's class results, comes before any space; payment
+  // then leads back to building, or to the results.
+  const results = typeof body?.results === "string" && readUserTour(body.results)?.userId === user.id ? `/account/tours/${body.results}/results` : undefined;
+  const build = results ?? (body?.build === undefined ? undefined : buildReturnPath(body.build));
   if (!build && !payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
   try {
     const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent, build);
-    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web", ...build ? { for: "tours" } : {} } });
+    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web", ...build ? { for: results ? "results" : "tours" } : {} } });
     return accountResponse({ ok: true, ..."url" in next ? { url: next.url, plan: next.plan } : "portal" in next ? { url: next.portal } : { paid: true } });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);

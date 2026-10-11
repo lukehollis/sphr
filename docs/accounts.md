@@ -119,6 +119,18 @@ shared tour of a private space opens that space for the link's visitors, which i
 choice. When the space stops being available (the operator makes it private, the customer deletes
 it or hosting lapses), its tours go offline and can only be deleted.
 
+**Class results** (`lib/server/tour-plays.ts`). When a shared tour or hunt is opened by anyone but
+its owner, the viewer asks the player's name once a browser session (`components/PlayerName.tsx`;
+playing without one is always offered) and sends each find, stop and the finish, and the time the
+page was looked at (`lib/play-report.ts`, to `/api/tours/<id>/plays`). Plays are kept a year in
+`tour_plays`. The owner sees them on `/account/tours/<id>/results`, linked from the builder: every
+count, the first `FREE_PLAYERS` (5) players without a plan, and all of them with a CSV download on
+any plan (a subscription that bills). From there `/account/plan?results=<id>` offers the plans that
+show every player before any space, and Checkout leads back to the results. Owners can stop asking
+for names (`tour_results_off`) and delete a tour's results. The operator hears once a day when a
+tour's players start. A yearly plan covering one space (for example "Classroom", `sphr_spaces=1`)
+suits teachers.
+
 The builder is the same as the operator's (`components/TourBuilder.tsx`), with a title and sharing
 controls. On the tour's link the customer's stops replace any stops the space was published with,
 and the spaces and narration a longer published tour continues into are left out

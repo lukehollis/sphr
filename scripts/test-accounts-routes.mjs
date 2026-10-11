@@ -467,6 +467,54 @@ try {
   tourPage = await (await anonymous.get(tourLink)).text();
   assert.ok(tourPage.includes('Find the lamps') && tourPage.includes('Under the window'), 'shared tours open for anyone');
   assert.ok(!(await (await anonymous.get('/s/0a0a0a0a0a01/operator-hall')).text()).includes('Under the window'), "the operator's space itself is unchanged");
+  // ---- Class results: players of a shared tour give a name, and its owner sees how far each got ----
+  response = await anonymous.post(`/api/tours/${hunt.id}/plays`, { name: '  Ana\u202eR.  ' });
+  assert.equal(response.status, 200);
+  const anaPlay = (await response.json()).play;
+  assert.match(anaPlay, /^[a-f0-9]{12}$/, 'a player of a shared hunt starts a play');
+  assert.equal((await (await alice.post(`/api/tours/${hunt.id}/plays`, { name: 'Alice' })).json()).play, null, "the owner trying it out isn't a player");
+  assert.equal((await anonymous.post(`/api/tours/${ownTour.id}/plays`, { name: 'Ana' })).status, 404, 'a private tour keeps no plays');
+  assert.equal((await anonymous.post(`/api/tours/${hunt.id}/plays/${anaPlay}`, { found: 1, steps: 1, finished: true, seconds: 95 })).status, 200);
+  assert.equal((await anonymous.post(`/api/tours/${hunt.id}/plays/${anaPlay}`, { found: 0, steps: 1, seconds: 10 })).status, 200, 'numbers only grow');
+  assert.equal((await anonymous.post(`/api/tours/${hunt.id}/plays/aaaaaaaaaaaa`, { found: 1 })).status, 404);
+  assert.equal((await anonymous.request(`/api/tours/${hunt.id}/plays/${anaPlay}`, { method: 'POST', json: { found: 1 }, headers: { Origin: 'https://elsewhere.example' } })).status, 400,
+    'only pages of this site send progress');
+  let results = (await (await alice.get(`/account/tours/${hunt.id}/results`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(results.includes('Class results') && results.includes('Ana R.') && results.includes('1 of 1 found') && results.includes('1 player, 1 finished')
+    && results.includes('2 minutes'), 'the owner sees who found what');
+  assert.equal((await bob.get(`/account/tours/${hunt.id}/results`)).status, 404, "no one else sees a tour's results");
+  response = await alice.get(`/api/account/tours/${hunt.id}/results.csv`);
+  assert.equal(response.status, 200, 'with a plan, results download');
+  assert.match(await response.text(), /^"Name","Started","Progress","Finished","Time"\r\n"Ana R\.","[^"]+ UTC","1 of 1 found","Yes","2 minutes"\r\n$/);
+  // The owner can stop asking for names, and delete what was kept.
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}/results`, { method: 'PATCH', json: { asking: false } })).status, 200);
+  assert.equal((await (await anonymous.post(`/api/tours/${hunt.id}/plays`, { name: 'Ben' })).json()).play, null, 'a tour that stopped asking keeps nothing new');
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}/results`, { method: 'PATCH', json: { asking: true } })).status, 200);
+  assert.equal((await bob.request(`/api/account/tours/${hunt.id}/results`, { method: 'DELETE', json: {} })).status, 404, "only the owner deletes results");
+  assert.equal((await alice.request(`/api/account/tours/${hunt.id}/results`, { method: 'DELETE', json: {} })).status, 200);
+  results = (await (await alice.get(`/account/tours/${hunt.id}/results`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(results.includes('No one has played it yet') && !results.includes('Ana R.'), 'deleted results are gone');
+  // Without a plan the first five players show; a plan shows the rest, from the results page and back.
+  assert.equal((await bob.request(`/api/account/tours/${freeHunt.id}`, { method: 'PUT', json: huntBody(0, { public: true }) })).status, 200);
+  for (let player = 1; player <= 6; player += 1) {
+    assert.equal((await anonymous.post(`/api/tours/${freeHunt.id}/plays`, { name: `Player ${player}` })).status, 200);
+  }
+  results = (await (await bob.get(`/account/tours/${freeHunt.id}/results`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(results.includes('Player 5') && !results.includes('Player 6') && results.includes('6 players, 0 finished'), 'without a plan, the first five show');
+  assert.ok(results.includes('1 more player') && results.includes(`/account/plan?results=${freeHunt.id}`), 'and the rest wait for a plan');
+  response = await bob.get(`/api/account/tours/${freeHunt.id}/results.csv`);
+  assert.equal(response.status, 402, 'downloading comes with a plan');
+  assert.equal((await response.json()).plan, `${base}/account/plan`);
+  const resultsPlan = (await (await bob.get(`/account/plan?results=${freeHunt.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(resultsPlan.includes('Choose a plan to see every player') && resultsPlan.includes('Starter') && resultsPlan.includes('Continue to payment'),
+    'a plan can be chosen before any space');
+  assert.ok(!resultsPlan.includes('Pay as you go'), 'pay as you go, which bills nothing before a space, is not offered for results');
+  response = await bob.post('/api/account/billing/checkout', { plan: 'price_starter', results: freeHunt.id });
+  assert.equal(response.status, 200);
+  const resultsSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(resultsSession.success_url, `${base}/account/tours/${freeHunt.id}/results?checkout={CHECKOUT_SESSION_ID}`, 'payment leads back to the results');
+  assert.equal(resultsSession.cancel_url, `${base}/account/plan?results=${freeHunt.id}`);
+  assert.equal((await bob.post('/api/account/billing/checkout', { plan: 'price_starter', results: hunt.id })).status, 400, "another customer's tour leads nowhere");
   tourPage = (await (await alice.get('/account')).text()).replaceAll('<!-- -->', '');
   assert.ok(tourPage.includes('Find the lamps') && tourPage.includes(`href="/account/tours/${ownTour.id}">Riverside studio, 2nd floor<`), 'the account lists its tours');
   // The agent drafts only for the owner; without an agent on this server it says so.
@@ -825,6 +873,7 @@ try {
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');
   assert.deepEqual(about('Scavenger hunt started', 'Account', 'bob@example.com').map(item => item.fields['Whose space']).sort(), ["Someone else's", 'Spacery']);
+  assert.equal(about('Players started a scavenger hunt', 'Account', 'alice@example.com').length, 1, 'the operator hears once a day when a class starts playing');
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));

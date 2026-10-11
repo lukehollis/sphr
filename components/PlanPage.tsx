@@ -21,14 +21,18 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
  * Choosing how hosting is paid for. Before hosting starts this leads to Checkout on the
  * chosen plan; afterwards it switches the subscription between plans. From the tour builder
  * (`build`), for the agent's drafts, it comes before any space: pay as you go only saves a card then.
+ * From a tour's class results (`results`), it also comes before any space; the page offers only
+ * the plans that show every player (pay as you go bills nothing until there is a space, so it can't).
  */
-export default function PlanPage({ account: initial, plans, brand, build }: { account: AccountView; plans: Plan[]; brand: string; build?: string }) {
+export default function PlanPage({ account: initial, plans, brand, build, results }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
+  /** The customer's tour whose class results they came to see in full. */ results?: string }) {
   const [account, setAccount] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const subscription = account.subscription;
   const active = hostingActive(account);
+  const forResults = Boolean(results) && !active;
   const paused = Boolean(subscription && !active && ["unpaid", "incomplete", "paused"].includes(subscription.status));
   const current = active ? currentPlan(plans, subscription) : undefined;
   const [choice, setChoice] = useState<string | null>(null);
@@ -40,7 +44,7 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
     try { await work(); } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
   }
   const pay = () => run(async () => {
-    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...build ? { build } : {} });
+    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...results ? { results } : build ? { build } : {} });
     // Without a link, a payment made earlier was just applied.
     window.location.assign(result.url ?? "/account");
   });
@@ -53,11 +57,13 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
   const portal = () => run(openPortal);
 
   const total = active && subscription ? periodTotal(subscription) : undefined;
-  const building = Boolean(build) && !active && !paused;
+  const building = (Boolean(build) || forResults) && !active && !paused;
   const perSpace = plans.find(plan => plan.spaces === null);
   const saveCard = building && spaces === 0 && selected?.spaces === null;
   let lead: string;
-  if (building) {
+  if (building && forResults) {
+    lead = "Every plan shows all your players, with how far each one got, and lets you download them. With a plan the agent also drafts your tours and hunts as often as you like.";
+  } else if (building) {
     lead = `Building tours and scavenger hunts by hand is free. With a plan the agent drafts them for you as often as you like.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
   } else if (active && current) {
     lead = current.spaces === null ? `You're on pay as you go with ${spaces} ${spaces === 1 ? "space" : "spaces"}${total ? `, ${total}` : ""}.`
@@ -73,7 +79,7 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
     <main className="site-main">
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
-        <div><h1>{building ? "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
+        <div><h1>{building ? forResults ? "Choose a plan to see every player" : "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
         {active && subscription?.periodEnd ? <p>{subscription.cancelAtPeriodEnd ? "Hosting ends" : "Renews"} {formatDate(subscription.periodEnd)}</p> : null}
       </div>
       <p className="plan-lead">{lead}</p>
@@ -98,6 +104,7 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
         </div>
         <p className="site-hint plan-hint">{active ? "A change applies now, and your next invoice is prorated for the rest of this period."
           : saveCard ? "Your card is saved on a secure page and nothing is charged today. Then you go straight to building."
+          : building && forResults ? "You pay on a secure checkout page and can cancel any time. Then you're back at your class results."
           : building ? "You pay on a secure checkout page and can cancel any time. Then you go straight to building."
           : spaces > 0 ? "You pay on a secure checkout page and can cancel any time."
           : "You pay once you add your first space."}</p>

@@ -11,6 +11,8 @@ import LoadingScreen from "@/components/LoadingScreen";
 import { reportError, track } from "@/components/Analytics";
 import ViewLoadingIndicator from "@/components/ViewLoadingIndicator";
 import TourOverlay, { TourFinale } from "@/components/TourOverlay";
+import PlayerName from "@/components/PlayerName";
+import { savedPlay, sendProgress, startPlay } from "@/lib/play-report";
 import type { ViewerHost } from "@/lib/host-link";
 import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
 import { vrAvailable, xrPanelFor } from "@/lib/xr-panel";
@@ -40,6 +42,8 @@ type Props = { configUrl?: string; preview?: { title: string; image: string; add
   social?: { creator: ProfileCard; heart: TourHeart };
   /** Where visitors start their own tour or scavenger hunt on this space, when they may. */
   build?: string;
+  /** A shared customer tour that keeps class results: the player's name is asked, and their progress kept. */
+  play?: { tourId: string; kind: "tour" | "hunt" };
   edits?: ViewerEdits;
   editor?: {
     onReady: (session: ViewerSession | null, issue: string | null) => void;
@@ -109,7 +113,7 @@ function linkEntry(data: SphrBootstrap): ViewerEntry {
   return Number.isInteger(stop) && stop >= 1 && stop <= stops ? { stop: stop - 1 } : {};
 }
 
-export default function SphrApp({ configUrl, preview, host, info, social, build, edits, editor, chrome: withChrome = !editor, revision = 0 }: Props) {
+export default function SphrApp({ configUrl, preview, host, info, social, build, play, edits, editor, chrome: withChrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -281,6 +285,51 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     if (!guidedTour || editor || !tourReady || window.parent === window) return;
     window.parent.postMessage({ type: "spacery:tour", page: window.location.pathname, stop: tourStop, stops: tourStops, guided: runtimeState.guided }, "*");
   }, [guidedTour, editor, tourReady, tourStop, tourStops, runtimeState.guided]);
+
+  // Class results (lib/play-report.ts): a shared customer tour opened by its link asks the player's
+  // name once a browser session, then sends each find, stop and the finish, the time the page was
+  // looked at, and a last word when the page is left. Not in another site's frame: a page framing a
+  // hunt (mused.com's) keeps its own players' progress from the spacery:hunt messages.
+  const [askName, setAskName] = useState(false);
+  const playRef = useRef<string | null>(null);
+  const looked = useRef({ seconds: 0, since: 0 });
+  const lookedSeconds = () => {
+    const state = looked.current;
+    const now = performance.now();
+    if (state.since) state.seconds += (now - state.since) / 1000;
+    state.since = document.visibilityState === "visible" ? now : 0;
+    return state.seconds;
+  };
+  const playProgress = useMemo(() => ({ found: runtimeState.hunt?.found.length ?? 0, steps: huntSteps.length, stop: tourStop, stops: tourStops,
+    finished: Boolean(runtimeState.finished) }), [runtimeState.hunt?.found.length, huntSteps.length, tourStop, tourStops, runtimeState.finished]);
+  const progressRef = useRef(playProgress);
+  progressRef.current = playProgress;
+  const playTour = !editor && chrome ? play?.tourId : undefined;
+  useEffect(() => {
+    if (!playTour || window.parent !== window) return;
+    const saved = savedPlay(playTour);
+    if (saved) playRef.current = saved; else setAskName(true);
+    lookedSeconds();
+    const report = () => { const seconds = lookedSeconds(); if (playRef.current) sendProgress(playTour, playRef.current, progressRef.current, seconds); };
+    const visibility = () => { if (document.visibilityState === "hidden") report(); else lookedSeconds(); };
+    const minute = window.setInterval(() => { if (document.visibilityState === "visible") report(); }, 60000);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pagehide", report);
+    return () => { window.clearInterval(minute); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("pagehide", report); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playTour]);
+  useEffect(() => {
+    if (playTour && started && playRef.current) sendProgress(playTour, playRef.current, playProgress, lookedSeconds());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playTour, started, playProgress]);
+  const nameDone = (name: string) => {
+    setAskName(false);
+    if (!playTour) return;
+    void startPlay(playTour, name).then((id) => {
+      playRef.current = id;
+      if (id) sendProgress(playTour, id, progressRef.current, lookedSeconds());
+    });
+  };
   // The browser took the WebGL context away and kept it: open the page again where the visitor stood.
   const graphicsLost = started && Boolean(runtimeState.graphicsLost);
   const reopenHere = () => {
@@ -358,6 +407,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         title={preview?.title || bootstrap?.space.title}
         image={preview?.image || bootstrap?.ui?.loadingImage || bootstrap?.space.space_data.loadingImage || bootstrap?.space.thumbnail || bootstrap?.space.share_image}
       />
+      {askName && play && <PlayerName kind={play.kind} onDone={nameDone} />}
       <ViewLoadingIndicator busy={started && (Boolean(runtimeState.loading.busy) ||
         Boolean(runtimeState.reconstruction?.visible && runtimeState.reconstruction.loading))} />
 

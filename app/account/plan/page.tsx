@@ -5,22 +5,32 @@ import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { billingEnabled, readPlans, syncSubscription } from "@/lib/server/billing";
 import { describeAccount } from "@/lib/server/customer-spaces";
 import { siteBrand } from "@/lib/server/brand";
-import { agentUnlimited, buildReturnPath } from "@/lib/server/user-tours";
+import { agentUnlimited, buildReturnPath, readUserTour } from "@/lib/server/user-tours";
+import { allPlayersShown } from "@/lib/server/tour-plays";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Plan", robots: { index: false, follow: false } };
 
-export default async function AccountPlanPage({ searchParams }: { searchParams: Promise<{ build?: string }> }) {
+export default async function AccountPlanPage({ searchParams }: { searchParams: Promise<{ build?: string; results?: string }> }) {
   if (!accountsEnabled() || !billingEnabled()) notFound();
-  const raw = (await searchParams).build;
+  const query = await searchParams;
+  const raw = query.build;
   // Choosing a plan for the tour agent while building, on one space (its id) or any ("1").
   const build = typeof raw === "string" && /^(?:[a-f0-9]{12}|1)$/.test(raw) ? raw : undefined;
   const user = await currentUser();
-  if (!user) redirect(`/account/login?next=${encodeURIComponent(build ? `/account/plan?build=${build}` : "/account/plan")}`);
+  // Choosing a plan to see every player of one of the customer's tours (lib/server/tour-plays.ts).
+  const results = typeof query.results === "string" && /^[a-f0-9]{12}$/.test(query.results) ? query.results : undefined;
+  if (!user) redirect(`/account/login?next=${encodeURIComponent(results ? `/account/plan?results=${results}` : build ? `/account/plan?build=${build}` : "/account/plan")}`);
+  const resultsTour = results && readUserTour(results)?.userId === user.id ? results : undefined;
+  if (resultsTour && allPlayersShown(user.id)) redirect(`/account/tours/${resultsTour}/results`);
   if (build && agentUnlimited(user.id)) redirect(buildReturnPath(build));
   const subscription = readSubscription(user.id);
   if (subscription && !subscription.plan) {
     await syncSubscription(subscription.id).catch(error => console.error("Unable to read the subscription:", error instanceof Error ? error.message : error));
   }
-  return <PlanPage brand={siteBrand()} account={describeAccount(readUser(user.id)!)} plans={await readPlans()} build={build} />;
+  const account = describeAccount(readUser(user.id)!);
+  const plans = await readPlans();
+  // For class results before any space, only the plans that show every player: pay as you go bills nothing yet.
+  const offered = resultsTour && account.spaceCount === 0 ? plans.filter(plan => plan.spaces !== null) : plans;
+  return <PlanPage brand={siteBrand()} account={account} plans={offered} build={resultsTour ? undefined : build} results={resultsTour} />;
 }

@@ -220,9 +220,11 @@ async function applySavedCard(session: Stripe.Checkout.Session, expectedUser?: s
   void notifyTeam({ title: "Card saved to build tours", tone: "money", fields: [["Account", user.email]] });
 }
 
-/** The plan page that leads back to building, for a Checkout left early. */
-function planPath(build: string) {
-  const scene = /[?&]scene=([a-f0-9]{12})/.exec(build)?.[1];
+/** The plan page that leads back to building or to a tour's class results, for a Checkout left early. */
+function planPath(back: string) {
+  const results = /^\/account\/tours\/([a-f0-9]{12})\/results$/.exec(back)?.[1];
+  if (results) return `/account/plan?results=${results}`;
+  const scene = /[?&]scene=([a-f0-9]{12})/.exec(back)?.[1];
   return `/account/plan?build=${scene ?? "1"}`;
 }
 

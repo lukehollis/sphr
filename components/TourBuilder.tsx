@@ -350,7 +350,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
 
     <aside className="tour-builder-panel">
       <div className="builder-scroll">
-        <nav aria-label="Builder"><a href={back.href}>← {back.label}</a><a href={link} target="_blank" rel="noreferrer">{tour ? (hunt ? "Open hunt ↗" : "Open tour ↗") : "View space ↗"}</a></nav>
+        <nav aria-label="Builder"><a href={back.href}>← {back.label}</a>{tour && <a href={`/account/tours/${tour.id}/results`}>Class results</a>}<a href={link} target="_blank" rel="noreferrer">{tour ? (hunt ? "Open hunt ↗" : "Open tour ↗") : "View space ↗"}</a></nav>
         <h1>{tour ? meta.title || "Untitled" : scene.title}</h1>
         {tour && <p className="builder-space">On {tour.spaceTitle}</p>}
         <div className="builder-kind" role="radiogroup" aria-label="What to make">

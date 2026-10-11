@@ -100,14 +100,22 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .scene-details dl > div { display: flex; justify-content: space-between; gap: var(--space-2); }
 .scene-details dt { color: var(--text-muted); }
 .scene-details dd { margin: 0; text-align: right; }
+/* The player's name before a shared tour or hunt, for its class results: over the loading screen and the space. */
+.player-name { position: absolute; inset: 0; z-index: 45; display: grid; place-items: center; padding: var(--space-3); background: rgba(0, 0, 0, .55); }
+.player-name-panel { display: grid; gap: var(--space-2); width: min(360px, 100%); padding: var(--space-4); background: var(--surface-page); color: var(--text-body); }
+.player-name-panel h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+.player-name-panel p { margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--size-caption); line-height: 1.4; }
+.player-name-panel input { height: 44px; padding: 0 12px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink); font: inherit; font-size: 16px; }
+.player-name-panel input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.player-name-start { height: 44px; border: 0; background: var(--accent); color: var(--text-on-accent); font: inherit; font-weight: 700; cursor: pointer; }
+.player-name-start:hover:not(:disabled), .player-name-start:focus-visible { background: var(--accent-press); }
+.player-name-start:disabled { opacity: .5; cursor: default; }
+.player-name-skip { justify-self: center; padding: 4px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; }
 /* Building on the space and the site credit share the bottom right corner. */
 .viewer-corner { position: absolute; z-index: 19; right: 2px; bottom: 2px; display: flex; gap: 2px; }
 .viewer-build, .viewer-host { display: inline-flex; align-items: center; padding: 3px 5px; background: #000000; color: #ffffff; font-size: 10px; line-height: 1; text-decoration: none; }
-.viewer-host { font-size: 8px; align-self: flex-end; }
+.viewer-host { font-size: 8px; }
 .viewer-build:hover, .viewer-build:focus-visible, .viewer-host:hover, .viewer-host:focus-visible { background: #2a2a2a; }
-/* Making a hunt on the space is the viewer's one invitation, in its accent. */
-.viewer-build { gap: 8px; padding: 8px 12px; background: var(--accent); color: var(--text-on-accent); font-size: 14px; font-weight: 700; pointer-events: auto; }
-.viewer-build:hover, .viewer-build:focus-visible { background: var(--accent-press); }
 .hud-left, .hud-right { display: flex; gap: 1px; background: var(--rule-hair-color); pointer-events: none; }
 .hud-left { position: absolute; z-index: 20; left: var(--space-3); bottom: var(--space-3); }
 .hud-right { flex: none; }

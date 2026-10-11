@@ -66,7 +66,10 @@ export default async function LearnPage() {
     { id: "share", title: "Share it with your class", shot: "share", alt: "The builder settings switched to Anyone with the link, with a Copy the link button",
       body: <p>Switch it from Only you to Anyone with the link, press Save, then copy the link into your class page, slides or an email. It opens in any browser on a laptop, tablet or phone.</p> },
     { id: "play", title: "Play it together", shot: "play", alt: "A scavenger hunt being played in the tomb of Seti I, with a friendly ghost on the stairs and the first clue in the corner",
-      body: <p>Students look around and move through the space on their own. A tour leads them stop by stop, and a hunt counts every find until they reach the end.</p> }
+      body: <>
+        <p>Students look around and move through the space on their own. A tour leads them stop by stop, and a hunt counts every find until they reach the end.</p>
+        <p className="site-hint">Each student types their name before they start, and Class results in the builder shows who found what and who finished.</p>
+      </> }
   ];
 
   return <div className="site"><div className="site-frame">

@@ -11,6 +11,7 @@ import { tourThumbnail } from "@/lib/server/tour-thumbnails";
 import { hasHeart, heartCount, profileCard } from "@/lib/server/profiles";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
 import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
+import { askingNames } from "@/lib/server/tour-plays";
 import { existingVariantsUrl } from "@/lib/server/variants";
 import { existingLightCopies } from "@/lib/server/light";
 import { loadingPlaceholder } from "@/lib/server/placeholder";
@@ -47,7 +48,9 @@ export default async function TourPage({ params }: Props) {
   preload(scene.bootstrapUrl, { as: "fetch", crossOrigin: "anonymous" });
   const [variants, reconstruction, light, placeholder] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId), loadingPlaceholder(scene.thumbnail)]);
   const user = await currentUser();
-  return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl}
+  // Players (not the owner trying it out) give their name for the owner's class results, unless the owner turned that off.
+  const play = user?.id !== tour.userId && askingNames(tour.id) ? { tourId: tour.id, kind: tour.kind } : undefined;
+  return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl} play={play}
     edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction, light }}
     preview={{ title: tour.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} info={readSpaceInfo(scene.sceneId).info}
     social={{ creator: profileCard(tour.userId), heart: { tourId: tour.id, count: heartCount(tour.id), hearted: hasHeart(user?.id, tour.id), signedIn: Boolean(user), loginPath: loginPath(tourPath(tour)) } }} />;
