@@ -374,17 +374,24 @@ try {
   assert.equal((await anonymous.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 401);
   assert.equal((await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' })).status, 403, 'unconfirmed accounts cannot make tours');
   database().prepare("UPDATE users SET email_verified=1 WHERE email='bob@example.com'").run();
-  // "Build on this space" sends visitors to make an account, then to choose a plan before building.
-  assert.equal(location(await anonymous.get('/account/tours/new?scene=0a0a0a0a0a01')), `/account/signup?next=${encodeURIComponent('/account/tours/new?scene=0a0a0a0a0a01')}`);
-  const signupPage = (await (await anonymous.get(`/account/signup?next=${encodeURIComponent('/account/tours/new?scene=0a0a0a0a0a01')}`)).text()).replaceAll('<!-- -->', '');
+  // "Make a scavenger hunt here" sends visitors to make an account, then straight to building: no plan, no card.
+  const huntStart = '/account/tours/new?scene=0a0a0a0a0a01&kind=hunt';
+  assert.equal(location(await anonymous.get(huntStart)), `/account/signup?next=${encodeURIComponent(huntStart)}`);
+  const signupPage = (await (await anonymous.get(`/account/signup?next=${encodeURIComponent(huntStart)}`)).text()).replaceAll('<!-- -->', '');
   assert.ok(signupPage.includes('build a guided tour or a scavenger hunt'), 'sign-up speaks of building');
   assert.ok(!signupPage.includes(' a month'), 'and shows no prices');
-  response = await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01' });
-  assert.equal(response.status, 402, 'a plan comes before the first tour');
-  assert.equal((await response.json()).plan, `${base}/account/plan?build=0a0a0a0a0a01`, 'agents are told where to choose one');
-  assert.equal(location(await bob.get('/account/tours/new?scene=0a0a0a0a0a01')), '/account/plan?build=0a0a0a0a0a01');
+  assert.ok(signupPage.includes(encodeURIComponent(huntStart)), 'and keeps the space and the hunt for after');
+  let tourPage = (await (await bob.get(huntStart)).text()).replaceAll('<!-- -->', '');
+  assert.ok(tourPage.includes('Operator hall') && tourPage.includes('Make a guided tour'), 'the picker opens with the space chosen, before any plan');
+  response = await bob.post('/api/account/tours', { sceneId: '0a0a0a0a0a01', kind: 'hunt' });
+  assert.equal(response.status, 200, 'making a tour or hunt needs no plan');
+  const freeHunt = (await response.json()).tour;
+  assert.equal((await bob.get(freeHunt.editor)).status, 200, 'and the builder opens');
+  assert.ok(![...stripeFake.state.sessions.values()].some(item => item.mode === 'setup'), 'no card was asked for');
+  // A plan lets the agent draft as often as the customer likes; the plan page comes from the builder.
   const planPage = (await (await bob.get('/account/plan?build=0a0a0a0a0a01')).text()).replaceAll('<!-- -->', '');
-  assert.ok(planPage.includes('Choose a plan to start building') && planPage.includes('Pay as you go') && planPage.includes('Enterprise'));
+  assert.ok(planPage.includes('Choose a plan for the agent') && planPage.includes('Pay as you go') && planPage.includes('Enterprise'));
+  assert.ok(planPage.includes('Building tours and scavenger hunts by hand is free'), 'and says building stays free');
   assert.ok(planPage.includes('mailto:hello@example.com'), 'larger customers are offered an enterprise plan by email');
   assert.ok(planPage.includes('Add a card'), 'pay as you go only saves a card before any space');
   // Pay as you go costs nothing before a space, so Checkout only saves the card.
@@ -396,8 +403,8 @@ try {
   assert.equal(cardSession.cancel_url, `${base}/account/plan?build=0a0a0a0a0a01`);
   assert.equal(cardSession.currency, 'usd');
   stripeFake.state.saveCard(cardSession.id);
-  let tourPage = (await (await bob.get(`/account/tours/new?scene=0a0a0a0a0a01&checkout=${cardSession.id}`)).text()).replaceAll('<!-- -->', '');
-  assert.ok(tourPage.includes('all set. Tours and scavenger hunts are included') && tourPage.includes('Make a guided tour'), 'back from Checkout, building starts');
+  tourPage = (await (await bob.get(`/account/tours/new?scene=0a0a0a0a0a01&checkout=${cardSession.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(tourPage.includes('all set. The agent can draft') && tourPage.includes('Make a guided tour'), 'back from Checkout, the agent drafts as often as they like');
   assert.ok(stripeFake.state.customers.get(cardSession.customer).invoice_settings.default_payment_method.startsWith('pm_'), 'the saved card pays for hosting later');
   assert.equal(location(await bob.get('/account/plan?build=0a0a0a0a0a01')), '/account/tours/new?scene=0a0a0a0a0a01', 'the plan step is done once');
   assert.equal([...stripeFake.state.subscriptions.values()].filter(item => item.metadata.sphr_user === cardSession.client_reference_id).length, 0, 'nothing is billed for tours');
@@ -817,7 +824,7 @@ try {
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');
-  assert.equal(about('Scavenger hunt started', 'Account', 'bob@example.com')[0]?.fields['Whose space'], "Someone else's");
+  assert.deepEqual(about('Scavenger hunt started', 'Account', 'bob@example.com').map(item => item.fields['Whose space']).sort(), ["Someone else's", 'Spacery']);
   assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));

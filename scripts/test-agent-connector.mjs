@@ -545,6 +545,24 @@ try {
   assert.equal((await fetch(`${base}/mcp`, { method: 'DELETE', headers: museSession })).status, 204);
   assert.equal((await mcp({ jsonrpc: '2.0', id: 9, method: 'tools/list' }, museSession)).response.status, 404, 'a deleted session is gone');
 
+  // ---- Building is free; without a plan the tour agent drafts three times a month ----
+  const erin = new Browser();
+  await signInWithGoogle(erin, { sub: 'erin-google', email: 'erin@example.com', email_verified: true, name: 'Erin' });
+  let made = await erin.post('/api/account/tours', { sceneId: '0b0b0b0b0b01', kind: 'hunt' });
+  assert.equal(made.status, 200, 'an account with no plan or card makes a hunt');
+  const erinHunt = (await made.json()).tour;
+  for (let draft = 1; draft <= 3; draft += 1) {
+    made = await erin.post(`/api/account/tours/${erinHunt.id}/agent`, { prompt: 'Hide a bronze tripod', save: true });
+    assert.equal(made.status, 200, `free draft ${draft}: ${await made.clone().text()}`);
+  }
+  made = await erin.post(`/api/account/tours/${erinHunt.id}/agent`, { prompt: 'Hide a bronze tripod', save: true });
+  assert.equal(made.status, 402, 'the fourth draft this month needs a plan');
+  const limited = await made.json();
+  assert.equal(limited.plan, `${base}/account/plan?build=0b0b0b0b0b01`, 'and says where to choose one');
+  assert.match(limited.error, /3 free drafts/);
+  assert.match((await (await erin.get(`/account/tours/${erinHunt.id}`)).text()).replaceAll('<!-- -->', ''), /The agent drafts 3 times a month for free/,
+    'the builder says what is free');
+
   // The operator hears that agents were linked and that they added and submitted spaces.
   const field = (embed, name) => embed.fields.find(item => item.name === name)?.value;
   assert.ok(teamMessages.some(embed => embed.title === 'Agent linked' && /^Claude on /.test(field(embed, 'Agent')) && field(embed, 'Account') === 'alice@example.com'));

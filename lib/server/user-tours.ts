@@ -98,21 +98,28 @@ export function deleteUserTour(id: string) {
 
 export class TourLimitError extends Error {}
 
-/** Accounts that made tours before a plan was needed keep building without one. */
+/** Accounts that made tours before plans were asked for keep the agent without one. */
 const plansRequiredFrom = "2026-10-05T00:00:00.000Z";
+/** Drafts the tour agent makes for an account without a plan, every 30 days (from its first draft). */
+export const FREE_AGENT_DRAFTS = 3;
+export const FREE_AGENT_WINDOW = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * Tours are free, but making one needs a plan first: hosting that is paid for, or a card
- * saved on pay as you go, which costs nothing until the customer hosts a space.
+ * Building tours and scavenger hunts is free for every account, by hand and with people's own
+ * agents. The tour agent, which runs on the operator's own machine, drafts as often as an
+ * account likes once it has a plan (hosting that is paid for, or a card saved on pay as you go,
+ * which costs nothing until the customer hosts a space), and FREE_AGENT_DRAFTS times every
+ * 30 days before that.
  */
-export function readyToBuild(userId: string) {
+export function agentUnlimited(userId: string) {
   if (!billingEnabled() || hostingActive(userId) || readUser(userId)?.cardSaved) return true;
   return Boolean(store().prepare("SELECT 1 FROM user_tours WHERE user_id=? AND created<? LIMIT 1").get(userId, plansRequiredFrom));
 }
 
-/** Where choosing a plan leads back to: the picker, with the space chosen when there is one. */
-export function buildReturnPath(scene: unknown) {
-  return typeof scene === "string" && /^[a-f0-9]{12}$/.test(scene) ? `/account/tours/new?scene=${scene}` : "/account/tours/new";
+/** Where signing in or choosing a plan leads back to: the picker, with the space (and a hunt) chosen when asked. */
+export function buildReturnPath(scene: unknown, kind?: unknown) {
+  if (typeof scene !== "string" || !/^[a-f0-9]{12}$/.test(scene)) return "/account/tours/new";
+  return `/account/tours/new?scene=${scene}${kind === "hunt" ? "&kind=hunt" : ""}`;
 }
 
 export function tourPath(tour: Pick<UserTour, "id" | "title">) {
@@ -371,9 +378,9 @@ export async function buildOnPath(sceneId: string) {
   const scenes = await readAllScenes();
   const scene = scenes.find((item) => item.sceneId === sceneId);
   if (!scene || !canBuildOn(null, scene)) return undefined;
-  if (!isOperatorScene(sceneId)) return `/account/tours/new?scene=${sceneId}`;
+  if (!isOperatorScene(sceneId)) return `/account/tours/new?scene=${sceneId}&kind=hunt`;
   const offered = scenes.filter((item) => isOperatorScene(item.sceneId) && canBuildOn(null, item)).map(pickerSpace);
   const space = pickerSpace(scene);
   const listed = onePerCapture(offered).find((item) => captureKey(item) === captureKey(space));
-  return `/account/tours/new?scene=${listed?.sceneId ?? sceneId}`;
+  return `/account/tours/new?scene=${listed?.sceneId ?? sceneId}&kind=hunt`;
 }

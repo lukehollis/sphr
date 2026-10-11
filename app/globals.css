@@ -103,8 +103,11 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 /* Building on the space and the site credit share the bottom right corner. */
 .viewer-corner { position: absolute; z-index: 19; right: 2px; bottom: 2px; display: flex; gap: 2px; }
 .viewer-build, .viewer-host { display: inline-flex; align-items: center; padding: 3px 5px; background: #000000; color: #ffffff; font-size: 10px; line-height: 1; text-decoration: none; }
-.viewer-host { font-size: 8px; }
+.viewer-host { font-size: 8px; align-self: flex-end; }
 .viewer-build:hover, .viewer-build:focus-visible, .viewer-host:hover, .viewer-host:focus-visible { background: #2a2a2a; }
+/* Making a hunt on the space is the viewer's one invitation, in its accent. */
+.viewer-build { gap: 8px; padding: 8px 12px; background: var(--accent); color: var(--text-on-accent); font-size: 14px; font-weight: 700; pointer-events: auto; }
+.viewer-build:hover, .viewer-build:focus-visible { background: var(--accent-press); }
 .hud-left, .hud-right { display: flex; gap: 1px; background: var(--rule-hair-color); pointer-events: none; }
 .hud-left { position: absolute; z-index: 20; left: var(--space-3); bottom: var(--space-3); }
 .hud-right { flex: none; }

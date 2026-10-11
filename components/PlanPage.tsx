@@ -19,8 +19,8 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
 
 /**
  * Choosing how hosting is paid for. Before hosting starts this leads to Checkout on the
- * chosen plan; afterwards it switches the subscription between plans. On the way to building
- * a tour (`build`), it comes before any space: pay as you go only saves a card then.
+ * chosen plan; afterwards it switches the subscription between plans. From the tour builder
+ * (`build`), for the agent's drafts, it comes before any space: pay as you go only saves a card then.
  */
 export default function PlanPage({ account: initial, plans, brand, build }: { account: AccountView; plans: Plan[]; brand: string; build?: string }) {
   const [account, setAccount] = useState(initial);
@@ -58,7 +58,7 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
   const saveCard = building && spaces === 0 && selected?.spaces === null;
   let lead: string;
   if (building) {
-    lead = `Tours and scavenger hunts are free on every plan.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
+    lead = `Building tours and scavenger hunts by hand is free. With a plan the agent drafts them for you as often as you like.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
   } else if (active && current) {
     lead = current.spaces === null ? `You're on pay as you go with ${spaces} ${spaces === 1 ? "space" : "spaces"}${total ? `, ${total}` : ""}.`
       : `You're on ${current.name} at ${price(current)}, which covers up to ${current.spaces} spaces. You have ${spaces}.`;
@@ -73,7 +73,7 @@ export default function PlanPage({ account: initial, plans, brand, build }: { ac
     <main className="site-main">
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
-        <div><h1>{building ? "Choose a plan to start building" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
+        <div><h1>{building ? "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
         {active && subscription?.periodEnd ? <p>{subscription.cancelAtPeriodEnd ? "Hosting ends" : "Renews"} {formatDate(subscription.periodEnd)}</p> : null}
       </div>
       <p className="plan-lead">{lead}</p>

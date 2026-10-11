@@ -1,8 +1,8 @@
-import { accountResponse, attemptKey } from "@/lib/server/accounts";
+import { accountResponse, attemptKey, publicOrigin } from "@/lib/server/accounts";
 import { allowAttempt } from "@/lib/server/admin-store";
 import { TourAgentError, tourAgentConfigured } from "@/lib/server/tour-agent";
 import { draftFromRequest } from "@/lib/server/tour-requests";
-import { ownedTourRequest, saveUserTour, tourPath } from "@/lib/server/user-tours";
+import { agentUnlimited, FREE_AGENT_DRAFTS, FREE_AGENT_WINDOW, ownedTourRequest, saveUserTour, tourPath } from "@/lib/server/user-tours";
 import { EditConflict } from "@/lib/server/admin-store";
 import { startDraft } from "@/lib/server/tour-drafts";
 import { recordEvent } from "@/lib/server/analytics";
@@ -17,6 +17,12 @@ export const maxDuration = 300;
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, body, tour, scene, error } = await ownedTourRequest(request, (await params).id, 10 * 1024 * 1024);
   if (error) return error;
+  // Building is free; without a plan the agent drafts FREE_AGENT_DRAFTS times every 30 days.
+  if (tourAgentConfigured() && !agentUnlimited(user.id)
+    && !allowAttempt([[attemptKey("tour-agent-free", user.id), FREE_AGENT_DRAFTS]], FREE_AGENT_WINDOW)) {
+    const plan = `${publicOrigin(request)}/account/plan?build=${tour.sceneId}`;
+    return accountResponse({ error: `You've used your ${FREE_AGENT_DRAFTS} free drafts with the agent for this month. Building by hand stays free. Choose a plan to keep drafting: ${plan}`, plan }, 402);
+  }
   // The agent runs on the operator's own machine, one request at a time.
   if (!allowAttempt([[attemptKey("tour-agent", user.id), 30], ["tour-agent-all", 400]], 60 * 60 * 1000)) {
     return accountResponse({ error: "Your agent has had a lot of requests this hour. Edit by hand for now, or try again later." }, 429);

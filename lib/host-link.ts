@@ -20,5 +20,5 @@ export function trackHostClick(label: string, href: string) {
 }
 
 export function trackBuildClick(href: string) {
-  track("cta_click", { label: "Build on this space", href: href.slice(0, 200) });
+  track("cta_click", { label: "Make a scavenger hunt here", href: href.slice(0, 200) });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Footprints, Heart, Menu, Volume2, VolumeX, X } from "lucide-react";
+import { Box, Footprints, Heart, MapPinPlus, Menu, Volume2, VolumeX, X } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
 import { contactHref, formatCapturedOn } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
@@ -101,7 +101,9 @@ export default function HudControls({
       </header>
       {/* Google's credit takes this corner while its 3D map is in view. */}
       {(build || host) && !state.earth && <div className="viewer-corner">
-        {build && <a className="viewer-build" href={build} onClick={(event) => trackBuildClick(event.currentTarget.href)}>Build on this space</a>}
+        {/* A new tab, so the tour stays open and signing in works where the viewer is framed on another site. */}
+        {build && <a className="viewer-build" href={build} target="_blank" rel="noopener" onClick={(event) => trackBuildClick(event.currentTarget.href)}>
+          <MapPinPlus size={16} aria-hidden="true" />Make a scavenger hunt here</a>}
         {host && <a className={`viewer-host ${pixelFont.className}`} href={hostHref(host, "badge")} target="_blank" rel="noopener"
           title={`Hosted on ${host.name}`} onClick={(event) => trackHostClick(`Hosted on ${host.name}`, event.currentTarget.href)}>{host.name}</a>}
       </div>}

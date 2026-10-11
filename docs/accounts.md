@@ -95,22 +95,25 @@ server with local stand-ins for Stripe, Google and email.
 
 A signed-in customer with a confirmed email can build guided tours and scavenger hunts on any of
 their own finished, hosted spaces and on any public space open to builders (Matterport embeds
-excepted), from *Make a tour or hunt* on *Your spaces*, from a space's page, or from *Build on this
-space* in the corner of the viewer on those spaces and on tours built on them (it opens the picker
-with that space chosen, signing the visitor in first). The operator's public spaces are open to
+excepted), from *Make a tour or hunt* on *Your spaces*, from a space's page, or from *Make a
+scavenger hunt here* in the corner of the viewer on those spaces and on tours built on them (it opens
+the picker in a new tab with that space and a hunt chosen, signing the visitor in first; a new tab
+keeps the tour open and lets sign-in work where the viewer is framed on another site). The operator's public spaces are open to
 builders unless the operator unticks *Others can build tours on it* on the admin card. A
 customer's space is open only once its owner ticks *Allow others to build on this space* on the
 space's page, and only while it is public and hosted; such spaces are reached from their links and
 never listed in the picker, and closing one takes the tours others built on it offline (the
 `builders` table in the state database holds each choice). Each tour is its own
 record (`user_tours` in the state database) pointing at a space; the space itself never changes,
-and a tour does not count as a space for billing. Tours are free, but with billing on, the first
-one needs a plan: visitors from *Build on this space* make an account, then choose a plan on
-`/account/plan?build=<scene>` before the builder opens. A plan with a price subscribes as usual;
-pay as you go before any space opens Checkout in setup mode, which only saves a card (made the
-customer's default, so hosting a space later reuses it) and records `users.card_saved`. Creating a
-tour without either answers 402 with the plan page's address, which agents relay. Accounts that
-made tours before plans were required keep building. Tours start private and get their own link,
+and a tour does not count as a space for billing. Building is free and needs no plan or card,
+by hand and with people's own agents. The tour agent (`lib/server/tour-agent.ts`), which runs on
+the operator's own machine, drafts `FREE_AGENT_DRAFTS` (3) times every 30 days for an account
+without a plan; after that the agent route answers 402 with the plan page's address
+(`/account/plan?build=<scene>`), which the builder links and agents relay. A plan with a price
+subscribes as usual; pay as you go before any space opens Checkout in setup mode, which only saves
+a card (made the customer's default, so hosting a space later reuses it) and records
+`users.card_saved`. Either one lets the agent draft without the monthly limit. Accounts that made
+tours before plans were asked for (5 October 2026) keep the agent. Tours start private and get their own link,
 `/t/<id>/<title>`, which the customer can share with anyone; tour pages are never indexed. A
 shared tour of a private space opens that space for the link's visitors, which is the customer's
 choice. When the space stops being available (the operator makes it private, the customer deletes

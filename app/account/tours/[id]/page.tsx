@@ -5,7 +5,7 @@ import { readSceneEdits } from "@/lib/server/admin-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { libraryModels } from "@/lib/server/library";
 import { tourAgentConfigured } from "@/lib/server/tour-agent";
-import { canBuildOn, readUserTour, tourPath, tourScene } from "@/lib/server/user-tours";
+import { agentUnlimited, canBuildOn, FREE_AGENT_DRAFTS, readUserTour, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
 import { existingLightCopies } from "@/lib/server/light";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
@@ -26,6 +26,7 @@ export default async function CustomerTourPage({ params }: { params: Promise<{ i
   const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId)]);
   const edits = { title: scene.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, variants, reconstruction, light };
   return <TourBuilder scene={scene} edits={edits} initial={tour.experience ?? emptyExperience(tour.kind)} saved={{ experience: tour.experience, revision: tour.revision }}
-    library={await libraryModels(false)} agentReady={tourAgentConfigured()} back={{ href: "/account", label: "Your spaces" }} api={`/api/account/tours/${tour.id}`}
+    library={await libraryModels(false)} agentReady={tourAgentConfigured()}
+    freeDrafts={tourAgentConfigured() && !agentUnlimited(user.id) ? FREE_AGENT_DRAFTS : undefined} back={{ href: "/account", label: "Your spaces" }} api={`/api/account/tours/${tour.id}`}
     tour={{ id: tour.id, title: tour.title, public: tour.public, path: tourPath(tour), spaceTitle: scene.title }} />;
 }

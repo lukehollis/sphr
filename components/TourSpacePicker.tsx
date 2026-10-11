@@ -59,7 +59,7 @@ export default function TourSpacePicker({ brand, account, own, spacery, chosen, 
         </div>
       </div>
       <div className="site-feedback" aria-live="polite">
-        {paid && !error && <p className="site-note" role="status">You're all set. Tours and scavenger hunts are included in your plan.</p>}
+        {paid && !error && <p className="site-note" role="status">You're all set. The agent can draft your tours and hunts as often as you like.</p>}
         {error && <p className="site-alert" role="alert">{error}</p>}
       </div>
       {!account.emailVerified && <div className="site-callout"><p>Confirm your email address to make tours. We sent a link to <strong>{account.email}</strong>, and it may be in spam or junk.</p></div>}

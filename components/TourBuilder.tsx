@@ -24,6 +24,8 @@ type Props = {
   saved: { experience: Experience | null; revision: number };
   library: LibraryModel[];
   agentReady: boolean;
+  /** Drafts the agent makes free each month, for an account without a plan (building by hand is always free). */
+  freeDrafts?: number;
   back: { href: string; label: string };
   api: string;
   /** A customer's own tour of the space, with its own title, link and sharing. */
@@ -38,7 +40,7 @@ function updateFor(draft: Experience, standalone: boolean) {
   return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, sky: draft.sky, place: draft.place, standalone };
 }
 
-export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, back, api, tour }: Props) {
+export default function TourBuilder({ scene, edits, initial, saved: initialSaved, library, agentReady, freeDrafts, back, api, tour }: Props) {
   const session = useRef<ViewerSession | null>(null);
   const views = useRef(new Map<string, ViewCamera>());
   const [draft, setDraftState] = useState<Experience>(initial);
@@ -59,6 +61,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   const [thinking, setThinking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Where to choose a plan once the free drafts are used.
+  const [planLink, setPlanLink] = useState("");
   const [message, setMessage] = useState("");
   const [revision, setRevision] = useState(0);
   const [adding, setAdding] = useState(false);
@@ -160,6 +164,10 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         body: JSON.stringify({ prompt: text, experience: draftRef.current, kind: draftRef.current.kind, history: turns, views: viewList })
       });
       const result = await response.json();
+      if (response.status === 402 && typeof result.plan === "string") {
+        setPlanLink(result.plan);
+        return;
+      }
       if (!response.ok) throw new Error(result.error || "The agent could not finish. Try again.");
       const placed = placeAnchors(result.experience as Experience, result.anchors);
       setDraft(placed, true);
@@ -370,7 +378,9 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void askAgent(); } }} />
           {!agentReady && <p className="editor-help">No agent is connected to this site yet. You can still build the tour by hand below.</p>}
-          <button type="submit" className="builder-send" disabled={thinking || !prompt.trim() || !agentReady || !canEdit}>
+          {agentReady && freeDrafts && !planLink ? <p className="editor-help">The agent drafts {freeDrafts} times a month for free. Building by hand below is always free.</p> : null}
+          {planLink && <p className="editor-help" role="status">You&apos;ve used this month&apos;s free drafts. Keep building by hand below, or <a href={planLink}>choose a plan</a> to keep drafting with the agent.</p>}
+          <button type="submit" className="builder-send" disabled={thinking || !prompt.trim() || !agentReady || !canEdit || Boolean(planLink)}>
             {thinking ? <><Sparkles size={18} aria-hidden="true" className="builder-spin" /> Your agent is working on it</> : <><Send size={18} aria-hidden="true" /> Send</>}
           </button>
           {turns.length > 0 && <ol className="builder-turns" aria-label="Conversation">

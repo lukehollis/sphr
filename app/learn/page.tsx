@@ -7,6 +7,7 @@ import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { billingEnabled } from "@/lib/server/billing";
 import { siteBrand } from "@/lib/server/brand";
 import { operatorHunts } from "@/lib/server/profiles";
+import { FREE_AGENT_DRAFTS } from "@/lib/server/user-tours";
 
 export const dynamic = "force-dynamic";
 
@@ -51,11 +52,12 @@ export default async function LearnPage() {
     { id: "choose", title: "Choose what to make and where", shot: "picker", alt: "Choosing Scavenger hunt and searching the spaces for tombs, with four tombs shown",
       body: <>
         <p>Pick a guided tour or a scavenger hunt, then search {brand}&apos;s spaces for a tomb, temple, museum or city to build in. A space you captured yourself works too.</p>
-        {billingEnabled() && <p className="site-hint">Before your first tour we ask you to add a card on a secure page. Making tours and scavenger hunts is free, and nothing is charged unless you host a space of your own.</p>}
+        {billingEnabled() && <p className="site-hint">Making tours and scavenger hunts is free, and there&apos;s no card to add. Nothing is charged unless you host a space of your own.</p>}
       </> },
     { id: "describe", title: "Describe it in a few words", shot: "describe", alt: "The builder open in the tomb of Nefertari, with a request for a sixth grade scavenger hunt typed into the agent box",
       body: <>
         <p>Tell the builder who it&apos;s for, what it should teach and how many stops or finds you want. It drafts every stop, clue and hint in a few minutes while you wait.</p>
+        {billingEnabled() && <p className="site-hint">The agent drafts {FREE_AGENT_DRAFTS} times a month for free. After that you can keep building by hand, or choose a plan for more drafts.</p>}
         <p className="learn-label">Try something like this</p>
         {examplePrompts.map(prompt => <blockquote key={prompt} className="site-quote learn-prompt">{prompt}</blockquote>)}
       </> },

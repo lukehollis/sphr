@@ -3,7 +3,7 @@ import TourSpacePicker from "@/components/TourSpacePicker";
 import { readUser } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { describeAccount } from "@/lib/server/customer-spaces";
-import { buildableSpaces, buildReturnPath, canBuildOn, pickerSpace, readyToBuild } from "@/lib/server/user-tours";
+import { buildableSpaces, buildReturnPath, canBuildOn, pickerSpace } from "@/lib/server/user-tours";
 import { applyCheckoutSession, billingEnabled } from "@/lib/server/billing";
 import { readAllScenes } from "@/lib/scene-catalog";
 import { siteBrand, siteHome } from "@/lib/server/brand";
@@ -15,13 +15,12 @@ export default async function NewTourPage({ searchParams }: { searchParams: Prom
   if (!accountsEnabled()) notFound();
   const { scene, kind, checkout } = await searchParams;
   const user = await currentUser();
-  // Visitors arriving from "Build on this space" make an account first, then choose a plan.
-  if (!user) redirect(`/account/signup?next=${encodeURIComponent(buildReturnPath(scene))}`);
+  // Visitors arriving from "Make a scavenger hunt here" make an account first; building is free.
+  if (!user) redirect(`/account/signup?next=${encodeURIComponent(buildReturnPath(scene, kind))}`);
   // Returning from Checkout usually beats the webhook; apply the result now.
   if (typeof checkout === "string" && billingEnabled()) {
     await applyCheckoutSession(checkout, user.id).catch(error => console.error("Unable to apply Checkout:", error instanceof Error ? error.message : error));
   }
-  if (!readyToBuild(user.id)) redirect(`/account/plan?build=${typeof scene === "string" && /^[a-f0-9]{12}$/.test(scene) ? scene : "1"}`);
   const spaces = await buildableSpaces(user.id);
   // Someone else's space open to builders is never listed, so it comes from its link.
   const listed = typeof scene === "string" ? [...spaces.own, ...spaces.spacery].find(item => item.sceneId === scene) : undefined;
