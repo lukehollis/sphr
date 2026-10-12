@@ -34,13 +34,20 @@ export function reportProblem(title: string, message: string, fields: TeamEvent[
   noticeOnce(`problem ${title} ${message}`, { title, tone: "bad", description: message.slice(0, 500), fields });
 }
 
+// Graphics drawn without a graphics card. Chrome uses SwiftShader only when started with a flag, as automated
+// browsers are; a page they open loses its context before the first picture and often never gets it back.
+const softwareGpu = /SwiftShader|llvmpipe|softpipe|Basic Render Driver/i;
+
 /** A JavaScript error in someone's browser, sent with the page's analytics. */
 export function reportClientError(props: Record<string, string | number | boolean>, path: string | null, device: string) {
   const message = String(props.message ?? "").slice(0, 300);
+  const source = String(props.source ?? "");
   // A page that reloaded itself after part of it didn't arrive usually recovers. It stays in the analytics,
   // and the operator hears about it only if it is still failing after the reload. Scripts that apps and
-  // extensions inject into the page stay in the analytics too, but they aren't this site's errors.
-  if (!message || props.source === "reloaded the page" || isBrowserNoise(message) || isBrowserNoise(String(props.source ?? ""))) return;
+  // extensions inject into the page stay in the analytics too, but they aren't this site's errors, and
+  // neither is a software renderer losing its context.
+  if (!message || source === "reloaded the page" || isBrowserNoise(message) || isBrowserNoise(source)) return;
+  if (props.kind === "webgl" && softwareGpu.test(source)) return;
   noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
     fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null]] });
 }

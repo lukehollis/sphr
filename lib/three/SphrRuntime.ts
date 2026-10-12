@@ -78,6 +78,24 @@ const RECONSTRUCTION_DELAY_MS = 1500;
 // With a model in view, the near plane moves out a little for depth precision kilometers away.
 const RECONSTRUCTION_NEAR = 0.1;
 const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
+
+/**
+ * The graphics card the page draws with, short enough for a notice: "NVIDIA GeForce RTX 3060, D3D11", "Apple GPU",
+ * or SwiftShader, the software renderer automated browsers use. Chrome and Safari name it only through the debug
+ * extension; Firefox names it plainly and warns when the extension is asked for.
+ */
+function gpuName(gl: WebGLRenderingContext | WebGL2RenderingContext) {
+  try {
+    let name = String(gl.getParameter(gl.RENDERER) ?? "");
+    if (!name || name === "WebKit WebGL") {
+      const debug = gl.getExtension("WEBGL_debug_renderer_info");
+      if (debug) name = String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? "");
+    }
+    return name.replace(/^ANGLE \((.*)\)$/, "$1").replace(/\s*\(0x[0-9a-f]+\)/gi, "").replace(/ vs_\d_\d ps_\d_\d/, "").slice(0, 60);
+  } catch {
+    return "";
+  }
+}
 // Spaces without panorama locations: held keys move the camera, [forward, right, up].
 const MOVE_KEYS: Record<string, [number, number, number]> = {
   w: [1, 0, 0], ArrowUp: [1, 0, 0], s: [-1, 0, 0], ArrowDown: [-1, 0, 0],
@@ -142,6 +160,7 @@ export class SphrRuntime {
   private contextLostTimer: ReturnType<typeof setTimeout> | null = null;
   private contextLostAt = 0;
   private contextLostDetails = "";
+  private readonly gpu: string;
   private controls: OrbitControls;
   private audio: AudioController;
   private splats: SparkSplatLayer | null = null;
@@ -238,6 +257,8 @@ export class SphrRuntime {
     this.renderer.toneMapping = THREE.LinearToneMapping;
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.setClearColor(0x0a0c10, 0);
+    // Read now: once the context is lost the browser no longer answers.
+    this.gpu = gpuName(this.renderer.getContext());
     this.textureCache = new TextureCache(this.manager, (this.light ? 64 : 320) * 1024 * 1024, !this.light);
     this.looks = new LookPass(this.renderer, this.lookHost(), typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -1095,7 +1116,7 @@ export class SphrRuntime {
     this.contextLost = true;
     this.contextLostAt = performance.now();
     const { textures, geometries } = this.renderer.info.memory;
-    this.contextLostDetails = `${textures} textures, ${geometries} geometries, open ${Math.round(this.contextLostAt / 60000)} min`;
+    this.contextLostDetails = `${textures} textures, ${geometries} geometries, open ${Math.round(this.contextLostAt / 60000)} min${this.gpu ? `, ${this.gpu}` : ""}`;
     this.waitForContext();
   };
 
