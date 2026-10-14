@@ -43,6 +43,49 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!started) return accountResponse({ error: "A draft is already being made for this tour. Check the tour in a minute." }, 409);
       return accountResponse({ ok: true, drafting: true }, 202);
     }
+    if (body?.stream === true) {
+      const origin = new URL(request.url).origin;
+      const encoder = new TextEncoder();
+      const bodyStream = new ReadableStream({
+        async start(controller) {
+          const sendLine = (payload: Record<string, unknown>) => {
+            try { controller.enqueue(encoder.encode(JSON.stringify(payload) + "\n")); } catch { /* stream closed */ }
+          };
+          const heartbeat = setInterval(() => sendLine({ type: "ping" }), 5000);
+          try {
+            const result = await draftFromRequest(scene!, request_, origin, false, {
+              place: save,
+              onLog: (text) => sendLine({ type: "log", text })
+            });
+            void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: save ? "agent" : "builder" } });
+            if (!save) {
+              sendLine({ type: "done", ok: true, ...result });
+            } else {
+              const saved = saveUserTour(tour.id, tour.revision, { experience: result.experience, title: tour.title, public: tour.public });
+              sendLine({
+                type: "done", ok: true, reply: result.reply,
+                tour: { id: saved.id, title: saved.title, kind: saved.kind, public: saved.public, revision: saved.revision,
+                  path: tourPath(saved), editor: `/account/tours/${saved.id}`, experience: saved.experience }
+              });
+            }
+          } catch (failure) {
+            if (failure instanceof TourAgentError) sendLine({ type: "error", status: 422, error: failure.message });
+            else if (failure instanceof EditConflict) sendLine({ type: "error", status: 409, error: "The tour changed while the agent worked. Ask again." });
+            else {
+              console.error("Tour agent failed for a customer tour:", failure);
+              sendLine({ type: "error", status: 502, error: "The agent could not finish. Try again." });
+            }
+          } finally {
+            clearInterval(heartbeat);
+            try { controller.close(); } catch { /* already closed */ }
+          }
+        }
+      });
+      return new Response(bodyStream, {
+        status: 200,
+        headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" }
+      });
+    }
     const result = await draftFromRequest(scene!, request_, new URL(request.url).origin, false, { place: save });
     void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: save ? "agent" : "builder" } });
     if (!save) return accountResponse({ ok: true, ...result });

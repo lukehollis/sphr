@@ -10,7 +10,7 @@ Group=sphr-agent
 WorkingDirectory=/var/lib/sphr-agent
 ExecStart=/opt/sphr/runtime/node /opt/sphr-agent/tour-agent-service.mjs
 Environment=HOME=/var/lib/sphr-agent
-Environment=SPHR_TOUR_AGENT_CLAUDE=/opt/sphr-agent/bin/claude
+Environment=SPHR_TOUR_AGENT_CLAUDE=/opt/sphr-agent/bin/agy
 Environment=SPHR_TOUR_AGENT_SERVICE_PORT=3037
 EnvironmentFile=/etc/sphr-agent/environment
 Restart=on-failure

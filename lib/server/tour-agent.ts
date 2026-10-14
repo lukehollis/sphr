@@ -424,11 +424,12 @@ const SEARCH_MODELS = {
   input_schema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] }
 };
 
-async function viaApi(context: { text: string; images: AgentImage[]; library?: LibraryModel[] }, history: AgentTurn[], prompt: string, check: (raw: RawDraft) => void): Promise<RawDraft> {
+async function viaApi(context: { text: string; images: AgentImage[]; library?: LibraryModel[] }, history: AgentTurn[], prompt: string, check: (raw: RawDraft) => void, onLog?: (line: string) => void): Promise<RawDraft> {
   const client = new Anthropic({ maxRetries: 2, timeout: 240_000 });
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: userContent(context, history, prompt) as Anthropic.Beta.BetaContentBlockParam[] }];
   const library = context.library ?? [];
   let searches = 0;
+  onLog?.(`Agent started (${TOUR_AGENT_MODEL}) — analyzing space layout and request…`);
   for (let attempt = 0; attempt < 3 + searches; attempt += 1) {
     const stream = client.beta.messages.stream({
       model: TOUR_AGENT_MODEL,
@@ -452,7 +453,9 @@ async function viaApi(context: { text: string; images: AgentImage[]; library?: L
       searches += 1;
       messages.push({ role: "user", content: lookups.map((lookup) => {
         const input = lookup.input as { query?: unknown; limit?: unknown };
-        const found = searchLibrary(library, String(input.query ?? ""), typeof input.limit === "number" ? input.limit : 16);
+        const q = String(input.query ?? "");
+        if (q) onLog?.(`Searching 3D model library for "${q}"…`);
+        const found = searchLibrary(library, q, typeof input.limit === "number" ? input.limit : 16);
         return { type: "tool_result" as const, tool_use_id: lookup.id, content: found.length ? found.map(describeModel).join("\n") : "No models match. Try other words, or use a shape." };
       }) });
       continue;
@@ -472,12 +475,13 @@ async function viaApi(context: { text: string; images: AgentImage[]; library?: L
   throw new TourAgentError("The agent could not produce a valid draft. Try again.");
 }
 
-async function viaCommand(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Promise<RawDraft> {
+async function viaCommand(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, onLog?: (line: string) => void): Promise<RawDraft> {
   let template: unknown;
   try { template = JSON.parse(process.env.SPHR_TOUR_AGENT_COMMAND ?? ""); } catch { template = null; }
   if (!Array.isArray(template) || !template.length || !template.every((part) => typeof part === "string")) {
     throw new TourAgentError("SPHR_TOUR_AGENT_COMMAND must be a JSON array of strings.");
   }
+  onLog?.("Starting local tour agent command…");
   const directory = await mkdtemp(path.join(tmpdir(), "sphr-tour-agent-"));
   try {
     const names = await Promise.all(context.images.map(async (image, index) => {
@@ -512,7 +516,7 @@ async function viaCommand(context: { text: string; images: AgentImage[] }, histo
 }
 
 /** The agent service: images travel as content blocks, the CLI has no tools. */
-async function viaService(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Promise<RawDraft> {
+async function viaService(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, onLog?: (line: string) => void): Promise<RawDraft> {
   const url = process.env.SPHR_TOUR_AGENT_URL!.trim().replace(/\/$/, "");
   const schema = JSON.stringify(WRITE_TOUR.input_schema);
   const text = `Instead of calling a tool, answer with only one JSON object matching this schema, and nothing else:\n${schema}\n\n`
@@ -521,8 +525,12 @@ async function viaService(context: { text: string; images: AgentImage[] }, histo
   try {
     response = await fetch(`${url}/compose`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.SPHR_TOUR_AGENT_TOKEN ?? ""}` },
-      body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images }),
+      headers: {
+        "Content-Type": "application/json",
+        ...(onLog ? { Accept: "application/x-ndjson" } : {}),
+        Authorization: `Bearer ${process.env.SPHR_TOUR_AGENT_TOKEN ?? ""}`
+      },
+      body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images, ...(onLog ? { stream: true } : {}) }),
       // Long enough to wait behind other drafts in the service's queue, then draft.
       signal: AbortSignal.timeout(900_000)
     });
@@ -530,6 +538,30 @@ async function viaService(context: { text: string; images: AgentImage[] }, histo
     throw new TourAgentError((failure as Error).name === "TimeoutError"
       ? "The tour agent took too long, usually because several drafts were waiting. Try again in a few minutes."
       : "The tour agent is not reachable right now. Try again in a minute.");
+  }
+  if (response.ok && response.headers.get("content-type")?.includes("application/x-ndjson") && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let output: string | null = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index: number;
+      while ((index = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (!line) continue;
+        let item: { type?: string; text?: string; output?: string; error?: string } | null = null;
+        try { item = JSON.parse(line); } catch { continue; }
+        if (item?.type === "log" && typeof item.text === "string") onLog?.(item.text);
+        else if (item?.type === "error") throw new TourAgentError(item.error || "The agent could not finish. Try again.");
+        else if (item?.type === "done" && typeof item.output === "string") output = item.output;
+      }
+    }
+    if (typeof output !== "string") throw new TourAgentError("The agent could not finish. Try again.");
+    return extractJson(output);
   }
   const result = await response.json().catch(() => ({})) as { output?: string; error?: string };
   if (!response.ok || typeof result.output !== "string") throw new TourAgentError(result.error || "The agent could not finish. Try again.");
@@ -569,17 +601,22 @@ export async function composeTour(options: {
   spaceViews?: SpaceView[];
   /** The space's reconstruction, when it has one (see reconstructions.ts). */
   reconstruction?: ReconstructionSummary | null;
+  /** Called with human-readable progress lines while the agent drafts. */
+  onLog?: (line: string) => void;
 }): Promise<AgentResult & { library: LibraryModel[] }> {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
   const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
+  options.onLog?.(`Reading space map and ${nodeIds.size ? `${nodeIds.size} panorama locations` : "3D views"}…`);
   const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews, options.reconstruction);
+  options.onLog?.(`Prepared ${context.images.length} space photo${context.images.length === 1 ? "" : "s"} and ${context.library.length} pre-matched 3D models…`);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
   const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
-    ? await viaApi(context, options.history, prompt, check)
+    ? await viaApi(context, options.history, prompt, check, options.onLog)
     : process.env.SPHR_TOUR_AGENT_URL?.trim()
-      ? await viaService(context, options.history, prompt)
-      : await viaCommand(context, options.history, prompt);
+      ? await viaService(context, options.history, prompt, options.onLog)
+      : await viaCommand(context, options.history, prompt, options.onLog);
+  options.onLog?.("Validating draft and aiming 3D views…");
   return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds), library: context.library };
 }

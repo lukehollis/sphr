@@ -59,6 +59,10 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   const [prompt, setPrompt] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [thinking, setThinking] = useState(false);
+  const [agentLogs, setAgentLogs] = useState<{ text: string; at: number }[]>([]);
+  const [logOpen, setLogOpen] = useState(true);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [justUpdated, setJustUpdated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Where to choose a plan once the free drafts are used.
@@ -67,6 +71,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   const [revision, setRevision] = useState(0);
   const [adding, setAdding] = useState(false);
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logListRef = useRef<HTMLOListElement | null>(null);
   const leaving = useRef(false);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -148,31 +153,117 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   }, [preview, ready]);
   useEffect(() => { session.current?.setGizmoMode(gizmo); }, [gizmo, ready]);
 
+  // Keep the agent log scrolled to the newest entry as steps stream in.
+  useEffect(() => {
+    const el = logListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [agentLogs, logOpen]);
+
+  // Live elapsed timer and progressive status updates while the agent works.
+  useEffect(() => {
+    if (!thinking) return;
+    const started = Date.now();
+    const interval = setInterval(() => {
+      const sec = Math.max(0, Math.floor((Date.now() - started) / 1000));
+      setElapsedSec(sec);
+      setAgentLogs((current) => {
+        const last = current[current.length - 1];
+        if (!last || sec - last.at < 7) return current;
+        const fallbacks = [
+          "Evaluating 3D sightlines and camera angles across locations…",
+          "Matching 3D models and composing clues for each stop…",
+          "Checking object visibility and floor placements…",
+          "Finalizing stop sequence and camera headings…"
+        ];
+        const nextText = fallbacks.find((line) => !current.some((item) => item.text === line));
+        return nextText ? [...current, { text: nextText, at: sec }] : current;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [thinking]);
+
   const activeStop = state ? draft.stops[state.activePointIndex] : undefined;
 
   // ---- Agent ----
   async function askAgent() {
     const text = prompt.trim();
     if (!text || thinking) return;
-    setThinking(true); setError(""); setMessage("");
+    const startedAt = Date.now();
+    const elapsed = () => Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+    const pushLog = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      setAgentLogs((current) => current[current.length - 1]?.text === trimmed ? current : [...current, { text: trimmed, at: elapsed() }]);
+    };
+    setThinking(true);
+    setLogOpen(true);
+    setElapsedSec(0);
+    setAgentLogs([{ text: "Capturing current camera view and preparing 3D space…", at: 0 }]);
+    setError("");
+    setMessage("");
     try {
       const capture = session.current?.captureView();
       const viewList = capture ? [{ id: "current", image: capture.image, nodeId: capture.view.nodeId, rotation: capture.view.rotation, fov: capture.view.fov }] : [];
       if (capture) views.current.set("current", capture.camera);
       const response = await fetch(`${api}/agent`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, experience: draftRef.current, kind: draftRef.current.kind, history: turns, views: viewList })
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/x-ndjson, application/json" },
+        body: JSON.stringify({ prompt: text, experience: draftRef.current, kind: draftRef.current.kind, history: turns, views: viewList, stream: true })
       });
-      const result = await response.json();
-      if (response.status === 402 && typeof result.plan === "string") {
-        setPlanLink(result.plan);
-        return;
+      type AgentResponse = { ok?: boolean; experience?: Experience; anchors?: { objects: Record<string, Anchor>; stops: Record<string, Anchor>; effects: Record<string, Anchor> }; reply?: string; error?: string; plan?: string };
+      let finalResult: AgentResponse | null = null;
+      if (response.ok && response.headers.get("content-type")?.includes("application/x-ndjson") && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+            let event: Record<string, unknown> | null = null;
+            try { event = JSON.parse(line); } catch { continue; }
+            if (event?.type === "log" && typeof event.text === "string") {
+              pushLog(event.text);
+            } else if (event?.type === "error") {
+              if (event.status === 402 && typeof event.plan === "string") {
+                setPlanLink(event.plan);
+                return;
+              }
+              throw new Error(typeof event.error === "string" && event.error ? event.error : "The agent could not finish. Try again.");
+            } else if (event?.type === "done") {
+              finalResult = event as unknown as AgentResponse;
+            }
+          }
+        }
+      } else {
+        const rawText = await response.text();
+        try {
+          finalResult = JSON.parse(rawText);
+        } catch {
+          throw new Error(response.status === 504 || response.status === 524
+            ? "The server connection timed out while the agent was working. Please try again."
+            : "The agent could not finish right now. Please try again.");
+        }
+        if (response.status === 402 && typeof finalResult?.plan === "string") {
+          setPlanLink(finalResult.plan);
+          return;
+        }
+        if (!response.ok) throw new Error(finalResult?.error || "The agent could not finish. Try again.");
       }
-      if (!response.ok) throw new Error(result.error || "The agent could not finish. Try again.");
-      const placed = placeAnchors(result.experience as Experience, result.anchors);
+      if (!finalResult?.experience) throw new Error(finalResult?.error || "The agent could not finish. Try again.");
+      pushLog("Placing 3D objects and aiming camera stops in the viewer…");
+      const placed = placeAnchors(finalResult.experience, finalResult.anchors ?? { objects: {}, stops: {}, effects: {} });
       setDraft(placed, true);
-      setTurns((current) => [...current, { prompt: text, reply: result.reply }]);
+      setTurns((current) => [...current, { prompt: text, reply: finalResult?.reply ?? "" }]);
       setPrompt("");
+      pushLog(`Ready — ${placed.stops.length} ${draftRef.current.kind === "hunt" ? "clue" : "stop"}${placed.stops.length === 1 ? "" : "s"} and ${placed.objects.length} 3D object${placed.objects.length === 1 ? "" : "s"} placed.`);
+      setJustUpdated(true);
+      setTimeout(() => setJustUpdated(false), 2400);
       if (placed.stops[0]) { setOpenStop(placed.stops[0].id); setTimeout(() => void session.current?.goToStop(0), 400); }
     } catch (failure) {
       setError((failure as Error).message);
@@ -380,18 +471,55 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           {!agentReady && <p className="editor-help">No agent is connected to this site yet. You can still build the tour by hand below.</p>}
           {agentReady && freeDrafts && !planLink ? <p className="editor-help">The agent drafts {freeDrafts} times a month for free. Building by hand below is always free.</p> : null}
           {planLink && <p className="editor-help" role="status">You&apos;ve used this month&apos;s free drafts. Keep building by hand below, or <a href={planLink}>choose a plan</a> to keep drafting with the agent.</p>}
-          <button type="submit" className="builder-send" disabled={thinking || !prompt.trim() || !agentReady || !canEdit || Boolean(planLink)}>
-            {thinking ? <><Sparkles size={18} aria-hidden="true" className="builder-spin" /> Your agent is working on it</> : <><Send size={18} aria-hidden="true" /> Send</>}
+          <button type="submit" className="builder-send" data-thinking={thinking || undefined} disabled={thinking || !prompt.trim() || !agentReady || !canEdit || Boolean(planLink)}>
+            {thinking ? <>
+              <span className="builder-spinner" aria-hidden="true" />
+              <span className="builder-send-status">{agentLogs[agentLogs.length - 1]?.text || "Your agent is working on it…"}</span>
+              <span className="builder-elapsed" aria-label={`${elapsedSec} seconds elapsed`}>{Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
+            </> : <><Send size={18} aria-hidden="true" /> Send</>}
           </button>
+          {agentLogs.length > 0 && <div className="builder-agent-log" data-state={thinking ? "running" : error ? "error" : "done"}>
+            <div className="builder-agent-log-head">
+              <span className="builder-agent-log-title">
+                <span className="builder-log-dot" aria-hidden="true" />
+                {thinking
+                  ? `Live agent log · Step ${agentLogs.length}`
+                  : error
+                    ? `Stopped after ${elapsedSec}s · ${agentLogs.length} step${agentLogs.length === 1 ? "" : "s"}`
+                    : `Drafted in ${elapsedSec}s · ${agentLogs.length} steps`}
+              </span>
+              {!thinking && <button type="button" className="builder-log-toggle" aria-expanded={logOpen} onClick={() => setLogOpen((open) => !open)}>
+                {logOpen ? "Hide log" : "Show log"}
+              </button>}
+            </div>
+            {(thinking || logOpen) && <ol className="builder-agent-log-list" role="log" aria-live="polite" aria-label="Agent progress" ref={logListRef}>
+              {agentLogs.map((entry, index) => {
+                const active = thinking && index === agentLogs.length - 1;
+                return <li key={index} data-active={active || undefined}>
+                  <span className="builder-log-icon" aria-hidden="true">{active ? <span className="builder-log-pulse" /> : "✓"}</span>
+                  <span className="builder-log-text">{entry.text.split(/("[^"]+")/g).map((part, i) =>
+                    part.startsWith('"') && part.endsWith('"') && part.length > 2
+                      ? <code key={i} className="builder-log-token">{part.slice(1, -1)}</code>
+                      : part
+                  )}</span>
+                  <span className="builder-log-time">+{entry.at}s</span>
+                </li>;
+              })}
+            </ol>}
+          </div>}
           {turns.length > 0 && <ol className="builder-turns" aria-label="Conversation">
             {turns.map((turn, index) => <li key={index}><p className="builder-turn-prompt">{turn.prompt}</p><p>{turn.reply}</p></li>)}
           </ol>}
         </form>
 
         <div className="builder-tabs" role="tablist" aria-label="Tour parts">
-          {(["stops", "objects", "effects", "look", "sky", "map"] as Tab[]).map((value) => <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)}>
-            {value === "stops" ? `${hunt ? "Clues" : "Stops"} ${draft.stops.length}` : value === "objects" ? `Objects ${draft.objects.length}` : value === "effects" ? `Effects ${draft.effects.length}` : value === "look" ? "Look" : value === "sky" ? "Sky" : "Map"}
-          </button>)}
+          {(["stops", "objects", "effects", "look", "sky", "map"] as Tab[]).map((value) => {
+            const count = value === "stops" ? draft.stops.length : value === "objects" ? draft.objects.length : value === "effects" ? draft.effects.length : null;
+            const label = value === "stops" ? (hunt ? "Clues" : "Stops") : value === "objects" ? "Objects" : value === "effects" ? "Effects" : value === "look" ? "Look" : value === "sky" ? "Sky" : "Map";
+            return <button key={value} role="tab" type="button" aria-selected={tab === value} data-updated={justUpdated && count !== null && count > 0 ? "true" : undefined} onClick={() => setTab(value)}>
+              {label}{count !== null && <> <span className="builder-tab-count">{count}</span></>}
+            </button>;
+          })}
         </div>
 
         {tab === "stops" && <div role="tabpanel" className="builder-list">
@@ -545,7 +673,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         <div className="builder-row">
           {tour ? <button type="button" className="builder-quiet" disabled={busy} onClick={() => void deleteTour()}>Delete</button>
             : saved.experience && <button type="button" className="builder-quiet" disabled={busy} onClick={() => { if (window.confirm("Remove the authored tour? Visitors will see the space as it was.")) void save(true); }}>Remove tour</button>}
-          <button type="button" className="editor-save" disabled={busy || !dirty} onClick={() => void save()}>{busy ? "Saving" : dirty ? "Save" : "Saved"}</button>
+          <button type="button" className="editor-save" disabled={busy || !dirty} onClick={() => void save()}>{busy ? <><span className="builder-spinner builder-spinner-sm" aria-hidden="true" /> Saving…</> : dirty ? "Save" : "Saved"}</button>
         </div>
       </div>
     </aside>

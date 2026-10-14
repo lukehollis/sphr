@@ -15,6 +15,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   catch { return adminResponse({ error: 'Invalid request.' }, 400); }
   const scene = (await readSourceScenes()).find(item => item.sceneId === id);
   if (!scene) return adminResponse({ error: 'Space not found.' }, 404);
+  if (body?.stream === true) {
+    const origin = new URL(request.url).origin;
+    const team = await isTeamEditor();
+    const encoder = new TextEncoder();
+    const bodyStream = new ReadableStream({
+      async start(controller) {
+        const sendLine = (payload: Record<string, unknown>) => {
+          try { controller.enqueue(encoder.encode(JSON.stringify(payload) + '\n')); } catch { /* stream closed */ }
+        };
+        const heartbeat = setInterval(() => sendLine({ type: 'ping' }), 5000);
+        try {
+          const result = await draftFromRequest(scene, body, origin, team, {
+            onLog: (text) => sendLine({ type: 'log', text })
+          });
+          sendLine({ type: 'done', ok: true, ...result });
+        } catch (error) {
+          if (error instanceof TourAgentError) sendLine({ type: 'error', status: 422, error: error.message });
+          else {
+            console.error('Tour agent failed:', error);
+            sendLine({ type: 'error', status: 502, error: 'The agent could not finish. Try again.' });
+          }
+        } finally {
+          clearInterval(heartbeat);
+          try { controller.close(); } catch { /* already closed */ }
+        }
+      }
+    });
+    return new Response(bodyStream, {
+      status: 200,
+      headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' }
+    });
+  }
   try {
     return adminResponse({ ok: true, ...await draftFromRequest(scene, body, new URL(request.url).origin, await isTeamEditor()) });
   } catch (error) {

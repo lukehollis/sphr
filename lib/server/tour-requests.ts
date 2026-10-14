@@ -39,9 +39,10 @@ export async function parseExperienceFor(scene: SceneListing, value: unknown) {
  * Ask the tour agent for a new draft from a builder's request body. Nothing is saved.
  * With `place`, positions are worked out here rather than in a browser (for agents).
  */
-export async function draftFromRequest(scene: SceneListing, body: Record<string, unknown> | null | undefined, origin: string, team: boolean, { place = false } = {}) {
+export async function draftFromRequest(scene: SceneListing, body: Record<string, unknown> | null | undefined, origin: string, team: boolean, { place = false, onLog }: { place?: boolean; onLog?: (line: string) => void } = {}) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt || prompt.length > 6000) throw new TourAgentError("Describe the tour in up to 6000 characters.");
+  onLog?.(`Loading ${scene.title} 3D space data…`);
   const bootstrap = await readSceneBootstrap(scene);
   const space = openingSpace(bootstrap);
   let draft;
@@ -62,9 +63,10 @@ export async function draftFromRequest(scene: SceneListing, body: Record<string,
   ]);
   // A space without panoramas (a splat or a model) is shown to the agent in views drawn here.
   const drawnViews = await spaceViews(bootstrap, scene.sceneId).catch((failure) => { console.warn("Drafting without drawn views:", (failure as Error).message); return null; }) ?? [];
-  const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn, spaceViews: drawnViews, reconstruction });
+  const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn, spaceViews: drawnViews, reconstruction, onLog });
   if (place) {
     // Placed against the capture mesh like the builder does; without it, against each location's floor.
+    onLog?.("Placing objects against the 3D capture mesh…");
     const meshes = await captureMeshes(bootstrap).catch((failure) => { console.warn("Placing without the capture mesh:", (failure as Error).message); return []; });
     return { experience: placeOnServer(bootstrap, result.experience, result.anchors, meshes, drawnViews), anchors: { objects: {}, stops: {}, effects: {} }, reply: result.reply };
   }
