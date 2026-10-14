@@ -1,4 +1,4 @@
-import { readCustomerSpace, readUpload, setUploadStatus } from "@/lib/server/accounts-store";
+import { readCustomerSpace, readUpload, sameTeam, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountResponse, accountsEnabled, bearerToken, requestUser, sameOrigin } from "@/lib/server/accounts";
 import { editableStatus } from "@/lib/server/customer-spaces";
 import { deleteStoredUpload, uploadBucket, uploadOffset, writeLocalChunk } from "@/lib/server/uploads";
@@ -12,7 +12,7 @@ async function ownedUpload(request: Request, params: Params["params"], checkOrig
   const user = await requestUser(request, true);
   const upload = readUpload((await params).id);
   const space = upload && readCustomerSpace(upload.spaceId);
-  return user && upload && space && space.userId === user.id && upload.status !== "deleted" && space.status !== "deleted" ? { upload, space } : undefined;
+  return user && upload && space && sameTeam(space.userId, user.id) && upload.status !== "deleted" && space.status !== "deleted" ? { upload, space } : undefined;
 }
 
 /** Local storage only: receives one chunk, like a Cloud Storage resumable session. */

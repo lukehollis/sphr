@@ -1,4 +1,4 @@
-import { AccountError, hostingStatuses, payableSpaceCount, readSubscription } from "@/lib/server/accounts-store";
+import { AccountError, hostingStatuses, payableSpaceCount, readSubscription, sameTeam } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout } from "@/lib/server/billing";
 import { recordEvent } from "@/lib/server/analytics";
@@ -18,7 +18,8 @@ export async function POST(request: Request) {
   if (subscription && hostingStatuses.has(subscription.status)) return accountResponse({ error: "Billing is already active." }, 409);
   // Choosing a plan to build tours, or to see a tour's class results, comes before any space; payment
   // then leads back to building, or to the results.
-  const results = typeof body?.results === "string" && readUserTour(body.results)?.userId === user.id ? `/account/tours/${body.results}/results` : undefined;
+  const tour = typeof body?.results === "string" ? readUserTour(body.results) : undefined;
+  const results = tour && sameTeam(tour.userId, user.id) ? `/account/tours/${body.results}/results` : undefined;
   const build = results ?? (body?.build === undefined ? undefined : buildReturnPath(body.build));
   if (!build && !payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
   try {

@@ -1,6 +1,6 @@
 import { readSceneEdits, readSceneTourTitles } from "./admin-store";
 import { isScenePublic, sceneBuildersChoice } from "./admin-store";
-import { cancellationDate, cancellationScheduled, latestJob, listUploads, payableSpaceCount, readSubscription, type CustomerSpace, type User } from "./accounts-store";
+import { cancellationDate, cancellationScheduled, latestJob, listUploads, matchingDomainTeam, payableSpaceCount, readSubscription, userTeam, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
 import { salesEmail, sourceUrl } from "./brand";
@@ -26,12 +26,32 @@ export async function describeSpace(space: CustomerSpace) {
 export type SpaceView = Awaited<ReturnType<typeof describeSpace>>;
 
 export function describeAccount(user: User) {
-  const subscription = billingEnabled() ? readSubscription(user.id) : undefined;
+  const membership = userTeam(user.id);
+  const matching = !membership && user.emailVerified ? matchingDomainTeam(user.email) : undefined;
+  const subscription = (billingEnabled() || membership?.team.planSpaces !== null) ? readSubscription(user.id) : undefined;
+  const invoiced = Boolean(subscription?.id.startsWith("team_"));
   return {
     email: user.email, name: user.name, emailVerified: user.emailVerified, hasPassword: user.hasPassword, providers: user.providers,
     billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null, salesEmail: salesEmail() ?? null,
     /** Spaces that count toward a plan: every space not deleted. */
     spaceCount: payableSpaceCount(user.id),
+    team: membership ? {
+      id: membership.team.id,
+      name: membership.team.name,
+      role: membership.role,
+      memberCount: membership.team.members.length,
+      joinCode: membership.team.joinCode,
+      joinDomain: membership.team.joinDomain,
+      planName: membership.team.planName,
+      planSpaces: membership.team.planSpaces,
+      invoiced,
+    } : null,
+    matchingTeam: matching ? {
+      id: matching.id,
+      name: matching.name,
+      joinCode: matching.joinCode,
+      joinDomain: matching.joinDomain,
+    } : null,
     // A cancellation scheduled for a date shows that date as the end, like one at the period's end.
     subscription: subscription ? { status: subscription.status, quantity: subscription.quantity, periodEnd: cancellationDate(subscription) ?? subscription.periodEnd,
       cancelAtPeriodEnd: cancellationScheduled(subscription), plan: subscription.plan } : null

@@ -42,6 +42,13 @@ function store() {
       client TEXT NOT NULL, created TEXT NOT NULL, used TEXT);
     CREATE INDEX IF NOT EXISTS agent_tokens_user ON agent_tokens(user_id);
     CREATE TABLE IF NOT EXISTS mcp_sessions (id TEXT PRIMARY KEY, client TEXT NOT NULL, secret TEXT, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT,
+      join_code TEXT NOT NULL UNIQUE, join_domain TEXT, plan_name TEXT, plan_spaces INTEGER,
+      created TEXT NOT NULL, updated TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS team_members (team_id TEXT NOT NULL, user_id TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL CHECK(role IN ('owner','member')), created TEXT NOT NULL,
+      PRIMARY KEY(team_id, user_id));
+    CREATE INDEX IF NOT EXISTS team_members_team ON team_members(team_id);
   `);
   // Databases from before plans were added gain the column; their subscriptions are per space.
   if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "plan")) {
@@ -406,6 +413,283 @@ export function setCheckoutSession(userId: string, session: string | null) {
   store().prepare("UPDATE users SET checkout_session=? WHERE id=?").run(session, userId);
 }
 
+// ---- Teams ----
+// A team shares spaces, tours and a single billing plan. The team owner pays through Stripe,
+// or an enterprise team can be provisioned with an invoiced space allowance (`plan_spaces`)
+// and an optional `@domain` restriction on its join link.
+
+export type TeamRole = "owner" | "member";
+export type TeamMember = { userId: string; email: string; name: string | null; role: TeamRole; created: string };
+export type Team = { id: string; name: string; ownerId: string | null; joinCode: string; joinDomain: string | null;
+  planName: string | null; planSpaces: number | null; created: string; updated: string; members: TeamMember[] };
+export type UserTeam = { team: Team; role: TeamRole };
+type TeamRow = { id: string; name: string; owner_id: string | null; join_code: string; join_domain: string | null;
+  plan_name: string | null; plan_spaces: number | null; created: string; updated: string };
+type TeamMemberRow = { user_id: string; email: string; name: string | null; role: TeamRole; created: string };
+
+export function normalizeDomain(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") throw new AccountError("Enter a valid email domain, such as example.org.");
+  const domain = value.trim().replace(/^@+/, "").toLowerCase();
+  if (!domain) return null;
+  if (domain.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain)) {
+    throw new AccountError("Enter a valid email domain, such as example.org.");
+  }
+  return domain;
+}
+
+export function emailDomain(email: string) {
+  return email.split("@")[1]?.toLowerCase() ?? "";
+}
+
+function generateJoinCode(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "team";
+  for (;;) {
+    const code = `${slug}-${randomId(4)}`;
+    const taken = store().prepare("SELECT 1 FROM teams WHERE join_code=?").get(code);
+    if (!taken) return code;
+  }
+}
+
+function toTeam(row: TeamRow): Team {
+  const members = (store().prepare(`SELECT team_members.user_id, users.email, users.name, team_members.role, team_members.created
+    FROM team_members JOIN users ON users.id = team_members.user_id
+    WHERE team_members.team_id=? ORDER BY CASE WHEN team_members.role='owner' THEN 0 ELSE 1 END, team_members.created`)
+    .all(row.id) as TeamMemberRow[])
+    .map(item => ({ userId: item.user_id, email: item.email, name: item.name, role: item.role, created: item.created }));
+  return { id: row.id, name: row.name, ownerId: row.owner_id, joinCode: row.join_code, joinDomain: row.join_domain,
+    planName: row.plan_name, planSpaces: row.plan_spaces, created: row.created, updated: row.updated, members };
+}
+
+export function readTeam(id: unknown) {
+  if (typeof id !== "string" || !/^[a-f0-9]{16}$/.test(id)) return undefined;
+  const row = store().prepare("SELECT * FROM teams WHERE id=?").get(id) as TeamRow | undefined;
+  return row ? toTeam(row) : undefined;
+}
+
+export function readTeamByJoinCode(code: unknown) {
+  if (typeof code !== "string") return undefined;
+  const normalized = code.trim().toLowerCase();
+  if (!/^[a-z0-9-]{6,80}$/.test(normalized)) return undefined;
+  const row = store().prepare("SELECT * FROM teams WHERE join_code=?").get(normalized) as TeamRow | undefined;
+  return row ? toTeam(row) : undefined;
+}
+
+export function userTeam(userId: string): UserTeam | undefined {
+  const row = store().prepare("SELECT team_id, role FROM team_members WHERE user_id=?").get(userId) as { team_id: string; role: TeamRole } | undefined;
+  if (!row) return undefined;
+  const team = readTeam(row.team_id);
+  return team ? { team, role: row.role } : undefined;
+}
+
+export function readUserTeam(userId: string) {
+  return userTeam(userId)?.team;
+}
+
+export function listTeams(): Team[] {
+  return (store().prepare("SELECT * FROM teams ORDER BY created DESC").all() as TeamRow[]).map(toTeam);
+}
+
+/** A domain-matched team that this email address is eligible to join. */
+export function matchingDomainTeam(email: string): Team | undefined {
+  const domain = emailDomain(email);
+  if (!domain) return undefined;
+  const row = store().prepare("SELECT * FROM teams WHERE join_domain=? ORDER BY created LIMIT 1").get(domain) as TeamRow | undefined;
+  return row ? toTeam(row) : undefined;
+}
+
+export function teamUserIds(userId: string): string[] {
+  const member = store().prepare("SELECT team_id FROM team_members WHERE user_id=?").get(userId) as { team_id: string } | undefined;
+  if (!member) return [userId];
+  const ids = (store().prepare("SELECT user_id FROM team_members WHERE team_id=? ORDER BY created").all(member.team_id) as { user_id: string }[])
+    .map(row => row.user_id);
+  return ids.length ? ids : [userId];
+}
+
+export function sameTeam(userA: string, userB: string): boolean {
+  if (userA === userB) return true;
+  return Boolean(store().prepare("SELECT 1 FROM team_members a JOIN team_members b ON a.team_id = b.team_id WHERE a.user_id=? AND b.user_id=?")
+    .get(userA, userB));
+}
+
+/** The account whose Stripe subscription covers `userId` (the team owner when in a team). */
+export function billingUserId(userId: string): string {
+  const row = store().prepare("SELECT teams.owner_id FROM team_members JOIN teams ON teams.id = team_members.team_id WHERE team_members.user_id=?")
+    .get(userId) as { owner_id: string | null } | undefined;
+  return row?.owner_id ?? userId;
+}
+
+export function createTeam(userId: string, input: { name: unknown; joinDomain?: unknown }): Team {
+  const name = cleanText(input.name, 80);
+  if (!name) throw new AccountError("Enter a team name.");
+  const joinDomain = input.joinDomain !== undefined ? normalizeDomain(input.joinDomain) : null;
+  return transaction(() => {
+    const existing = store().prepare("SELECT team_id FROM team_members WHERE user_id=?").get(userId) as { team_id: string } | undefined;
+    if (existing) throw new AccountError("Leave your current team before creating another.");
+    const id = randomId(8);
+    const joinCode = generateJoinCode(name);
+    const stamp = now();
+    store().prepare("INSERT INTO teams(id, name, owner_id, join_code, join_domain, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, name, userId, joinCode, joinDomain, stamp, stamp);
+    store().prepare("INSERT INTO team_members(team_id, user_id, role, created) VALUES (?, ?, 'owner', ?)").run(id, userId, stamp);
+    return readTeam(id)!;
+  });
+}
+
+/**
+ * Creates or updates an operator-provisioned team (for example, an invoiced enterprise account
+ * with a domain-restricted join link). Idempotent by team name (case-insensitive).
+ */
+export function provisionEnterpriseTeam(input: {
+  name: unknown;
+  ownerEmail?: unknown;
+  joinDomain?: unknown;
+  planName?: unknown;
+  planSpaces?: unknown;
+}): Team {
+  const name = cleanText(input.name, 80);
+  if (!name) throw new AccountError("Enter a team name.");
+  const joinDomain = input.joinDomain !== undefined ? normalizeDomain(input.joinDomain) : null;
+  const planName = input.planName === null ? null : (cleanText(input.planName, 60) ?? "Enterprise");
+  const rawSpaces = input.planSpaces === undefined ? 200 : input.planSpaces;
+  const planSpaces = rawSpaces === null || rawSpaces === "" ? null : Number(rawSpaces);
+  if (planSpaces !== null && (!Number.isInteger(planSpaces) || planSpaces < 1 || planSpaces > 10000)) {
+    throw new AccountError("Enter a valid number of spaces for the team plan.");
+  }
+  const ownerEmail = typeof input.ownerEmail === "string" && input.ownerEmail.trim() ? input.ownerEmail.trim() : undefined;
+  const owner = ownerEmail ? readUserByEmail(ownerEmail) : undefined;
+  if (ownerEmail && !owner) throw new AccountError(`No account exists for ${ownerEmail} yet.`);
+  return transaction(() => {
+    const existing = store().prepare("SELECT * FROM teams WHERE lower(name)=lower(?)").get(name) as TeamRow | undefined;
+    if (owner) {
+      const memberOf = store().prepare("SELECT team_id FROM team_members WHERE user_id=?").get(owner.id) as { team_id: string } | undefined;
+      if (memberOf && memberOf.team_id !== existing?.id) throw new AccountError(`${owner.email} already belongs to another team.`);
+    }
+    const stamp = now();
+    const id = existing?.id ?? randomId(8);
+    if (existing) {
+      const nextOwnerId = owner?.id ?? existing.owner_id;
+      store().prepare("UPDATE teams SET name=?, owner_id=?, join_domain=?, plan_name=?, plan_spaces=?, updated=? WHERE id=?")
+        .run(name, nextOwnerId, joinDomain ?? existing.join_domain, planName, planSpaces, stamp, id);
+    } else {
+      const joinCode = generateJoinCode(name);
+      store().prepare("INSERT INTO teams(id, name, owner_id, join_code, join_domain, plan_name, plan_spaces, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, name, owner?.id ?? null, joinCode, joinDomain, planName, planSpaces, stamp, stamp);
+    }
+    if (owner) {
+      store().prepare("UPDATE team_members SET role='member' WHERE team_id=? AND role='owner' AND user_id<>?").run(id, owner.id);
+      store().prepare("INSERT INTO team_members(team_id, user_id, role, created) VALUES (?, ?, 'owner', ?) ON CONFLICT(team_id, user_id) DO UPDATE SET role='owner'")
+        .run(id, owner.id, stamp);
+      if (hostingActive(owner.id)) activateUnpaidSpaces(owner.id);
+    }
+    return readTeam(id)!;
+  });
+}
+
+export function joinTeamByCode(userId: string, code: unknown): Team {
+  return transaction(() => {
+    const user = readUser(userId);
+    if (!user) throw new AccountError("Sign in to join this team.");
+    const team = readTeamByJoinCode(code);
+    if (!team) throw new AccountError("This team invite link is no longer valid.");
+    const current = userTeam(userId);
+    if (current?.team.id === team.id) return team;
+    if (current) throw new AccountError("You are already a member of another team. Leave your current team first.");
+    const ownSub = readStoredSubscription(userId);
+    if (ownSub && hostingStatuses.has(ownSub.status) && team.ownerId && team.ownerId !== userId) {
+      throw new AccountError("Cancel your individual subscription before joining a team.");
+    }
+    if (team.joinDomain) {
+      if (!user.emailVerified) throw new AccountError("Confirm your email address before joining this team.");
+      if (emailDomain(user.email) !== team.joinDomain) {
+        throw new AccountError(`This invite link is only for @${team.joinDomain} email addresses.`);
+      }
+    }
+    const stamp = now();
+    const role: TeamRole = team.ownerId ? "member" : "owner";
+    if (!team.ownerId) {
+      store().prepare("UPDATE teams SET owner_id=?, updated=? WHERE id=?").run(userId, stamp, team.id);
+    } else {
+      store().prepare("UPDATE teams SET updated=? WHERE id=?").run(stamp, team.id);
+    }
+    store().prepare("INSERT INTO team_members(team_id, user_id, role, created) VALUES (?, ?, ?, ?)").run(team.id, userId, role, stamp);
+    if (hostingActive(userId)) activateUnpaidSpaces(userId);
+    return readTeam(team.id)!;
+  });
+}
+
+export function updateTeam(
+  teamId: string,
+  actorUserId: string,
+  patch: { name?: unknown; joinDomain?: unknown; regenerateJoinCode?: boolean; planName?: unknown; planSpaces?: unknown },
+  isOperator = false,
+): Team {
+  return transaction(() => {
+    const team = readTeam(teamId);
+    if (!team) throw new AccountError("Team not found.");
+    if (team.ownerId !== actorUserId && !isOperator) throw new AccountError("Only the team owner can update team settings.");
+    const nextName = patch.name !== undefined ? cleanText(patch.name, 80) : team.name;
+    if (!nextName) throw new AccountError("Enter a team name.");
+    const nextDomain = patch.joinDomain !== undefined ? normalizeDomain(patch.joinDomain) : team.joinDomain;
+    const nextCode = patch.regenerateJoinCode ? generateJoinCode(nextName) : team.joinCode;
+    let nextPlanName = team.planName;
+    let nextPlanSpaces = team.planSpaces;
+    if (isOperator) {
+      if (patch.planName !== undefined) nextPlanName = patch.planName === null || patch.planName === "" ? null : cleanText(patch.planName, 60);
+      if (patch.planSpaces !== undefined) {
+        const parsed = patch.planSpaces === null || patch.planSpaces === "" ? null : Number(patch.planSpaces);
+        if (parsed !== null && (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000)) {
+          throw new AccountError("Enter a valid number of spaces for the team plan.");
+        }
+        nextPlanSpaces = parsed;
+      }
+    }
+    store().prepare("UPDATE teams SET name=?, join_domain=?, join_code=?, plan_name=?, plan_spaces=?, updated=? WHERE id=?")
+      .run(nextName, nextDomain, nextCode, nextPlanName, nextPlanSpaces, now(), team.id);
+    return readTeam(team.id)!;
+  });
+}
+
+export function setTeamOwner(teamId: string, actorUserId: string, nextOwnerUserId: string, isOperator = false): Team {
+  return transaction(() => {
+    const team = readTeam(teamId);
+    if (!team) throw new AccountError("Team not found.");
+    if (team.ownerId !== actorUserId && !isOperator) throw new AccountError("Only the team owner can transfer ownership.");
+    if (!team.members.some(member => member.userId === nextOwnerUserId)) {
+      throw new AccountError("Choose a current team member as the new owner.");
+    }
+    store().prepare("UPDATE team_members SET role='member' WHERE team_id=? AND role='owner'").run(team.id);
+    store().prepare("UPDATE team_members SET role='owner' WHERE team_id=? AND user_id=?").run(team.id, nextOwnerUserId);
+    store().prepare("UPDATE teams SET owner_id=?, updated=? WHERE id=?").run(nextOwnerUserId, now(), team.id);
+    return readTeam(team.id)!;
+  });
+}
+
+export function removeTeamMember(teamId: string, actorUserId: string, targetUserId: string, isOperator = false): Team | null {
+  return transaction(() => {
+    const team = readTeam(teamId);
+    if (!team) throw new AccountError("Team not found.");
+    const isSelf = actorUserId === targetUserId;
+    if (!isSelf && team.ownerId !== actorUserId && !isOperator) throw new AccountError("Only the team owner can remove members.");
+    const member = team.members.find(item => item.userId === targetUserId);
+    if (!member) throw new AccountError("Team member not found.");
+    if (member.role === "owner") {
+      if (team.members.length > 1) throw new AccountError("Transfer team ownership to another member before leaving the team.");
+      if (team.planSpaces !== null) {
+        store().prepare("DELETE FROM team_members WHERE team_id=? AND user_id=?").run(team.id, targetUserId);
+        store().prepare("UPDATE teams SET owner_id=NULL, updated=? WHERE id=?").run(now(), team.id);
+        return readTeam(team.id)!;
+      }
+      store().prepare("DELETE FROM team_members WHERE team_id=?").run(team.id);
+      store().prepare("DELETE FROM teams WHERE id=?").run(team.id);
+      return null;
+    }
+    store().prepare("DELETE FROM team_members WHERE team_id=? AND user_id=?").run(team.id, targetUserId);
+    store().prepare("UPDATE teams SET updated=? WHERE id=?").run(now(), team.id);
+    return readTeam(team.id)!;
+  });
+}
+
 // ---- Billing state (Stripe remains the source of truth; this is its latest copy) ----
 
 export const hostingStatuses = new Set(["active", "trialing", "past_due"]);
@@ -434,10 +718,35 @@ function parsePlan(value: string | null): SubscriptionPlan | null {
   try { return value ? JSON.parse(value) as SubscriptionPlan : null; } catch { return null; }
 }
 
-export function readSubscription(userId: string): Subscription | undefined {
+/** Reads the direct Stripe subscription row stored on `userId`, without team inheritance. */
+export function readStoredSubscription(userId: string): Subscription | undefined {
   const row = store().prepare("SELECT * FROM subscriptions WHERE user_id=?").get(userId) as SubscriptionRow | undefined;
   return row && { id: row.subscription, item: row.item, status: row.status, quantity: row.quantity, periodEnd: row.period_end,
     cancelAtPeriodEnd: row.cancel_at_period_end === 1, cancelAt: row.cancel_at ?? null, plan: parsePlan(row.plan) };
+}
+
+export function readSubscription(userId: string): Subscription | undefined {
+  const teamRow = store().prepare(`SELECT teams.id, teams.owner_id, teams.plan_spaces
+    FROM team_members JOIN teams ON teams.id = team_members.team_id
+    WHERE team_members.user_id=?`).get(userId) as { id: string; owner_id: string | null; plan_spaces: number | null } | undefined;
+  if (teamRow) {
+    const ownerSub = teamRow.owner_id ? readStoredSubscription(teamRow.owner_id) : undefined;
+    if (ownerSub && (hostingStatuses.has(ownerSub.status) || teamRow.plan_spaces === null)) return ownerSub;
+    if (teamRow.plan_spaces !== null) {
+      return {
+        id: `team_${teamRow.id}`,
+        item: null,
+        status: "active",
+        quantity: 1,
+        periodEnd: null,
+        cancelAtPeriodEnd: false,
+        cancelAt: null,
+        plan: { price: `team_${teamRow.id}`, amount: null, currency: "usd", interval: "month", intervalCount: 1, spaces: teamRow.plan_spaces },
+      };
+    }
+    return ownerSub;
+  }
+  return readStoredSubscription(userId);
 }
 
 /** How many spaces the customer's plan covers, or null when each space is billed. */
@@ -449,7 +758,7 @@ export function planSpaceLimit(userId: string) {
 /** Saves Stripe's latest state and returns what it replaced, read in the same transaction so each change is seen once. */
 export function saveSubscription(userId: string, subscription: Subscription) {
   return transaction(() => {
-    const current = readSubscription(userId);
+    const current = readStoredSubscription(userId);
     // A late event for an older, ended subscription must not replace a live one.
     if (current && current.id !== subscription.id && hostingStatuses.has(current.status) && !hostingStatuses.has(subscription.status)) return { saved: false, previous: current };
     store().prepare("DELETE FROM subscriptions WHERE subscription=? AND user_id<>?").run(subscription.id, userId);
@@ -510,7 +819,9 @@ export function readCustomerSpace(id: unknown) {
 }
 
 export function listCustomerSpaces(userId: string) {
-  return (store().prepare("SELECT * FROM customer_spaces WHERE user_id=? AND status<>'deleted' ORDER BY created DESC").all(userId) as SpaceRow[]).map(toSpace);
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  return (store().prepare(`SELECT * FROM customer_spaces WHERE user_id IN (${marks}) AND status<>'deleted' ORDER BY created DESC`).all(...users) as SpaceRow[]).map(toSpace);
 }
 
 export function spaceForScene(sceneId: string) {
@@ -523,8 +834,11 @@ export class PlanLimitError extends AccountError {}
 
 export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null) {
   return transaction(() => {
-    const { count } = store().prepare("SELECT count(*) AS count FROM customer_spaces WHERE user_id=? AND status<>'deleted'").get(userId) as { count: number };
-    if (count >= maxSpacesPerAccount) {
+    const users = teamUserIds(userId);
+    const marks = users.map(() => "?").join(",");
+    const { count } = store().prepare(`SELECT count(*) AS count FROM customer_spaces WHERE user_id IN (${marks}) AND status<>'deleted'`).get(...users) as { count: number };
+    const limit = Math.max(maxSpacesPerAccount, planSpaces ?? 0);
+    if (count >= limit) {
       const contact = contactEmail();
       throw new AccountError(`This account has reached its space limit. ${contact ? `Write to ${contact}` : "Contact support"} to add more.`);
     }
@@ -532,7 +846,7 @@ export function createCustomerSpace(userId: string, title: string, status: "unpa
       throw new PlanLimitError(`Your plan covers ${planSpaces} ${planSpaces === 1 ? "space" : "spaces"}. Change plans to add another.`);
     }
     if (status === "unpaid") {
-      const { waiting } = store().prepare("SELECT count(*) AS waiting FROM customer_spaces WHERE user_id=? AND status='unpaid'").get(userId) as { waiting: number };
+      const { waiting } = store().prepare(`SELECT count(*) AS waiting FROM customer_spaces WHERE user_id IN (${marks}) AND status='unpaid'`).get(...users) as { waiting: number };
       if (waiting >= 10) throw new AccountError("Complete payment for your existing spaces first.");
     }
     const id = randomId(6);
@@ -569,16 +883,22 @@ export function readCustomerListings(): unknown[] {
 }
 
 export function billableSpaceCount(userId: string) {
-  return (store().prepare(`SELECT count(*) AS count FROM customer_spaces WHERE user_id=? AND status IN ${billable}`).get(userId) as { count: number }).count;
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  return (store().prepare(`SELECT count(*) AS count FROM customer_spaces WHERE user_id IN (${marks}) AND status IN ${billable}`).get(...users) as { count: number }).count;
 }
 
 /** Spaces a new subscription must cover: everything the customer has not deleted. */
 export function payableSpaceCount(userId: string) {
-  return (store().prepare("SELECT count(*) AS count FROM customer_spaces WHERE user_id=? AND status<>'deleted'").get(userId) as { count: number }).count;
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  return (store().prepare(`SELECT count(*) AS count FROM customer_spaces WHERE user_id IN (${marks}) AND status<>'deleted'`).get(...users) as { count: number }).count;
 }
 
 export function activateUnpaidSpaces(userId: string) {
-  store().prepare("UPDATE customer_spaces SET status='draft', updated=? WHERE user_id=? AND status='unpaid'").run(now(), userId);
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  store().prepare(`UPDATE customer_spaces SET status='draft', updated=? WHERE user_id IN (${marks}) AND status='unpaid'`).run(now(), ...users);
 }
 
 // ---- Uploads ----

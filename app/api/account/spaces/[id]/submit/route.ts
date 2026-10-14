@@ -1,4 +1,4 @@
-import { AccountError, cleanText, listUploads, parseSpaceOutput, readCustomerSpace, submitCustomerSpace } from "@/lib/server/accounts-store";
+import { AccountError, cleanText, listUploads, parseSpaceOutput, readCustomerSpace, sameTeam, submitCustomerSpace } from "@/lib/server/accounts-store";
 import { allowAttempt } from "@/lib/server/admin-store";
 import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { describeSpace } from "@/lib/server/customer-spaces";
@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { user, body, agent, error } = await accountRequest(request, 8192, { agents: true });
   if (error) return error;
   const space = readCustomerSpace((await params).id);
-  if (!space || space.userId !== user.id || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
+  if (!space || !sameTeam(space.userId, user.id) || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
   if (space.status === "unpaid") return accountResponse({ error: "Complete payment before submitting." }, 402);
   if (!spaceHosted(space)) return accountResponse({ error: "Update your billing details to continue." }, 402);
   // Each submission runs an agent; the limits survive deleting and recreating spaces.

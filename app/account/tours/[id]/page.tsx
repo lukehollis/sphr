@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import TourBuilder from "@/components/TourBuilder";
 import { emptyExperience } from "@/lib/experience/types";
 import { readSceneEdits } from "@/lib/server/admin-store";
+import { sameTeam } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { libraryModels } from "@/lib/server/library";
 import { tourAgentConfigured } from "@/lib/server/tour-agent";
@@ -20,7 +21,7 @@ export default async function CustomerTourPage({ params }: { params: Promise<{ i
   const user = await currentUser();
   if (!user) redirect(`/account/login?next=${encodeURIComponent(`/account/tours/${id}`)}`);
   const tour = readUserTour(id);
-  if (!tour || tour.userId !== user.id) notFound();
+  if (!tour || !sameTeam(tour.userId, user.id)) notFound();
   const scene = await tourScene(tour);
   if (!scene || !canBuildOn(user.id, scene)) notFound();
   const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId)]);

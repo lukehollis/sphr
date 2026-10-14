@@ -60,8 +60,14 @@ export default function PlanPage({ account: initial, plans, brand, build, result
   const building = (Boolean(build) || forResults) && !active && !paused;
   const perSpace = plans.find(plan => plan.spaces === null);
   const saveCard = building && spaces === 0 && selected?.spaces === null;
+  const team = account.team;
+  const canManageBilling = (!team || team.role === "owner") && !team?.invoiced;
   let lead: string;
-  if (building && forResults) {
+  if (team?.invoiced) {
+    lead = `${team.name} is on an invoiced ${team.planName ?? "Enterprise"} plan${team.planSpaces ? ` covering up to ${team.planSpaces} spaces` : ""}. Your team is using ${spaces} ${spaces === 1 ? "space" : "spaces"}.`;
+  } else if (team && team.role !== "owner") {
+    lead = `Billing for ${team.name} is managed by the team owner.`;
+  } else if (building && forResults) {
     lead = "Every plan shows all your players, with how far each one got, and lets you download them. With a plan the agent also drafts your tours and hunts as often as you like.";
   } else if (building) {
     lead = `Building tours and scavenger hunts by hand is free. With a plan the agent drafts them for you as often as you like.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
@@ -88,7 +94,9 @@ export default function PlanPage({ account: initial, plans, brand, build, result
         {error && <p className="site-alert" role="alert">{error}</p>}
       </div>
 
-      {paused ? <div className="site-actions">
+      {!canManageBilling ? <div className="site-actions">
+        <a className="site-button" href="/account/team">Team settings<span aria-hidden="true">→</span></a>
+      </div> : paused ? <div className="site-actions">
         <button type="button" className="site-button" disabled={busy} onClick={portal}>{busy ? "Opening…" : "Update payment method"}</button>
       </div> : plans.length > 0 && <>
         <PlanPicker plans={plans} selected={selected?.id ?? null} onSelect={setChoice} needed={Math.max(spaces, 1)} current={current?.id}

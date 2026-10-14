@@ -1,5 +1,5 @@
 import { setSceneBuilders, setScenePublic } from "@/lib/server/admin-store";
-import { cleanText, deleteCustomerSpace, listUploads, readCustomerSpace, renameCustomerSpace, setUploadStatus } from "@/lib/server/accounts-store";
+import { cleanText, deleteCustomerSpace, listUploads, readCustomerSpace, renameCustomerSpace, sameTeam, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, ownedSpace } from "@/lib/server/accounts";
 import { billingEnabled, syncQuantity } from "@/lib/server/billing";
 import { describeSpace } from "@/lib/server/customer-spaces";
@@ -14,7 +14,7 @@ async function owned(request: Request, params: Params["params"], agents = false)
   const { user, body, error } = await accountRequest(request, 4096, { agents });
   if (error) return { error };
   const space = readCustomerSpace((await params).id);
-  if (!space || space.userId !== user.id || space.status === "deleted") return { error: accountResponse({ error: "Space not found." }, 404) };
+  if (!space || !sameTeam(space.userId, user.id) || space.status === "deleted") return { error: accountResponse({ error: "Space not found." }, 404) };
   return { user, body, space };
 }
 

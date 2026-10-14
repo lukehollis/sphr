@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { db, EditConflict, isScenePublic, sceneBuildersChoice } from "./admin-store";
-import { hostingActive, readUser, spaceForScene } from "./accounts-store";
+import { billingUserId, hostingActive, readUser, sameTeam, spaceForScene, teamUserIds } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { accountRequest, accountResponse, accountsEnabled, bearerToken, currentUser, requestUser, sameOrigin, spaceHosted } from "./accounts";
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -57,7 +57,9 @@ export function readUserTour(id: unknown) {
 }
 
 export function listUserTours(userId: string) {
-  return (store().prepare("SELECT * FROM user_tours WHERE user_id=? ORDER BY updated DESC").all(userId) as TourRow[]).map(toTour);
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  return (store().prepare(`SELECT * FROM user_tours WHERE user_id IN (${marks}) ORDER BY updated DESC`).all(...users) as TourRow[]).map(toTour);
 }
 
 export function createUserTour(userId: string, sceneId: string, title: string, kind: ExperienceKind) {
@@ -112,8 +114,11 @@ export const FREE_AGENT_WINDOW = 30 * 24 * 60 * 60 * 1000;
  * 30 days before that.
  */
 export function agentUnlimited(userId: string) {
-  if (!billingEnabled() || hostingActive(userId) || readUser(userId)?.cardSaved) return true;
-  return Boolean(store().prepare("SELECT 1 FROM user_tours WHERE user_id=? AND created<? LIMIT 1").get(userId, plansRequiredFrom));
+  const billingId = billingUserId(userId);
+  if (!billingEnabled() || hostingActive(userId) || readUser(userId)?.cardSaved || readUser(billingId)?.cardSaved) return true;
+  const users = teamUserIds(userId);
+  const marks = users.map(() => "?").join(",");
+  return Boolean(store().prepare(`SELECT 1 FROM user_tours WHERE user_id IN (${marks}) AND created<? LIMIT 1`).get(...users, plansRequiredFrom));
 }
 
 /** Where signing in or choosing a plan leads back to: the picker, with the space (and a hunt) chosen when asked. */
@@ -141,7 +146,7 @@ export function canBuildOn(userId: string | null, scene: SceneListing) {
   if (!buildableScene(scene)) return false;
   const owned = spaceForScene(scene.sceneId);
   if (owned && (owned.status !== "ready" || !spaceHosted(owned))) return false;
-  if (owned && owned.userId === userId) return true;
+  if (owned && userId && sameTeam(owned.userId, userId)) return true;
   return isScenePublic(scene.sceneId) && (sceneBuildersChoice(scene.sceneId) ?? !owned);
 }
 
@@ -168,7 +173,7 @@ export async function tourAccess(tour: UserTour): Promise<"allowed" | "login" | 
   const scene = await tourScene(tour);
   if (!scene || !canBuildOn(tour.userId, scene)) return "unavailable";
   const user = await currentUser();
-  if (tour.public || user?.id === tour.userId) return "allowed";
+  if (tour.public || (user && sameTeam(user.id, tour.userId))) return "allowed";
   return user ? "unavailable" : "login";
 }
 
@@ -182,7 +187,7 @@ export async function ownedTourRequest(request: Request, id: string, maxBytes: n
   const { user, body, error } = kind === "json" ? await accountRequest(request, maxBytes, { agents }) : await tourUser(request);
   if (error) return { error } as const;
   const tour = readUserTour(id);
-  if (!tour || tour.userId !== user.id) return { error: accountResponse({ error: "Tour not found." }, 404) } as const;
+  if (!tour || !sameTeam(tour.userId, user.id)) return { error: accountResponse({ error: "Tour not found." }, 404) } as const;
   const scene = await tourScene(tour);
   if (!anySpace && (!scene || !canBuildOn(user.id, scene))) {
     return { error: accountResponse({ error: "This tour's space is no longer available to build on." }, 410) } as const;
@@ -356,7 +361,7 @@ export async function buildableSpaces(userId: string) {
     if (!canBuildOn(userId, scene)) continue;
     const owner = spaceForScene(scene.sceneId)?.userId;
     if (owner === undefined) spacery.push(pickerSpace(scene));
-    else if (owner === userId) own.push(pickerSpace(scene));
+    else if (sameTeam(owner, userId)) own.push(pickerSpace(scene));
   }
   own.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   spacery.sort((a, b) => a.title.localeCompare(b.title));

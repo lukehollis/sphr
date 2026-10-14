@@ -1,3 +1,4 @@
+import { AccountError } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin } from "@/lib/server/accounts";
 import { billingEnabled, portalUrl } from "@/lib/server/billing";
 
@@ -8,6 +9,7 @@ export async function POST(request: Request) {
   if (!billingEnabled()) return accountResponse({ error: "Billing is unavailable." }, 404);
   try { return accountResponse({ ok: true, url: await portalUrl(user, publicOrigin(request)) }); }
   catch (failure) {
+    if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
     console.error("Unable to open the billing portal:", failure instanceof Error ? failure.message : failure);
     return accountResponse({ error: "Billing could not open. Try again." }, 502);
   }

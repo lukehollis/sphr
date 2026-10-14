@@ -55,42 +55,56 @@ function BillingBar({ account, spaces, plans }: { account: AccountView; spaces: 
   const subscription = account.subscription;
   const active = hostingActive(account);
   const unpaid = spaces.some(space => space.status === "unpaid");
+  const team = account.team;
+  const canManageBilling = (!team || team.role === "owner") && !team?.invoiced;
   async function portal() {
     setBusy(true); setError("");
     try { await openPortal(); } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
-  let alert = "", action: ["plan" | "portal", string] | undefined;
+  let alert = "", action: ["plan" | "portal" | "team", string] | undefined;
   if (subscription && ["unpaid", "incomplete", "paused"].includes(subscription.status)) {
-    alert = "Hosting is paused until a payment goes through. Update your payment method to bring your spaces back online.";
-    action = ["portal", "Update payment method"];
+    alert = canManageBilling
+      ? "Hosting is paused until a payment goes through. Update your payment method to bring your spaces back online."
+      : `Hosting for ${team?.name ?? "your team"} is paused until the team owner updates the payment method.`;
+    action = canManageBilling ? ["portal", "Update payment method"] : ["team", "Team"];
   } else if (!active && spaces.length && (unpaid || subscription)) {
-    alert = subscription ? "Hosting is paused because billing ended. Restart billing to bring your spaces back online." : "Complete payment to start uploading.";
-    action = ["plan", subscription ? "Restart billing" : "Complete payment"];
+    alert = canManageBilling
+      ? (subscription ? "Hosting is paused because billing ended. Restart billing to bring your spaces back online." : "Complete payment to start uploading.")
+      : `Hosting for ${team?.name ?? "your team"} requires the team owner to complete billing.`;
+    action = canManageBilling ? ["plan", subscription ? "Restart billing" : "Complete payment"] : ["team", "Team"];
   } else if (subscription?.status === "past_due") {
-    alert = "Your last payment did not go through. Update your payment method to keep your spaces online.";
-    action = ["portal", "Update payment method"];
+    alert = canManageBilling
+      ? "Your last payment did not go through. Update your payment method to keep your spaces online."
+      : `The last payment for ${team?.name ?? "your team"} did not go through. Ask the team owner to update the payment method.`;
+    action = canManageBilling ? ["portal", "Update payment method"] : ["team", "Team"];
   }
-  if (!account.billing || (!alert && !(active && subscription))) return null;
+  if ((!account.billing && !team?.invoiced) || (!alert && !(active && subscription))) return null;
   const plan = currentPlan(plans, subscription);
+  const planName = plan?.name ?? team?.planName ?? (subscription?.plan?.spaces === null ? "Pay as you go" : "Enterprise");
   const hosted = spaces.filter(space => space.status !== "unpaid").length;
   const covers = subscription?.plan?.spaces ?? null;
   const total = subscription && periodTotal(subscription);
-  const better = active && covers === null ? cheaperPlan(plans, hosted) : undefined;
+  const better = active && covers === null && canManageBilling ? cheaperPlan(plans, hosted) : undefined;
   return <>
     {alert && <div className="site-callout site-callout-action" role="status">
       <p>{alert}</p>
       {action && (action[0] === "plan" ? <a className="site-button site-button-accent" href="/account/plan">{action[1]}</a>
+        : action[0] === "team" ? <a className="site-button" href="/account/team">{action[1]}</a>
         : <button type="button" className="site-button" disabled={busy} onClick={portal}>{busy ? "Opening…" : action[1]}</button>)}
     </div>}
     {!alert && active && subscription && <div className="spaces-billing">
-      <p><strong>{plan?.name ?? (covers === null ? "Pay as you go" : "Your plan")}</strong>
+      <p><strong>{team ? `${team.name} · ${planName}` : planName}</strong>
         <span>{covers === null ? `${hosted} ${hosted === 1 ? "space" : "spaces"}` : `${hosted} of ${covers} spaces`}</span>
         {total && <span>{total}</span>}
+        {team?.invoiced ? <span>Billed by invoice</span> : null}
         {subscription.periodEnd ? <span>{subscription.cancelAtPeriodEnd ? "Ends" : "Renews"} {formatDate(subscription.periodEnd)}</span> : null}
         {better && <a className="spaces-billing-offer" href="/account/plan">{better.name} covers up to {better.spaces} spaces for {formatMoney(better.amount, better.currency)} {formatPeriod(better.interval, better.intervalCount)}</a>}</p>
       <span className="spaces-billing-actions">
-        <a className="site-link" href="/account/plan">Change plan</a>
-        <button type="button" className="site-link" disabled={busy} onClick={portal}>{busy ? "Opening…" : "Billing and invoices"}</button>
+        {team && <a className="site-link" href="/account/team">Team ({team.memberCount})</a>}
+        {canManageBilling && <>
+          <a className="site-link" href="/account/plan">Change plan</a>
+          <button type="button" className="site-link" disabled={busy} onClick={portal}>{busy ? "Opening…" : "Billing and invoices"}</button>
+        </>}
       </span>
     </div>}
     {error && <p className="site-alert" role="alert">{error}</p>}
@@ -371,6 +385,10 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
       {blocked && <div className="site-callout site-callout-action">
         <p>Confirm your email address to add spaces. We sent a link to <strong>{account.email}</strong>. If it is not in your inbox, look in spam or junk.</p>
         <button type="button" className="site-button site-button-secondary" onClick={resend}>Send a new link</button>
+      </div>}
+      {account.matchingTeam && <div className="site-callout site-callout-action">
+        <p>Your <strong>@{account.matchingTeam.joinDomain}</strong> email address can join <strong>{account.matchingTeam.name}</strong>.</p>
+        <a className="site-button site-button-accent" href={`/account/join/${account.matchingTeam.joinCode}`}>Join {account.matchingTeam.name}<span aria-hidden="true">→</span></a>
       </div>}
       <BillingBar account={account} spaces={spaces} plans={plans} />
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { accessControlled, isScenePublic } from "./admin-store";
-import { createUserSession, createUserToken, deleteUserSession, hostingActive, readCustomerSpace, spaceForScene, userFromAgentToken, userFromSession,
+import { createUserSession, createUserToken, deleteUserSession, hostingActive, readCustomerSpace, sameTeam, spaceForScene, userFromAgentToken, userFromSession,
   type CustomerSpace, type User } from "./accounts-store";
 import { adminResponse, cookieOptions, isAdmin, readAdminBody, sameOrigin } from "./auth";
 import { billingEnabled } from "./billing";
@@ -60,7 +60,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12})?|\/profile|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour)?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
+const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12})?|\/profile|\/team|\/join\/[a-z0-9-]{6,80}|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour)?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }
@@ -104,7 +104,7 @@ export async function accountRequest(request: Request, maxBytes = 4096, { agents
 export async function ownedSpace(id: string, request?: Request) {
   const user = request ? await requestUser(request, true) : await currentUser();
   const space = readCustomerSpace(id);
-  return user && space && space.userId === user.id && space.status !== "deleted" ? { user, space } : undefined;
+  return user && space && sameTeam(space.userId, user.id) && space.status !== "deleted" ? { user, space } : undefined;
 }
 
 /**
@@ -117,7 +117,7 @@ export async function sceneAccess(sceneId: string): Promise<"allowed" | "login" 
   if (space && !spaceHosted(space)) return "unavailable";
   if (isScenePublic(sceneId)) return "allowed";
   const user = await currentUser();
-  if (space && user?.id === space.userId) return "allowed";
+  if (space && user && sameTeam(user.id, space.userId)) return "allowed";
   // A signed-in customer who does not own the space would only be sent back here by sign-in.
   return user ? "unavailable" : "login";
 }
@@ -126,7 +126,8 @@ export async function sceneAccess(sceneId: string): Promise<"allowed" | "login" 
 export async function canManageScene(sceneId: string) {
   if (await isAdmin()) return true;
   const space = accountsEnabled() ? spaceForScene(sceneId) : undefined;
-  return Boolean(space && space.status !== "deleted" && (await currentUser())?.id === space.userId);
+  const user = await currentUser();
+  return Boolean(space && space.status !== "deleted" && user && sameTeam(user.id, space.userId));
 }
 
 export function loginPath(next: string) {

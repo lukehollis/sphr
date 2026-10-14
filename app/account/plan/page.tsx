@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import PlanPage from "@/components/PlanPage";
-import { readSubscription, readUser } from "@/lib/server/accounts-store";
+import { readSubscription, readUser, sameTeam } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { billingEnabled, readPlans, syncSubscription } from "@/lib/server/billing";
 import { describeAccount } from "@/lib/server/customer-spaces";
@@ -21,7 +21,8 @@ export default async function AccountPlanPage({ searchParams }: { searchParams: 
   // Choosing a plan to see every player of one of the customer's tours (lib/server/tour-plays.ts).
   const results = typeof query.results === "string" && /^[a-f0-9]{12}$/.test(query.results) ? query.results : undefined;
   if (!user) redirect(`/account/login?next=${encodeURIComponent(results ? `/account/plan?results=${results}` : build ? `/account/plan?build=${build}` : "/account/plan")}`);
-  const resultsTour = results && readUserTour(results)?.userId === user.id ? results : undefined;
+  const tour = results ? readUserTour(results) : undefined;
+  const resultsTour = tour && sameTeam(tour.userId, user.id) ? results : undefined;
   if (resultsTour && allPlayersShown(user.id)) redirect(`/account/tours/${resultsTour}/results`);
   if (build && agentUnlimited(user.id)) redirect(buildReturnPath(build));
   const subscription = readSubscription(user.id);

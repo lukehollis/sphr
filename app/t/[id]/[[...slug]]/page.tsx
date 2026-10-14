@@ -5,6 +5,7 @@ import SphrApp from "@/components/SphrApp";
 import { emptyExperience } from "@/lib/experience/types";
 import { sceneTitleSlug } from "@/lib/scene-edits";
 import { readSceneEdits } from "@/lib/server/admin-store";
+import { sameTeam } from "@/lib/server/accounts-store";
 import { currentUser, loginPath } from "@/lib/server/accounts";
 import { readSpaceInfo } from "@/lib/server/space-info";
 import { tourThumbnail } from "@/lib/server/tour-thumbnails";
@@ -49,7 +50,7 @@ export default async function TourPage({ params }: Props) {
   const [variants, reconstruction, light, placeholder] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId), loadingPlaceholder(scene.thumbnail)]);
   const user = await currentUser();
   // Players (not the owner trying it out) give their name for the owner's class results, unless the owner turned that off.
-  const play = user?.id !== tour.userId && askingNames(tour.id) ? { tourId: tour.id, kind: tour.kind } : undefined;
+  const play = !(user && sameTeam(user.id, tour.userId)) && askingNames(tour.id) ? { tourId: tour.id, kind: tour.kind } : undefined;
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl} play={play}
     edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction, light }}
     preview={{ title: tour.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} info={readSpaceInfo(scene.sceneId).info}

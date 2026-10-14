@@ -1,4 +1,4 @@
-import { AccountError, createUploadRecord, listUploads, readCustomerSpace, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
+import { AccountError, createUploadRecord, listUploads, readCustomerSpace, sameTeam, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { editableStatus } from "@/lib/server/customer-spaces";
 import { chunkSize, maxSpaceBytes, objectName, safeFileName, startUploadSession, uploadOffset } from "@/lib/server/uploads";
@@ -8,7 +8,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { user, body, error } = await accountRequest(request, 4096, { agents: true });
   if (error) return error;
   const space = readCustomerSpace((await params).id);
-  if (!space || space.userId !== user.id || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
+  if (!space || !sameTeam(space.userId, user.id) || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
   if (space.status === "unpaid") return accountResponse({ error: "Complete payment before uploading." }, 402);
   if (!spaceHosted(space)) return accountResponse({ error: "Update your billing details to continue." }, 402);
   if (!editableStatus(space)) return accountResponse({ error: "Files cannot be added while this space is being processed." }, 409);

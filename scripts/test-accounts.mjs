@@ -12,6 +12,7 @@ registerHooks({
   resolve(specifier, context, next) {
     if (specifier.startsWith('@/')) return next(new URL(`../${specifier.slice(2)}.ts`, import.meta.url).href, context);
     if (/^\.\.?\//.test(specifier) && context.parentURL?.endsWith('.ts') && !/\.[a-z]+$/.test(specifier)) return next(`${specifier}.ts`, context);
+    if (/^next\/[a-z-]+$/.test(specifier)) return next(`${specifier}.js`, context);
     return next(specifier, context);
   }
 });
@@ -607,3 +608,101 @@ test('a failed email is logged with its subject and account, and never fails the
   assert.equal(logged.length, 1);
   assert.match(logged[0], /^Unable to send "Your payment did not go through" to account acct123: /);
 });
+
+test('team accounts: self-serve owner billing, domain-restricted join links, invoiced enterprise plans, and shared spaces and tours', async () => {
+  const billing = await import('../lib/server/billing.ts');
+  const { safeReturnPath } = await import('../lib/server/accounts.ts');
+  const { createUserTour, listUserTours } = await import('../lib/server/user-tours.ts');
+  const origin = 'https://app.example';
+
+  assert.equal(safeReturnPath('/account/team'), '/account/team');
+  assert.equal(safeReturnPath('/account/join/new-alexandria-foundation-1a2b3c4d'), '/account/join/new-alexandria-foundation-1a2b3c4d');
+
+  // 1. Self-serve team where the team owner pays through Stripe and members share the plan, spaces, and tours.
+  const owner = await store.createPasswordUser('owner@mused.org', 'password one', 'Luke');
+  const member = await store.createPasswordUser('colleague@mused.org', 'password one', 'Colleague');
+  store.markEmailVerified(owner.id);
+  store.markEmailVerified(member.id);
+
+  const team = store.createTeam(owner.id, { name: 'Mused Studio', joinDomain: '@mused.org' });
+  assert.equal(team.name, 'Mused Studio');
+  assert.equal(team.joinDomain, 'mused.org');
+  assert.equal(team.ownerId, owner.id);
+  assert.match(team.joinCode, /^mused-studio-[a-f0-9]{8}$/);
+
+  const outsider = await store.createPasswordUser('outsider@other.org', 'password one', null);
+  store.markEmailVerified(outsider.id);
+  assert.throws(() => store.joinTeamByCode(outsider.id, team.joinCode), /only for @mused\.org/);
+
+  const unverified = await store.createPasswordUser('unverified@mused.org', 'password one', null);
+  assert.throws(() => store.joinTeamByCode(unverified.id, team.joinCode), /Confirm your email/);
+
+  assert.equal(store.matchingDomainTeam(member.email)?.id, team.id);
+  const joined = store.joinTeamByCode(member.id, team.joinCode);
+  assert.equal(joined.members.length, 2);
+  assert.equal(store.sameTeam(owner.id, member.id), true);
+  assert.equal(store.sameTeam(owner.id, outsider.id), false);
+
+  store.createCustomerSpace(owner.id, 'Owner Space', 'unpaid');
+  const started = await billing.startCheckout(store.readUser(owner.id), origin);
+  const subscription = fake.state.pay([...fake.state.sessions.values()].find(item => item.url === started.url).id);
+  await billing.syncSubscription(subscription.id);
+
+  assert.equal(store.hostingActive(owner.id), true);
+  assert.equal(store.hostingActive(member.id), true, 'team members inherit the owner subscription');
+  await assert.rejects(() => billing.startCheckout(store.readUser(member.id), origin), /managed by the team owner/);
+
+  // Member creates a space; it counts toward the team owner's subscription quantity and appears for both members.
+  const memberSpace = store.createCustomerSpace(member.id, 'Member Space', 'draft');
+  await billing.syncQuantity(member.id);
+  assert.equal(subscription.items.data[0].quantity, 2, 'member spaces sync to the team owner Stripe subscription');
+  assert.equal(store.listCustomerSpaces(owner.id).length, 2);
+  assert.equal(store.listCustomerSpaces(member.id).length, 2);
+
+  const tour = createUserTour(member.id, '0123456789ab', 'Team Tour', 'tour');
+  assert.equal(listUserTours(owner.id).some(item => item.id === tour.id), true, 'team members share tours');
+
+  // 2. Operator-provisioned invoiced enterprise team with domain-restricted join link (New Alexandria Foundation).
+  const naf = store.provisionEnterpriseTeam({
+    name: 'New Alexandria Foundation',
+    joinDomain: 'newalexandriafoundation.org',
+    planName: 'Enterprise',
+    planSpaces: 200,
+  });
+  assert.equal(naf.ownerId, null);
+  assert.equal(naf.joinDomain, 'newalexandriafoundation.org');
+  assert.equal(naf.planName, 'Enterprise');
+  assert.equal(naf.planSpaces, 200);
+
+  const firstNaf = await store.createPasswordUser('scholar@newalexandriafoundation.org', 'password one', 'First Scholar');
+  const secondNaf = await store.createPasswordUser('curator@newalexandriafoundation.org', 'password one', 'Second Curator');
+  store.markEmailVerified(firstNaf.id);
+  store.markEmailVerified(secondNaf.id);
+
+  const afterFirst = store.joinTeamByCode(firstNaf.id, naf.joinCode);
+  assert.equal(afterFirst.ownerId, firstNaf.id, 'first verified member to join an ownerless enterprise team becomes owner');
+  assert.equal(store.userTeam(firstNaf.id)?.role, 'owner');
+  assert.equal(store.hostingActive(firstNaf.id), true, 'invoiced enterprise plan is immediately active without Stripe checkout');
+  assert.equal(store.planSpaceLimit(firstNaf.id), 200);
+
+  const afterSecond = store.joinTeamByCode(secondNaf.id, naf.joinCode);
+  assert.equal(afterSecond.members.length, 2);
+  assert.equal(store.userTeam(secondNaf.id)?.role, 'member');
+  assert.equal(store.hostingActive(secondNaf.id), true);
+  assert.equal(store.planSpaceLimit(secondNaf.id), 200);
+
+  store.createCustomerSpace(secondNaf.id, 'Library Archive', 'draft', store.planSpaceLimit(secondNaf.id));
+  assert.equal(store.listCustomerSpaces(firstNaf.id).length, 1);
+  assert.equal(await billing.syncQuantity(secondNaf.id), false, 'invoiced enterprise teams do not call Stripe for quantity updates');
+  await assert.rejects(() => billing.changePlan(store.readUser(firstNaf.id), 'price_pro'), /billed by invoice/);
+
+  // Ownership transfer and member removal.
+  const transferred = store.setTeamOwner(naf.id, firstNaf.id, secondNaf.id);
+  assert.equal(transferred.ownerId, secondNaf.id);
+  assert.equal(store.userTeam(secondNaf.id)?.role, 'owner');
+  assert.equal(store.userTeam(firstNaf.id)?.role, 'member');
+  store.removeTeamMember(naf.id, secondNaf.id, firstNaf.id);
+  assert.equal(store.readTeam(naf.id)?.members.length, 1);
+  assert.equal(store.readCustomerSpace(memberSpace.id)?.title, 'Member Space');
+});
+

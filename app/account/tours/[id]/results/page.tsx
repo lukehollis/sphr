@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import ClassResults from "@/components/ClassResults";
-import { readUser } from "@/lib/server/accounts-store";
+import { readUser, sameTeam } from "@/lib/server/accounts-store";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { applyCheckoutSession, billingEnabled } from "@/lib/server/billing";
 import { describeAccount } from "@/lib/server/customer-spaces";
@@ -19,7 +19,7 @@ export default async function TourResultsPage({ params, searchParams }: { params
   const user = await currentUser();
   if (!user) redirect(`/account/login?next=${encodeURIComponent(`/account/tours/${id}/results`)}`);
   const tour = readUserTour(id);
-  if (!tour || tour.userId !== user.id) notFound();
+  if (!tour || !sameTeam(tour.userId, user.id)) notFound();
   // Back from choosing a plan: Checkout usually beats the webhook, so its result is applied now.
   const { checkout } = await searchParams;
   if (typeof checkout === "string" && billingEnabled()) {

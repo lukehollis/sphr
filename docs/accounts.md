@@ -172,6 +172,17 @@ Signed-in people follow each other (`PUT`/`DELETE /api/follows/<handle>`) and he
 open (`PUT`/`DELETE /api/hearts/<tour id>`, the heart beside the guide switch on a tour's page, which
 also names who made it). *Your spaces* lists recent tours from the people the customer follows.
 
+## Team accounts
+
+Customers can create or join a team at `/account/team` (`teams` and `team_members` in the state
+database). Everyone on a team shares the team's spaces, guided tours, scavenger hunts, class
+results and hosting plan. The team owner's Stripe subscription covers every member's spaces, or the
+operator (`SPHR_OPERATOR_ACCOUNT`) can provision an invoiced enterprise team with a space allowance
+(`plan_spaces`) and an optional `@domain` restriction on its join link (`/account/join/<code>`).
+When `join_domain` is set on a team, anyone with a confirmed email address on that domain can join
+using the invite link (or from the banner shown on `/account` and `/account/team`), and the first
+member to join a pre-provisioned team without an owner becomes its owner.
+
 ## Operator notifications
 
 With `SPHR_DISCORD_WEBHOOK_URL` set to a Discord channel webhook, the operator hears about new

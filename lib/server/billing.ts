@@ -1,6 +1,7 @@
 import Stripe from "stripe";
-import { AccountError, activateUnpaidSpaces, billableSpaceCount, cancellationDate, cancellationScheduled, hostingStatuses, payableSpaceCount, readSubscription, readUser,
-  saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity, userIdForCustomer, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
+import { AccountError, activateUnpaidSpaces, billableSpaceCount, billingUserId, cancellationDate, cancellationScheduled, hostingStatuses, payableSpaceCount,
+  readStoredSubscription, readSubscription, readUser, saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity,
+  userIdForCustomer, userTeam, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
 import { saveEvent } from "./analytics-store";
@@ -108,13 +109,21 @@ const liveStatuses = new Set(["active", "trialing", "past_due", "unpaid", "incom
 /** A Checkout to open (with the plan it pays for), a payment already applied, or the portal to repair billing. */
 export type CheckoutStart = { url: string; plan: string } | { paid: true } | { portal: string };
 
+function assertBillingManager(userId: string) {
+  const membership = userTeam(userId);
+  if (membership && membership.role !== "owner") {
+    throw new AccountError(`Billing for ${membership.team.name} is managed by the team owner.`);
+  }
+}
+
 /**
  * One Checkout for all waiting spaces, one at a time per customer. An open session is
  * reused, a paid one is applied, and a customer whose subscription still exists in Stripe
  * is sent to the billing portal instead, so a customer is never subscribed twice. Without
  * a plan named, an open session keeps its plan while that plan still covers every space.
  */
-export function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string): Promise<CheckoutStart> {
+export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string): Promise<CheckoutStart> {
+  assertBillingManager(user.id);
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
     const count = payableSpaceCount(current.id);
@@ -182,6 +191,7 @@ export function startCheckout(user: User, origin: string, planId?: unknown, from
 }
 
 export async function portalUrl(user: User, origin: string) {
+  assertBillingManager(user.id);
   const customer = await ensureCustomer(user);
   const configuration = env("SPHR_STRIPE_PORTAL_CONFIGURATION");
   return (await stripe().billingPortal.sessions.create({ customer, return_url: `${origin}/account`, ...(configuration ? { configuration } : {}) })).url;
@@ -241,13 +251,14 @@ function subscriptionUser(subscription: Stripe.Subscription) {
  * a newer one (and have the next event announce the same change again).
  */
 export async function syncSubscription(id: string) {
+  if (!id.startsWith("sub_")) return;
   const userId = subscriptionUser(await stripe().subscriptions.retrieve(id));
   if (!userId) return;
   await serialized(`subscription:${userId}`, async () => {
     const subscription = await stripe().subscriptions.retrieve(id);
     if (subscriptionUser(subscription) !== userId) return;
     // Existing customers keep the price they subscribed at when the configured prices change.
-    const stored = readSubscription(userId);
+    const stored = readStoredSubscription(userId);
     const offered = new Set([priceId(), ...planPriceIds()]);
     const item = subscription.items.data.find(entry => entry.id === stored?.item) ?? subscription.items.data.find(entry => offered.has(entry.price.id))
       ?? subscription.items.data[0];
@@ -265,7 +276,7 @@ export async function syncSubscription(id: string) {
         .catch(error => console.error(`Unable to announce a billing change for account ${userId}:`, error instanceof Error ? error.message : error));
     }
     // Quantity updates take the account's own lock (`userId`), never this one, so they cannot wait on each other.
-    if (hostingStatuses.has(subscription.status) && readSubscription(userId)?.id === subscription.id) {
+    if (hostingStatuses.has(subscription.status) && readStoredSubscription(userId)?.id === subscription.id) {
       activateUnpaidSpaces(userId);
       await syncQuantity(userId);
     }
@@ -328,14 +339,15 @@ async function announceBillingChange(userId: string, previous: Subscription | un
  * server; each reads the latest count.
  */
 export function syncQuantity(userId: string) {
-  return serialized(userId, async () => {
-    const subscription = readSubscription(userId);
+  const targetId = billingUserId(userId);
+  return serialized(targetId, async () => {
+    const subscription = readStoredSubscription(targetId);
     if (!subscription?.item || !hostingStatuses.has(subscription.status)) return false;
-    const quantity = subscription.plan?.spaces ? 1 : billableSpaceCount(userId);
+    const quantity = subscription.plan?.spaces ? 1 : billableSpaceCount(targetId);
     if (quantity === subscription.quantity) return true;
     // Prorations are collected on the next regular invoice to avoid a card charge per space.
     const item = await stripe().subscriptionItems.update(subscription.item, { quantity, proration_behavior: "create_prorations" });
-    setSubscriptionQuantity(userId, subscription.id, item.quantity ?? quantity);
+    setSubscriptionQuantity(targetId, subscription.id, item.quantity ?? quantity);
     return true;
   });
 }
@@ -346,17 +358,24 @@ export function syncQuantity(userId: string) {
  * allow invoices outside the billing period. A plan must cover every space the customer has.
  */
 export async function changePlan(user: User, planId: unknown) {
+  assertBillingManager(user.id);
   const plan = await resolvePlan(planId);
-  const changed = await serialized(user.id, async () => {
-    const subscription = readSubscription(user.id);
-    if (!subscription?.item || !hostingStatuses.has(subscription.status)) throw new AccountError("Start hosting before changing plans.");
+  const targetId = billingUserId(user.id);
+  const changed = await serialized(targetId, async () => {
+    const subscription = readStoredSubscription(targetId);
+    if (!subscription?.item || !hostingStatuses.has(subscription.status)) {
+      if (readSubscription(user.id)?.id.startsWith("team_")) {
+        throw new AccountError("Your team's enterprise plan is billed by invoice. Contact support to change it.");
+      }
+      throw new AccountError("Start hosting before changing plans.");
+    }
     if (subscription.plan?.price === plan.id) return undefined;
-    const count = payableSpaceCount(user.id);
+    const count = payableSpaceCount(targetId);
     if (plan.spaces !== null && count > plan.spaces) {
       throw new AccountError(`${plan.name} covers up to ${plan.spaces} spaces and you have ${count}. Delete spaces or choose a larger plan.`);
     }
     await stripe().subscriptions.update(subscription.id, {
-      items: [{ id: subscription.item, price: plan.id, quantity: plan.spaces === null ? billableSpaceCount(user.id) : 1 }],
+      items: [{ id: subscription.item, price: plan.id, quantity: plan.spaces === null ? billableSpaceCount(targetId) : 1 }],
       proration_behavior: "create_prorations"
     });
     return subscription.id;
