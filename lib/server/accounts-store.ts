@@ -462,7 +462,7 @@ function toTeam(row: TeamRow): Team {
 }
 
 export function readTeam(id: unknown) {
-  if (typeof id !== "string" || !/^[a-f0-9]{16}$/.test(id)) return undefined;
+  if (typeof id !== "string" || !/^[a-f0-9]{16,32}$/.test(id)) return undefined;
   const row = store().prepare("SELECT * FROM teams WHERE id=?").get(id) as TeamRow | undefined;
   return row ? toTeam(row) : undefined;
 }
