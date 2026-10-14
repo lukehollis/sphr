@@ -227,6 +227,64 @@ export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef,
   });
 }
 
+export type TourDraftMail = {
+  id: string;
+  title: string;
+  kind: "tour" | "hunt";
+  path: string;
+  public?: boolean;
+  spaceTitle: string;
+  thumbnail?: string;
+  reply?: string;
+  stops: Array<{ title: string }>;
+  objects: Array<{ name: string }>;
+};
+
+/** Sent when the tour agent finishes drafting a customer's guided tour or scavenger hunt. */
+export function tourReadyEmail(brand: string, origin: string, tour: TourDraftMail) {
+  const hunt = tour.kind === "hunt";
+  const kindLabel = hunt ? "scavenger hunt" : "guided tour";
+  const stepWord = hunt ? (tour.stops.length === 1 ? "clue" : "clues") : (tour.stops.length === 1 ? "stop" : "stops");
+  const stepCount = `${tour.stops.length} ${stepWord}`;
+  const title = tour.title || tour.spaceTitle;
+  const editor = `${origin}/account/tours/${tour.id}`;
+  const viewer = `${origin}${tour.path.startsWith("/") ? tour.path : `/${tour.path}`}`;
+  const thumbnail = tour.thumbnail?.startsWith("/") ? `${origin}${tour.thumbnail}` : tour.thumbnail;
+  const stopNames = tour.stops.map((stop, index) => `${index + 1}. ${stop.title || `Stop ${index + 1}`}`);
+  const stopsDetail = stopNames.length
+    ? `${stepCount} — ${stopNames.slice(0, 6).join(" · ")}${stopNames.length > 6 ? " …" : ""}`
+    : stepCount;
+  const objectNames = tour.objects.map((object) => object.name).filter(Boolean);
+  const objectsDetail = objectNames.length
+    ? `${objectNames.length} placed (${objectNames.slice(0, 5).join(", ")}${objectNames.length > 5 ? ", …" : ""})`
+    : "None";
+
+  return render({
+    brand,
+    origin,
+    subject: `Your ${kindLabel} for ${title} is ready`,
+    preheader: `The agent finished drafting ${stepCount}${objectNames.length ? ` and placed ${objectNames.length} 3D object${objectNames.length === 1 ? "" : "s"}` : ""} in ${tour.spaceTitle}.`,
+    eyebrow: `${hunt ? "Scavenger hunt" : "Guided tour"} · ${tour.spaceTitle}`,
+    heading: `Your ${kindLabel} is ready`,
+    blocks: [
+      ...(thumbnail ? [{ kind: "image" as const, src: thumbnail, href: editor, alt: title }] : []),
+      { kind: "text", text: `The agent finished drafting "${title}" on ${tour.spaceTitle} and saved it to your account.` },
+      ...(tour.reply?.trim() ? [{ kind: "quote" as const, text: tour.reply.trim() }] : []),
+      {
+        kind: "details",
+        rows: [
+          [hunt ? "Clues" : "Stops", stopsDetail],
+          ...(objectNames.length ? [["3D objects", objectsDetail] as [string, string]] : []),
+          ["Space", tour.spaceTitle],
+          ["Sharing", tour.public ? "Public — anyone with the link can open it" : "Private — only you can open it until you share it"]
+        ]
+      }
+    ],
+    action: { label: hunt ? "Open hunt in the builder" : "Open tour in the builder", url: editor },
+    secondary: { label: hunt ? "Play the scavenger hunt" : "Preview the guided tour", url: viewer }
+  });
+}
+
 // ---- Billing ----
 // Sent when Stripe's state for a subscription changes; each change is announced once (see billing.ts).
 

@@ -340,7 +340,20 @@ test('account emails: what to make, visibility, the contact address and billing 
   assert.match(overdue.text, /Your latest payment has not gone through yet/);
   const toursOnly = emails.cancellationScheduledEmail('Spaces', origin, 'help@example.com', { ends: 1900000000, paid: true, spaces: 0 });
   assert.doesNotMatch(toursOnly.text + toursOnly.html, /go offline|spaces stay|your spaces and/, 'an account without spaces is not told about spaces');
-  for (const message of [payment, planOnly, lapsed, ended, cancelling, overdue, toursOnly]) {
+  const huntReady = emails.tourReadyEmail('Spaces', origin, {
+    id: 'b69329d3b887', title: 'The Siq, Petra, Jordan', kind: 'hunt', path: '/t/b69329d3b887/the-siq-petra-jordan',
+    public: false, spaceTitle: 'The Siq, Petra, Jordan', thumbnail: '/datasets/legacy/petra/preview.jpg',
+    reply: 'I hid six Nabataean objects along the canyon walls.',
+    stops: [{ title: 'The Bab al-Siq Dam' }, { title: 'The Water Channel' }],
+    objects: [{ name: 'Terracotta Urn' }, { name: 'Bronze Oil Lamp' }]
+  });
+  assert.equal(huntReady.subject, 'Your scavenger hunt for The Siq, Petra, Jordan is ready');
+  assert.match(huntReady.text, /2 clues — 1\. The Bab al-Siq Dam · 2\. The Water Channel/);
+  assert.match(huntReady.text, /2 placed \(Terracotta Urn, Bronze Oil Lamp\)/);
+  assert.match(huntReady.text, /Open hunt in the builder\nhttps:\/\/app\.example\/account\/tours\/b69329d3b887/);
+  assert.match(huntReady.text, /Play the scavenger hunt\nhttps:\/\/app\.example\/t\/b69329d3b887\/the-siq-petra-jordan/);
+  assert.ok(huntReady.html.includes('https://app.example/datasets/legacy/petra/preview.jpg'), 'relative thumbnail becomes a full URL in HTML email');
+  for (const message of [payment, planOnly, lapsed, ended, cancelling, overdue, toursOnly, huntReady]) {
     assert.ok(message.html.includes('<!doctype html>') && message.html.includes(`${origin}/account`), `${message.subject} has an HTML part with the account link`);
   }
 });

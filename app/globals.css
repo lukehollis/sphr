@@ -345,6 +345,7 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
 .builder-log-text { min-width: 0; overflow-wrap: anywhere; }
 .builder-log-token { padding: 1px 5px; background: rgba(0, 152, 219, .14); border: 1px solid rgba(0, 152, 219, .3); color: #9adbf7; font-family: inherit; font-size: 12px; }
 .builder-log-time { color: #75726b; font-size: 11px; font-variant-numeric: tabular-nums; }
+.builder-agent-log-note { margin: 0; padding: 7px 12px; border-top: 1px solid #232323; background: #181818; color: #9a968e; font-size: 11.5px; line-height: 1.4; }
 @keyframes builder-log-in { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
 @keyframes builder-pulse { 0%, 100% { opacity: 1; scale: 1; } 50% { opacity: .45; scale: .88; } }
 

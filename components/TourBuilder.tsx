@@ -210,7 +210,16 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         headers: { "Content-Type": "application/json", Accept: "application/x-ndjson, application/json" },
         body: JSON.stringify({ prompt: text, experience: draftRef.current, kind: draftRef.current.kind, history: turns, views: viewList, stream: true })
       });
-      type AgentResponse = { ok?: boolean; experience?: Experience; anchors?: { objects: Record<string, Anchor>; stops: Record<string, Anchor>; effects: Record<string, Anchor> }; reply?: string; error?: string; plan?: string };
+      type AgentResponse = {
+        ok?: boolean;
+        experience?: Experience;
+        placed?: Experience;
+        anchors?: { objects: Record<string, Anchor>; stops: Record<string, Anchor>; effects: Record<string, Anchor> };
+        tour?: { id: string; title: string; kind: ExperienceKind; public: boolean; revision: number; path: string; editor: string; experience: Experience | null };
+        reply?: string;
+        error?: string;
+        plan?: string;
+      };
       let finalResult: AgentResponse | null = null;
       if (response.ok && response.headers.get("content-type")?.includes("application/x-ndjson") && response.body) {
         const reader = response.body.getReader();
@@ -255,13 +264,28 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         }
         if (!response.ok) throw new Error(finalResult?.error || "The agent could not finish. Try again.");
       }
-      if (!finalResult?.experience) throw new Error(finalResult?.error || "The agent could not finish. Try again.");
+      const rawExperience = finalResult?.experience ?? finalResult?.tour?.experience;
+      if (!rawExperience) throw new Error(finalResult?.error || "The agent could not finish. Try again.");
       pushLog("Placing 3D objects and aiming camera stops in the viewer…");
-      const placed = placeAnchors(finalResult.experience, finalResult.anchors ?? { objects: {}, stops: {}, effects: {} });
+      const hasClientViewAnchors = [
+        ...Object.values(finalResult?.anchors?.objects ?? {}),
+        ...Object.values(finalResult?.anchors?.stops ?? {}),
+        ...Object.values(finalResult?.anchors?.effects ?? {})
+      ].some((anchor) => Boolean(anchor?.view && views.current.has(anchor.view)));
+      const placed = finalResult?.tour?.experience && !hasClientViewAnchors
+        ? finalResult.tour.experience
+        : placeAnchors(rawExperience, finalResult?.anchors ?? { objects: {}, stops: {}, effects: {} });
       setDraft(placed, true);
+      if (finalResult?.tour) {
+        setSaved({ experience: finalResult.tour.experience, revision: finalResult.tour.revision });
+        setBaseline(JSON.stringify(placed));
+        setLink(finalResult.tour.path);
+        try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }
+        setMessage("Draft saved — we also emailed you a link.");
+      }
       setTurns((current) => [...current, { prompt: text, reply: finalResult?.reply ?? "" }]);
       setPrompt("");
-      pushLog(`Ready — ${placed.stops.length} ${draftRef.current.kind === "hunt" ? "clue" : "stop"}${placed.stops.length === 1 ? "" : "s"} and ${placed.objects.length} 3D object${placed.objects.length === 1 ? "" : "s"} placed.`);
+      pushLog(`Ready — ${placed.stops.length} ${draftRef.current.kind === "hunt" ? "clue" : "stop"}${placed.stops.length === 1 ? "" : "s"} and ${placed.objects.length} 3D object${placed.objects.length === 1 ? "" : "s"} placed${finalResult?.tour ? " and saved" : ""}.`);
       setJustUpdated(true);
       setTimeout(() => setJustUpdated(false), 2400);
       if (placed.stops[0]) { setOpenStop(placed.stops[0].id); setTimeout(() => void session.current?.goToStop(0), 400); }
@@ -506,6 +530,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                 </li>;
               })}
             </ol>}
+            {Boolean(tour) && thinking && <p className="builder-agent-log-note">We&apos;ll automatically save your draft and email you when it&apos;s ready — you can safely leave this page.</p>}
           </div>}
           {turns.length > 0 && <ol className="builder-turns" aria-label="Conversation">
             {turns.map((turn, index) => <li key={index}><p className="builder-turn-prompt">{turn.prompt}</p><p>{turn.reply}</p></li>)}

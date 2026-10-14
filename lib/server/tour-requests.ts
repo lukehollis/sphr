@@ -39,7 +39,7 @@ export async function parseExperienceFor(scene: SceneListing, value: unknown) {
  * Ask the tour agent for a new draft from a builder's request body. Nothing is saved.
  * With `place`, positions are worked out here rather than in a browser (for agents).
  */
-export async function draftFromRequest(scene: SceneListing, body: Record<string, unknown> | null | undefined, origin: string, team: boolean, { place = false, onLog }: { place?: boolean; onLog?: (line: string) => void } = {}) {
+export async function draftFromRequest(scene: SceneListing, body: Record<string, unknown> | null | undefined, origin: string, team: boolean, { place = false, alsoPlace = false, onLog }: { place?: boolean; alsoPlace?: boolean; onLog?: (line: string) => void } = {}) {
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt || prompt.length > 6000) throw new TourAgentError("Describe the tour in up to 6000 characters.");
   onLog?.(`Loading ${scene.title} 3D space data…`);
@@ -64,17 +64,19 @@ export async function draftFromRequest(scene: SceneListing, body: Record<string,
   // A space without panoramas (a splat or a model) is shown to the agent in views drawn here.
   const drawnViews = await spaceViews(bootstrap, scene.sceneId).catch((failure) => { console.warn("Drafting without drawn views:", (failure as Error).message); return null; }) ?? [];
   const result = await composeTour({ bootstrap: { ...bootstrap, space }, draft, prompt, history, views, origin, kind: body?.kind === "hunt" ? "hunt" : "tour", team, drawn, spaceViews: drawnViews, reconstruction, onLog });
-  if (place) {
+  let placed: ReturnType<typeof placeOnServer> | undefined;
+  if (place || alsoPlace) {
     // Placed against the capture mesh like the builder does; without it, against each location's floor.
     onLog?.("Placing objects against the 3D capture mesh…");
     const meshes = await captureMeshes(bootstrap).catch((failure) => { console.warn("Placing without the capture mesh:", (failure as Error).message); return []; });
-    return { experience: placeOnServer(bootstrap, result.experience, result.anchors, meshes, drawnViews), anchors: { objects: {}, stops: {}, effects: {} }, reply: result.reply };
+    placed = placeOnServer(bootstrap, result.experience, result.anchors, meshes, drawnViews);
+    if (place) return { experience: placed, placed, anchors: { objects: {}, stops: {}, effects: {} }, reply: result.reply };
   }
-  if (!drawnViews.length) return { experience: result.experience, anchors: result.anchors, reply: result.reply };
+  if (!drawnViews.length) return { experience: result.experience, placed, anchors: result.anchors, reply: result.reply };
   // In the builder, spots in the drawn views are placed here and the rest in the browser.
   const ours = new Set(drawnViews.map((view) => view.id));
   const split = (group: Record<string, { view?: string }>, mine: boolean) => Object.fromEntries(Object.entries(group).filter(([, anchor]) => Boolean(anchor.view && ours.has(anchor.view)) === mine));
   const here = { objects: split(result.anchors.objects, true), stops: split(result.anchors.stops, true), effects: split(result.anchors.effects, true) } as typeof result.anchors;
   const there = { objects: split(result.anchors.objects, false), stops: split(result.anchors.stops, false), effects: split(result.anchors.effects, false) } as typeof result.anchors;
-  return { experience: placeOnServer(bootstrap, result.experience, here, [], drawnViews), anchors: there, reply: result.reply };
+  return { experience: placeOnServer(bootstrap, result.experience, here, [], drawnViews), placed, anchors: there, reply: result.reply };
 }
