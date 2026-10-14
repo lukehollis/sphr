@@ -161,7 +161,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
   const images: AgentImage[] = [];
   const preferred = [...draft.stops.map((stop) => stop.view.nodeId).filter((id): id is string => Boolean(id)), ...(data.initialNode ? [data.initialNode] : [])];
-  const sampled = sampleNodes(nodes, preferred, nodes.length > 1 ? 8 : 1);
+  const sampled = sampleNodes(nodes, preferred, nodes.length > 1 ? 16 : 1);
   await Promise.all(sampled.map(async (node) => {
     const cube = Boolean(node.faces?.length || node.cubeFaces?.length || node.textureTemplate);
     if (cube) {

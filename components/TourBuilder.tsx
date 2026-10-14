@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Camera, Eye, Globe, Move3d, Play, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Camera, Eye, Globe, Mail, Move3d, Play, Plus, Rotate3d, Scale3d, Send, Sparkles, Trash2, X } from "lucide-react";
 import SphrApp from "./SphrApp";
 import type { SceneListing } from "@/lib/scene-types";
 import type { SceneEdits } from "@/lib/scene-edits";
@@ -200,7 +200,10 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
     setElapsedSec(0);
     setAgentLogs([{ text: "Capturing current camera view and preparing 3D space…", at: 0 }]);
     setError("");
-    setMessage("");
+    setMessage(tour ? "We'll email you a link when your agent finishes — you can safely leave this page." : "");
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission().catch(() => {});
+    }
     try {
       const capture = session.current?.captureView();
       const viewList = capture ? [{ id: "current", image: capture.image, nodeId: capture.view.nodeId, rotation: capture.view.rotation, fov: capture.view.fov }] : [];
@@ -282,6 +285,13 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         setLink(finalResult.tour.path);
         try { localStorage.removeItem(storageKey); } catch { /* storage blocked */ }
         setMessage("Draft saved — we also emailed you a link.");
+        if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted" && document.visibilityState === "hidden") {
+          try {
+            new Notification(`${finalResult.tour.title || "Your tour"} is ready`, {
+              body: `We saved your ${draftRef.current.kind === "hunt" ? "scavenger hunt" : "guided tour"} and emailed you a link.`
+            });
+          } catch { /* notification unavailable */ }
+        }
       }
       setTurns((current) => [...current, { prompt: text, reply: finalResult?.reply ?? "" }]);
       setPrompt("");
@@ -488,8 +498,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
           <label htmlFor="agent-prompt">Tell your agent what to make</label>
           <textarea id="agent-prompt" value={prompt} rows={6} maxLength={6000} disabled={thinking || !agentReady}
             placeholder={hunt
-              ? "Hide five small treasures around this space for kids, with clues that rhyme, a hint for each and playful music."
-              : "Walk visitors through this space in five stops, starting at the entrance. Sweep a scan of light across everything at the start, play calm music, and let sparkles follow the pointer."}
+              ? "Hide seven small treasures around this space for kids, with clues that rhyme, a hint for each and playful music."
+              : "Walk visitors through this space in seven stops, starting at the entrance. Sweep a scan of light across everything at the start, play calm music, and let sparkles follow the pointer."}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void askAgent(); } }} />
           {!agentReady && <p className="editor-help">No agent is connected to this site yet. You can still build the tour by hand below.</p>}
@@ -502,6 +512,15 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
               <span className="builder-elapsed" aria-label={`${elapsedSec} seconds elapsed`}>{Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
             </> : <><Send size={18} aria-hidden="true" /> Send</>}
           </button>
+          {Boolean(tour) && (thinking || (turns.length > 0 && !error)) && <div className="builder-email-notice" data-state={thinking ? "running" : "done"} role="status" aria-live="polite">
+            <Mail size={18} className="builder-email-notice-icon" aria-hidden="true" />
+            <div className="builder-email-notice-body">
+              <strong>{thinking ? "We'll email you when your agent finishes" : "Draft saved & email sent"}</strong>
+              <span>{thinking
+                ? "Your tour is saved automatically when the agent finishes — you can safely switch tabs or close this page."
+                : "We saved your draft and emailed you a link."}</span>
+            </div>
+          </div>}
           {agentLogs.length > 0 && <div className="builder-agent-log" data-state={thinking ? "running" : error ? "error" : "done"}>
             <div className="builder-agent-log-head">
               <span className="builder-agent-log-title">
@@ -530,7 +549,6 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                 </li>;
               })}
             </ol>}
-            {Boolean(tour) && thinking && <p className="builder-agent-log-note">We&apos;ll automatically save your draft and email you when it&apos;s ready — you can safely leave this page.</p>}
           </div>}
           {turns.length > 0 && <ol className="builder-turns" aria-label="Conversation">
             {turns.map((turn, index) => <li key={index}><p className="builder-turn-prompt">{turn.prompt}</p><p>{turn.reply}</p></li>)}
