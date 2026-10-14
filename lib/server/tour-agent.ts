@@ -161,7 +161,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
   const nodes = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
   const images: AgentImage[] = [];
   const preferred = [...draft.stops.map((stop) => stop.view.nodeId).filter((id): id is string => Boolean(id)), ...(data.initialNode ? [data.initialNode] : [])];
-  const sampled = sampleNodes(nodes, preferred, nodes.length > 1 ? 6 : 1);
+  const sampled = sampleNodes(nodes, preferred, nodes.length > 1 ? 8 : 1);
   await Promise.all(sampled.map(async (node) => {
     const cube = Boolean(node.faces?.length || node.cubeFaces?.length || node.textureTemplate);
     if (cube) {
@@ -211,7 +211,7 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
 }
 
 export const SYSTEM = `You build guided tours and scavenger hunts inside captured 3D spaces for Spacery's viewer.
-A tour is a sequence of stops. Each stop stands at a panorama location (or a free camera in splat spaces), looks somewhere, and shows a short title and text. A scavenger hunt is a sequence of clues; each step hides one placed object that the visitor must find and click, then shows a found message.
+A tour is a sequence of stops. Each stop stands at a panorama location (or a free camera in splat spaces), looks somewhere, and shows a short title and text. A scavenger hunt is a sequence of clues; each step hides one placed object that the visitor must find and click, then shows a found message. Make at least 7 stops (or at least 7 clues in a scavenger hunt) when drafting a tour or hunt, unless the person explicitly asks for fewer.
 
 You always answer by calling the write_tour tool exactly once with the complete new draft. Keep everything from the current draft that the request does not change, including IDs, text the person wrote and object positions they set.
 
@@ -610,7 +610,7 @@ export async function composeTour(options: {
   options.onLog?.(`Reading space map and ${nodeIds.size ? `${nodeIds.size} panorama locations` : "3D views"}…`);
   const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews, options.reconstruction);
   options.onLog?.(`Prepared ${context.images.length} space photo${context.images.length === 1 ? "" : "s"} and ${context.library.length} pre-matched 3D models…`);
-  const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt" : "guided tour"} unless the request says otherwise.)`;
+  const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt with at least 7 clues" : "guided tour with at least 7 stops"} unless the request explicitly asks for fewer or says otherwise.)`;
   const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
     ? await viaApi(context, options.history, prompt, check, options.onLog)

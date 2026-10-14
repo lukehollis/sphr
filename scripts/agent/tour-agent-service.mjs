@@ -69,7 +69,8 @@ function compose({ system, prompt, images }, onLog) {
       'Tool notes for this environment:',
       '- Pre-matched 3D models (`lib1`..`libN`) are already listed in the prompt below. Prefer those codes whenever they fit.',
       '- To search the 3D model library (`search_models`) for anything not already listed, call `call_mcp_tool` with `ServerName: "library"`, `ToolName: "search_models"`, and `Arguments: { "query": "..." }`.',
-      names.length ? `- Images of the space are saved in ${directory}. Inspect at most 4–6 key views with \`view_file\` using \`AbsolutePath\`:\n  ${names.join('\n  ')}` : '',
+      names.length ? `- Images of the space are saved in ${directory}. Inspect 6–8 key views across the space with \`view_file\` using \`AbsolutePath\`:\n  ${names.join('\n  ')}` : '',
+      '- Create at least 7 stops (or at least 7 clues in a scavenger hunt) unless the user explicitly asks for a shorter tour/hunt.',
       '- SPEED IS CRITICAL: Batch all `view_file` and `search_models` calls together in ONE single parallel tool-call turn, keep your internal thinking brief (under 250 words), and output the JSON draft immediately in the next turn.',
       '- Do not write or edit files or run shell commands. Reply with ONLY the single JSON object matching the schema.',
       String(prompt)
