@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import AuthShell, { customerFacts } from "./site/AuthShell";
+import AuthShell, { customerFacts, type Fact } from "./site/AuthShell";
 import { googleEvent } from "./Analytics";
+import type { AuthBuildPreview } from "@/lib/server/user-tours";
 
 type Provider = { id: string; label: string };
+
+const builderFacts: Fact[] = [
+  { code: "1.1", title: "Drafted by AI", text: "Describe your scavenger hunt or guided tour in plain words and our 3D agent places clues, stops and models." },
+  { code: "1.2", title: "Free to build", text: "Edit stops, clues, 3D objects, skies and sound effects in the browser at no cost." },
+  { code: "1.3", title: "Share a playable link", text: "Send a link to students, friends or visitors and see class results as they play." }
+];
 
 /** Posts JSON to an account route. A failure throws an error carrying the status and the response body. */
 export async function accountRequest(url: string, body?: object, method = "POST") {
@@ -24,7 +31,7 @@ const errors: Record<string, string> = {
 
 function ProviderIcon({ id }: { id: string }) {
   if (id === "google") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.6 12.3c0-.8-.1-1.5-.2-2.3H12v4.3h6a5.1 5.1 0 0 1-2.2 3.4v2.8h3.6c2.1-2 3.2-4.9 3.2-8.2z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.4-2.7l-3.6-2.8c-1 .7-2.3 1.1-3.8 1.1-2.9 0-5.4-2-6.3-4.6H2v2.9A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.7 14a6.6 6.6 0 0 1 0-4.1V7H2a11 11 0 0 0 0 9.9L5.7 14z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.3 1.7l3.2-3.2A11 11 0 0 0 2 7l3.7 2.9C6.6 7.3 9.1 5.4 12 5.4z"/></svg>;
-  if (id === "apple") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9a4.8 4.8 0 0 0-3.8-2c-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9a5 5 0 0 0-4.2 2.6c-1.8 3.1-.5 7.7 1.3 10.2.8 1.2 1.8 2.6 3.1 2.5 1.2 0 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.3 4.3 0 0 1-2.1-4.2zM13.9 5a4.4 4.4 0 0 0 1-3.2 4.5 4.5 0 0 0-2.9 1.5 4.2 4.2 0 0 0-1.1 3.1c1.1.1 2.2-.6 3-1.4z"/></svg>;
+  if (id === "apple") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9a4.8 4.8 0 0 0-3.8-2c-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9a5 5 0 0 0-4.2 2.6c-1.8 3.1-.5 7.7 1.3 10.2.8 1.2 1.8 2.6 3.1 2.5 1.2 0 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4a10 10 0 0 0 1.4-2.8 4.3 4.3 0 0 1-2.1-4.2zM13.9 5a4.4 4.4 0 0 0 1-3.2 4.5 4.5 0 0 0-2.9 1.5 4.2 4.2 4.2 0 0 0-1.1 3.1c1.1.1 2.2-.6 3-1.4z"/></svg>;
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#0A66C2" d="M20.4 20.5h-3.6v-5.6c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9v5.7H9.3V9h3.4v1.6c.5-.9 1.7-1.8 3.4-1.8 3.6 0 4.3 2.4 4.3 5.5v6.2zM5.3 7.4a2.1 2.1 0 1 1 0-4.2 2.1 2.1 0 0 1 0 4.2zm1.8 13.1H3.5V9h3.6v11.5zM22.2 0H1.8C.8 0 0 .8 0 1.7v20.6c0 .9.8 1.7 1.8 1.7h20.4c1 0 1.8-.8 1.8-1.7V1.7C24 .8 23.2 0 22.2 0z"/></svg>;
 }
 
@@ -33,8 +40,8 @@ function ProviderIcon({ id }: { id: string }) {
 const inAppBrowsers: [RegExp, string][] = [[/Instagram/, "Instagram"], [/FBAN|FBAV|FB_IAB/, "Facebook"], [/LinkedInApp/, "LinkedIn"],
   [/\bLine\//, "LINE"], [/musical_ly|BytedanceWebview|TikTok/i, "TikTok"], [/Snapchat/, "Snapchat"], [/Pinterest/, "Pinterest"], [/; wv\)/, ""]];
 
-export default function AccountAuth({ mode: initialMode, providers: allProviders, passwordEnabled, returnPath, error: errorCode, brand }:
-  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string }) {
+export default function AccountAuth({ mode: initialMode, providers: allProviders, passwordEnabled, returnPath, error: errorCode, brand, buildPreview }:
+  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string; buildPreview?: AuthBuildPreview | null }) {
   const [mode, setMode] = useState<"login" | "signup" | "forgot">(initialMode);
   const [error, setError] = useState(errorCode ? errors[errorCode] ?? errors.failed : "");
   const [message, setMessage] = useState("");
@@ -66,9 +73,20 @@ export default function AccountAuth({ mode: initialMode, providers: allProviders
   const next = returnPath === "/account" ? "" : `?next=${encodeURIComponent(returnPath)}`;
   const heading = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Sign in";
   const building = returnPath.startsWith("/account/tours/new");
-  const lede = mode === "signup" ? building ? "Then build a guided tour or a scavenger hunt from a few words, or with your own agent." : "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : "Welcome back.";
-  return <AuthShell brand={brand} headline="Host 3D captures as virtual spaces." facts={customerFacts}>
+  const lede = mode === "signup" ? building ? "Then build a guided tour or a scavenger hunt from a few words, or with your own agent." : "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : building ? "Sign in to open the 3D builder for this space." : "Welcome back.";
+  const plateHeadline = buildPreview
+    ? `Make a ${buildPreview.kind === "hunt" ? "scavenger hunt" : "guided tour"} in ${buildPreview.title}.`
+    : building ? "Build guided tours & 3D scavenger hunts." : "Host 3D captures as virtual spaces.";
+  return <AuthShell brand={brand} headline={plateHeadline} facts={building ? builderFacts : customerFacts}>
     <div className="site-auth-form">
+      {buildPreview && mode !== "forgot" && <div className="site-auth-preview">
+        <img src={buildPreview.thumbnail} alt="" width={160} height={106} />
+        <div className="site-auth-preview-body">
+          <span className="site-auth-preview-tag">{buildPreview.kind === "hunt" ? "Scavenger hunt · Free to build" : "Guided tour · Free to build"}</span>
+          <strong>{buildPreview.title}</strong>
+          <span>{buildPreview.nodeCount > 1 ? `${buildPreview.nodeCount} 3D viewpoints ready` : "3D space ready in the builder"}</span>
+        </div>
+      </div>}
       <div className="site-auth-heading"><span className="site-code">{mode === "signup" ? "A.1" : mode === "forgot" ? "A.3" : "A.2"}</span><h2>{heading}</h2><p>{lede}</p></div>
       {mode !== "forgot" && googleBlocked && <p className="site-note">Google sign-in does not work inside {inApp ? `the ${inApp} app` : "this app"}. Use your email below, or open this page in Safari or Chrome.</p>}
       {mode !== "forgot" && providers.length > 0 && <div className="site-providers">

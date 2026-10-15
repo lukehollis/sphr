@@ -1,7 +1,7 @@
 import { allowAttempt } from "@/lib/server/admin-store";
 import { accountRequest, accountResponse, attemptKey } from "@/lib/server/accounts";
 import { readAllScenes } from "@/lib/scene-catalog";
-import { canBuildOn, createUserTour, describeTours, TourLimitError, tourPath, tourUser } from "@/lib/server/user-tours";
+import { canBuildOn, createUserTour, describeTours, findEmptyUserTour, TourLimitError, tourPath, tourUser } from "@/lib/server/user-tours";
 import { spaceForScene } from "@/lib/server/accounts-store";
 import { recordEvent } from "@/lib/server/analytics";
 import { notifyTeam } from "@/lib/server/team-notify";
@@ -21,6 +21,12 @@ export async function POST(request: Request) {
   const kind = body?.kind === "hunt" ? "hunt" : "tour";
   const scene = typeof body?.sceneId === "string" ? (await readAllScenes()).find(item => item.sceneId === body.sceneId) : undefined;
   if (!scene || !canBuildOn(user.id, scene)) return accountResponse({ error: "That space is not available to build on." }, 404);
+  if (body?.reuseEmpty === true) {
+    const existing = findEmptyUserTour(user.id, scene.sceneId, kind);
+    if (existing) {
+      return accountResponse({ ok: true, reused: true, tour: { id: existing.id, title: existing.title, kind: existing.kind, editor: `/account/tours/${existing.id}`, path: tourPath(existing) } });
+    }
+  }
   if (!allowAttempt([[attemptKey("tour", user.id), 60]], 60 * 60 * 1000)) return accountResponse({ error: "Too many new tours. Try again later." }, 429);
   try {
     // The space's name is a fine first title; the builder shows what kind of tour it is.

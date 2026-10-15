@@ -62,6 +62,17 @@ export function listUserTours(userId: string) {
   return (store().prepare(`SELECT * FROM user_tours WHERE user_id IN (${marks}) ORDER BY updated DESC`).all(...users) as TourRow[]).map(toTour);
 }
 
+export function findEmptyUserTour(userId: string, sceneId: string, kind: ExperienceKind) {
+  const connection = store();
+  const row = connection.prepare(
+    "SELECT * FROM user_tours WHERE user_id=? AND scene_id=? AND kind=? AND revision=0 AND experience IS NULL ORDER BY updated DESC LIMIT 1"
+  ).get(userId, sceneId, kind) as TourRow | undefined;
+  if (!row) return undefined;
+  const stamp = new Date().toISOString();
+  connection.prepare("UPDATE user_tours SET updated=? WHERE id=?").run(stamp, row.id);
+  return readUserTour(row.id);
+}
+
 export function createUserTour(userId: string, sceneId: string, title: string, kind: ExperienceKind) {
   const connection = store();
   connection.exec("BEGIN IMMEDIATE");
@@ -125,6 +136,27 @@ export function agentUnlimited(userId: string) {
 export function buildReturnPath(scene: unknown, kind?: unknown) {
   if (typeof scene !== "string" || !/^[a-f0-9]{12}$/.test(scene)) return "/account/tours/new";
   return `/account/tours/new?scene=${scene}${kind === "hunt" ? "&kind=hunt" : ""}`;
+}
+
+export type AuthBuildPreview = { sceneId: string; title: string; thumbnail: string; kind: ExperienceKind; nodeCount: number };
+
+/** Resolves the space preview shown on the sign-up / sign-in card when a visitor arrives from a space's "Make a scavenger hunt here" CTA. */
+export async function buildScenePreview(returnPath: string): Promise<AuthBuildPreview | null> {
+  if (!returnPath.startsWith("/account/tours/new")) return null;
+  const queryIndex = returnPath.indexOf("?");
+  if (queryIndex < 0) return null;
+  const params = new URLSearchParams(returnPath.slice(queryIndex + 1));
+  const sceneId = params.get("scene");
+  if (!sceneId || !/^[a-f0-9]{12}$/.test(sceneId)) return null;
+  const scene = (await readAllScenes()).find(item => item.sceneId === sceneId);
+  if (!scene || !canBuildOn(null, scene)) return null;
+  return {
+    sceneId: scene.sceneId,
+    title: scene.title,
+    thumbnail: scene.thumbnail,
+    kind: params.get("kind") === "hunt" ? "hunt" : "tour",
+    nodeCount: scene.nodeCount
+  };
 }
 
 export function tourPath(tour: Pick<UserTour, "id" | "title">) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { accountRequest } from "./AccountAuth";
 import { accountNav, legalLinks } from "./AccountDashboard";
 import SiteHeader from "./site/SiteHeader";
@@ -28,13 +28,17 @@ function SpaceChoice({ space, busy, onChoose }: { space: PickerSpace; busy: stri
 }
 
 /** Choose what to make and the space to build it on: one of the customer's own, or one of Spacery's. */
-export default function TourSpacePicker({ brand, account, own, spacery, chosen, kind: initialKind, paid = false, agentsUrl }:
+export default function TourSpacePicker({ brand, account, own, spacery, chosen, kind: initialKind, paid = false, autoStart = false, agentsUrl }:
   { brand: string; account: AccountView; own: PickerSpace[]; spacery: PickerSpace[]; chosen: PickerSpace | null; kind: Kind;
-    /** Back from choosing a plan. */ paid?: boolean; /** Where customers learn to connect their own agents. */ agentsUrl?: string }) {
+    /** Back from choosing a plan. */ paid?: boolean;
+    /** Automatically open the builder when arriving from a space's "Make a scavenger hunt here" CTA. */ autoStart?: boolean;
+    /** Where customers learn to connect their own agents. */ agentsUrl?: string }) {
   const [kind, setKind] = useState<Kind>(initialKind);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [resent, setResent] = useState(false);
+  const startedRef = useRef(false);
   const chosenSpace = chosen;
   const filtered = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -44,10 +48,24 @@ export default function TourSpacePicker({ brand, account, own, spacery, chosen, 
   async function create(sceneId: string, as: Kind = kind) {
     setBusy(sceneId); setError("");
     try {
-      const { tour } = await accountRequest("/api/account/tours", { sceneId, kind: as });
+      const { tour } = await accountRequest("/api/account/tours", { sceneId, kind: as, reuseEmpty: true });
       window.location.assign(tour.editor);
     } catch (failure) { setError((failure as Error).message); setBusy(null); }
   }
+
+  async function resendVerification() {
+    setError("");
+    try {
+      await accountRequest("/api/account/verify/resend");
+      setResent(true);
+    } catch (failure) { setError((failure as Error).message); }
+  }
+
+  useEffect(() => {
+    if (!autoStart || !chosenSpace || startedRef.current) return;
+    startedRef.current = true;
+    void create(chosenSpace.sceneId, initialKind);
+  }, [autoStart, chosenSpace, initialKind]);
 
   return <div className="site"><div className="site-frame">
     <SiteHeader brand={brand} nav={accountNav(account, "spaces")} account={account.email} signOut="account" />
@@ -62,7 +80,14 @@ export default function TourSpacePicker({ brand, account, own, spacery, chosen, 
         {paid && !error && <p className="site-note" role="status">You're all set. The agent can draft your tours and hunts as often as you like.</p>}
         {error && <p className="site-alert" role="alert">{error}</p>}
       </div>
-      {!account.emailVerified && <div className="site-callout"><p>Confirm your email address to make tours. We sent a link to <strong>{account.email}</strong>, and it may be in spam or junk.</p></div>}
+      {!account.emailVerified && <div className="site-callout">
+        <p>Confirm your email address to make tours. We sent a link to <strong>{account.email}</strong>, and it may be in spam or junk.</p>
+        <div className="site-callout-actions">
+          {resent
+            ? <span className="site-note" role="status">We sent a fresh confirmation link to {account.email}.</span>
+            : <button type="button" className="site-button site-button-secondary" onClick={() => void resendVerification()}>Resend confirmation email</button>}
+        </div>
+      </div>}
 
       {chosenSpace && <section className="tour-chosen" aria-labelledby="chosen-title">
         <img src={chosenSpace.thumbnail} alt="" width={960} height={640} />
@@ -71,8 +96,17 @@ export default function TourSpacePicker({ brand, account, own, spacery, chosen, 
           <p>Build a guided tour or a scavenger hunt on this space. Describe it in a few words and the builder drafts every stop for you to edit{agentsUrl
             ? <>, or let <a href={agentsUrl}>your own agent</a> build it</> : null}. The space itself stays as it is.</p>
           <div className="tour-chosen-actions">
-            <button type="button" className="site-button site-button-accent" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "tour")}>Make a guided tour</button>
-            <button type="button" className="site-button site-button-secondary" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "hunt")}>Make a scavenger hunt</button>
+            {kind === "hunt" ? <>
+              <button type="button" className="site-button site-button-accent" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "hunt")}>
+                {busy === chosenSpace.sceneId ? "Opening scavenger hunt builder…" : "Make a scavenger hunt"}
+              </button>
+              <button type="button" className="site-button site-button-secondary" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "tour")}>Make a guided tour</button>
+            </> : <>
+              <button type="button" className="site-button site-button-accent" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "tour")}>
+                {busy === chosenSpace.sceneId ? "Opening guided tour builder…" : "Make a guided tour"}
+              </button>
+              <button type="button" className="site-button site-button-secondary" disabled={busy !== null} onClick={() => void create(chosenSpace.sceneId, "hunt")}>Make a scavenger hunt</button>
+            </>}
           </div>
         </div>
       </section>}

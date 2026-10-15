@@ -26,7 +26,9 @@ export default async function NewTourPage({ searchParams }: { searchParams: Prom
   const listed = typeof scene === "string" ? [...spaces.own, ...spaces.spacery].find(item => item.sceneId === scene) : undefined;
   const linked = !listed && typeof scene === "string" ? (await readAllScenes()).find(item => item.sceneId === scene) : undefined;
   const chosen = listed ?? (linked && canBuildOn(user.id, linked) ? pickerSpace(linked) : null);
+  const explicitKind = kind === "hunt" || kind === "tour";
   return <TourSpacePicker brand={siteBrand()} account={describeAccount(readUser(user.id)!)} own={spaces.own} spacery={spaces.spacery}
     chosen={chosen} kind={kind === "hunt" ? "hunt" : "tour"} paid={typeof checkout === "string"}
+    autoStart={Boolean(chosen && explicitKind && user.emailVerified && typeof checkout !== "string")}
     agentsUrl={siteHome() ? `${siteHome()}/#start` : undefined} />;
 }

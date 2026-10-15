@@ -32,9 +32,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return accountResponse({ error: "Your agent has had a lot of requests this hour. Edit by hand for now, or try again later." }, 429);
   }
   const externalOrigin = publicOrigin(request);
-  const saveAndEmail = (experience: Experience, reply: string, strictRevision: boolean) => {
+  const saveAndEmail = (experience: Experience, reply: string, strictRevision: boolean, autoShareFirstDraft = false) => {
     const current = strictRevision ? tour : (readUserTour(tour.id) ?? tour);
-    const saved = saveUserTour(tour.id, current.revision, { experience, title: current.title, public: current.public });
+    const shouldShare = autoShareFirstDraft && current.revision === 0 ? true : current.public;
+    const saved = saveUserTour(tour.id, current.revision, { experience, title: current.title, public: shouldShare });
     void notifyOwner(user, tourReadyEmail(siteBrand(), externalOrigin, {
       id: saved.id,
       title: saved.title,
@@ -85,7 +86,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             });
             void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: save ? "agent" : "builder" } });
             sendLine({ type: "log", text: "Saving draft and sending email notification…" });
-            const savedTour = saveAndEmail(result.placed ?? result.experience, result.reply, save);
+            const savedTour = saveAndEmail(result.placed ?? result.experience, result.reply, save, !save);
             if (!save) {
               sendLine({ type: "done", ok: true, ...result, tour: savedTour });
             } else {

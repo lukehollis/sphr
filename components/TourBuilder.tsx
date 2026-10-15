@@ -36,6 +36,41 @@ type Turn = { prompt: string; reply: string };
 type Anchor = { nodeId?: string; face?: number; view?: string; x: number; y: number };
 type Tab = "stops" | "objects" | "effects" | "look" | "sky" | "map";
 
+const STARTER_PROMPTS: Record<ExperienceKind, { label: string; prompt: string }[]> = {
+  hunt: [
+    {
+      label: "7-clue classroom hunt",
+      prompt: "Create a 7-clue classroom scavenger hunt around this space where each hidden object has a clever clue, a directional hint, and reveals a real historical or architectural fact when found."
+    },
+    {
+      label: "Riddle & mystery hunt",
+      prompt: "Hide 7 mysterious artifacts around this space with rhyming riddles as clues, a helpful hint for each, and atmospheric background music."
+    },
+    {
+      label: "Kids treasure hunt",
+      prompt: "Hide 7 playful treasures around this space for kids, with fun clues, encouraging hints, and celebratory sound effects."
+    }
+  ],
+  tour: [
+    {
+      label: "7-stop highlight tour",
+      prompt: "Walk visitors through this space in 7 stops starting at the entrance, pointing out key architectural and historical details with warm narration and calm background music."
+    },
+    {
+      label: "Story & atmosphere tour",
+      prompt: "Build a 7-stop atmospheric story tour through this space using dramatic sky lighting, visual looks at key moments, and immersive sound."
+    },
+    {
+      label: "Student field trip",
+      prompt: "Create a 7-stop interactive field trip for students explaining how this place was built, who used it, and what details to look closely at."
+    }
+  ]
+};
+
+const ALL_STARTER_TEXTS = new Set(
+  [...STARTER_PROMPTS.hunt, ...STARTER_PROMPTS.tour].map((item) => item.prompt)
+);
+
 function updateFor(draft: Experience, standalone: boolean) {
   return { kind: draft.kind, objects: draft.objects, effects: draft.effects, points: draft.stops.map(stopToTourPoint), finale: draft.finale, look: draft.look, sky: draft.sky, place: draft.place, standalone };
 }
@@ -56,7 +91,9 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   const [selected, setSelected] = useState<string | null>(null);
   const [gizmo, setGizmo] = useState<GizmoMode>("translate");
   const [preview, setPreview] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(() =>
+    tour && initial.stops.length === 0 ? STARTER_PROMPTS[initial.kind][0].prompt : ""
+  );
   const [turns, setTurns] = useState<Turn[]>([]);
   const [thinking, setThinking] = useState(false);
   const [agentLogs, setAgentLogs] = useState<{ text: string; at: number }[]>([]);
@@ -280,6 +317,9 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         : placeAnchors(rawExperience, finalResult?.anchors ?? { objects: {}, stops: {}, effects: {} });
       setDraft(placed, true);
       if (finalResult?.tour) {
+        const nextMeta = { title: finalResult.tour.title, public: finalResult.tour.public };
+        setMeta(nextMeta);
+        setSavedMeta(nextMeta);
         setSaved({ experience: finalResult.tour.experience, revision: finalResult.tour.revision });
         setBaseline(JSON.stringify(placed));
         setLink(finalResult.tour.path);
@@ -372,9 +412,52 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
     } catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
 
-  async function copyLink() {
-    try { await navigator.clipboard.writeText(new URL(link, window.location.href).href); setMessage("Link copied."); }
-    catch { setMessage(new URL(link, window.location.href).href); }
+  async function setSharing(nextPublic: boolean) {
+    setMeta((current) => ({ ...current, public: nextPublic }));
+    if (!tour) return;
+    try {
+      const response = await fetch(api, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ public: nextPublic })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.ok && result?.tour) {
+        const next = { title: result.tour.title, public: result.tour.public };
+        setMeta(next);
+        setSavedMeta(next);
+        setLink(result.tour.path);
+        setMessage(next.public ? "Anyone with the link can now open it." : "Private — only you can open it.");
+      }
+    } catch { /* fallback to Save button if offline */ }
+  }
+
+  async function copyLink(shareFirst = false) {
+    let targetPath = link;
+    if (shareFirst && tour && !savedMeta.public) {
+      try {
+        const response = await fetch(api, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ public: true })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (response.ok && result?.tour) {
+          const next = { title: result.tour.title, public: result.tour.public };
+          setMeta(next);
+          setSavedMeta(next);
+          targetPath = result.tour.path;
+          setLink(targetPath);
+        }
+      } catch { /* ignore */ }
+    }
+    const fullUrl = new URL(targetPath, window.location.href).href;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setMessage("Playable link copied — anyone with the link can open it.");
+    } catch {
+      setMessage(fullUrl);
+    }
   }
 
   // ---- Stops ----
@@ -452,12 +535,18 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
     setDraft((current) => ({ ...current, effects: current.effects.filter((effect) => effect.id !== id), stops: current.stops.map((stop) => ({ ...stop, effects: stop.effects.filter((item) => item !== id) })) }), true);
   }
 
-  const setKind = (kind: ExperienceKind) => setDraft((current) => ({ ...current, kind }), true);
+  const setKind = (kind: ExperienceKind) => {
+    setDraft((current) => ({ ...current, kind }), true);
+    if (tour && draftRef.current.stops.length === 0) {
+      setPrompt((current) => (!current.trim() || ALL_STARTER_TEXTS.has(current.trim()) ? STARTER_PROMPTS[kind][0].prompt : current));
+    }
+  };
   const objectName = (id: string) => draft.objects.find((object) => object.id === id)?.name ?? id;
   const selectedObject = draft.objects.find((object) => object.id === selected) ?? null;
   const canEdit = ready && state?.loading.ready;
   const splatSpace = scene.sourceType === "splat";
   const hunt = draft.kind === "hunt";
+  const starters = STARTER_PROMPTS[draft.kind];
 
   return <div className="tour-builder">
     <section className="tour-builder-view" aria-label="Space">
@@ -486,8 +575,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
         {tour && <div className="builder-settings">
           <label>Title<input value={meta.title} maxLength={200} onChange={(event) => setMeta((current) => ({ ...current, title: event.target.value }))} /></label>
           <div className="builder-kind" role="radiogroup" aria-label="Who can open it">
-            <button type="button" role="radio" aria-checked={!meta.public} onClick={() => setMeta((current) => ({ ...current, public: false }))}>Only you</button>
-            <button type="button" role="radio" aria-checked={meta.public} onClick={() => setMeta((current) => ({ ...current, public: true }))}>Anyone with the link</button>
+            <button type="button" role="radio" aria-checked={!meta.public} onClick={() => void setSharing(false)}>Only you</button>
+            <button type="button" role="radio" aria-checked={meta.public} onClick={() => void setSharing(true)}>Anyone with the link</button>
           </div>
           {meta.public !== savedMeta.public
             ? <p className="editor-help">{meta.public ? "Save to let anyone with the link open it." : "Save to make it private again."}</p>
@@ -496,6 +585,11 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
 
         <form className="builder-agent" onSubmit={(event) => { event.preventDefault(); void askAgent(); }}>
           <label htmlFor="agent-prompt">Tell your agent what to make</label>
+          {draft.stops.length === 0 && !thinking && agentReady && <div className="builder-starters" role="group" aria-label="Starter prompts">
+            {starters.map((item) => <button key={item.label} type="button" className="builder-starter-chip"
+              aria-pressed={prompt.trim() === item.prompt}
+              onClick={() => setPrompt(item.prompt)}><Sparkles size={13} aria-hidden="true" /> {item.label}</button>)}
+          </div>}
           <textarea id="agent-prompt" value={prompt} rows={6} maxLength={6000} disabled={thinking || !agentReady}
             placeholder={hunt
               ? "Hide seven small treasures around this space for kids, with clues that rhyme, a hint for each and playful music."
@@ -510,15 +604,19 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
               <span className="builder-spinner" aria-hidden="true" />
               <span className="builder-send-status">{agentLogs[agentLogs.length - 1]?.text || "Your agent is working on it…"}</span>
               <span className="builder-elapsed" aria-label={`${elapsedSec} seconds elapsed`}>{Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}</span>
-            </> : <><Send size={18} aria-hidden="true" /> Send</>}
+            </> : <><Send size={18} aria-hidden="true" /> {draft.stops.length === 0 ? (hunt ? "Generate scavenger hunt" : "Generate guided tour") : "Send"}</>}
           </button>
           {Boolean(tour) && (thinking || (turns.length > 0 && !error)) && <div className="builder-email-notice" data-state={thinking ? "running" : "done"} role="status" aria-live="polite">
             <Mail size={18} className="builder-email-notice-icon" aria-hidden="true" />
             <div className="builder-email-notice-body">
-              <strong>{thinking ? "We'll email you when your agent finishes" : "Draft saved & email sent"}</strong>
+              <strong>{thinking ? "We'll email you when your agent finishes" : "Draft saved & ready to share"}</strong>
               <span>{thinking
                 ? "Your tour is saved automatically when the agent finishes — you can safely switch tabs or close this page."
-                : "We saved your draft and emailed you a link."}</span>
+                : "We saved your draft, enabled link sharing, and emailed you a link."}</span>
+              {!thinking && <div className="builder-email-notice-actions">
+                <button type="button" className="builder-share-cta" onClick={() => void copyLink(true)}>Copy playable link</button>
+                <a href={link} target="_blank" rel="noreferrer" className="builder-share-open">{hunt ? "Play hunt ↗" : "Open tour ↗"}</a>
+              </div>}
             </div>
           </div>}
           {agentLogs.length > 0 && <div className="builder-agent-log" data-state={thinking ? "running" : error ? "error" : "done"}>

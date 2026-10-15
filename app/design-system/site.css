@@ -293,6 +293,13 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 .site-auth-facts dd { margin: 0; color: var(--site-muted); font-size: var(--size-caption); line-height: var(--leading-body); }
 .site-auth-panel { display: flex; align-items: center; justify-content: center; padding: var(--space-6) var(--space-6); }
 .site-auth-form { width: 100%; max-width: 400px; }
+.site-auth-preview { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: var(--space-3); padding: 10px;
+  background: var(--site-paper), var(--paper-cream); outline: 1px solid var(--site-line); border-left: 3px solid var(--accent); }
+.site-auth-preview img { width: 84px; height: 56px; object-fit: cover; display: block; background: var(--paper-tint); }
+.site-auth-preview-body { display: grid; gap: 2px; min-width: 0; }
+.site-auth-preview-tag { color: var(--accent); font-size: 11px; font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.04em; }
+.site-auth-preview-body strong { color: var(--text-heading); font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-auth-preview-body span:last-child { color: var(--site-muted); font-size: 12px; }
 .site-auth-heading { margin-bottom: var(--space-4); }
 .site-auth-heading h2 { margin: 6px 0 8px; color: var(--text-heading); font-size: 32px; line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
 .site-auth-heading p { margin: 0; color: var(--site-muted); line-height: var(--leading-body); }
