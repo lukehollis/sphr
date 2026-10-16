@@ -859,12 +859,12 @@ test('the free preview: one for each account, its limits, a window that starts w
   // What the ready email says about a preview, and what it leaves alone.
   const origin = 'https://app.example';
   const ready = emails.spaceReadyEmail('Spaces', origin, { id: 'abcdef123456', title: 'Porch' }, { path: '/s/0123456789ab/porch', public: false },
-    { until: '2026-10-23T09:00:00.000Z', price: '$2 a month for each space' });
+    { until: '2026-10-23T09:00:00.000Z' });
   assert.equal(ready.subject, 'Porch is ready');
   assert.match(ready.text, /Your preview is ready/);
-  assert.match(ready.text, /free preview, so only you can open it, until October 23/);
-  assert.match(ready.text, /Hosting is \$2 a month for each space, and you can cancel any time/);
-  assert.match(ready.text, /Publish it or keep it hosted\nhttps:\/\/app\.example\/account\/spaces\/abcdef123456/);
+  assert.match(ready.text, /Only you can open it, and it stays open until October 23/);
+  assert.doesNotMatch(ready.text, /Hosting is \$|Publish it/, 'the email sells nothing');
+  assert.match(ready.text, /Space page\nhttps:\/\/app\.example\/account\/spaces\/abcdef123456/);
   assert.doesNotMatch(ready.text, /It is private for now/, 'a preview has its own wording');
   assert.match(emails.spaceReadyEmail('Spaces', origin, { id: 'abcdef123456', title: 'Porch' }, { path: '/s/0123456789ab/porch' }).text, /private for now/, 'a hosted space keeps its wording');
 });

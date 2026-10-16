@@ -322,9 +322,9 @@ try {
   assert.equal(body.space.scene.public, false, 'new spaces start private');
   assert.deepEqual([body.space.hosted, body.space.preview.open, body.space.preview.daysLeft], [false, true, 7], 'the window starts with the first result');
   const readyMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Riverside studio is ready'));
-  assert.ok(readyMail.includes('free preview, so only you can open it, until'), 'a preview is called a free preview, private until its date');
-  assert.ok(readyMail.includes('Hosting is $1 a month for each space, and you can cancel any time'), 'with the price from Stripe');
-  assert.ok(readyMail.includes(`/account/spaces/${studio.id}`) && readyMail.includes('Publish it or keep it hosted'), 'and where to publish it');
+  assert.ok(readyMail.includes('Only you can open it, and it stays open until'), 'a preview is called a free preview, private until its date');
+  assert.ok(!readyMail.includes('Hosting is $') && !readyMail.includes('Publish it'), 'and the email sells nothing: no price and no prompt to pay');
+  assert.ok(readyMail.includes(`/account/spaces/${studio.id}`), 'and it links to the space page');
   const scenePath = body.space.scene.path;
   // Only the listed runtime files are installed, and the space is not added to a shared index.
   const installed = path.join(datasets, `customer-${studio.id}`);
