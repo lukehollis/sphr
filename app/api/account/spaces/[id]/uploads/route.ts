@@ -1,6 +1,7 @@
-import { AccountError, createUploadRecord, listUploads, readCustomerSpace, sameTeam, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
+import { AccountError, createUploadRecord, listUploads, PreviewLimitError, readCustomerSpace, sameTeam, setUploadSession, setUploadStatus } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { editableStatus } from "@/lib/server/customer-spaces";
+import { previewGateBody, previewOffer, spacePreview } from "@/lib/server/previews";
 import { chunkSize, maxSpaceBytes, objectName, safeFileName, startUploadSession, uploadOffset } from "@/lib/server/uploads";
 
 /** Registers one file and returns the resumable session the browser uploads it to. */
@@ -9,8 +10,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (error) return error;
   const space = readCustomerSpace((await params).id);
   if (!space || !sameTeam(space.userId, user.id) || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
-  if (space.status === "unpaid") return accountResponse({ error: "Complete payment before uploading." }, 402);
-  if (!spaceHosted(space)) return accountResponse({ error: "Update your billing details to continue." }, 402);
+  if (space.status === "unpaid") {
+    return accountResponse({ error: previewOffer(user.id)?.available ? "Start your free preview or complete payment before uploading." : "Complete payment before uploading." }, 402);
+  }
+  // Hosted spaces upload freely. A free preview does too, until its window ends, but holds fewer files.
+  const preview = spaceHosted(space) ? null : spacePreview(space);
+  if (!spaceHosted(space) && !preview) return accountResponse({ error: "Update your billing details to continue." }, 402);
+  if (preview?.expired) return accountResponse(previewGateBody(space, "ended"), 402);
   if (!editableStatus(space)) return accountResponse({ error: "Files cannot be added while this space is being processed." }, 409);
   const name = safeFileName(body?.name);
   const size = body?.size;
@@ -27,8 +33,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } catch { setUploadStatus(unfinished.id, "deleted"); }
   }
   let upload;
-  try { upload = createUploadRecord(space.id, name, size, type, id => objectName(space.id, id, name), maxSpaceBytes()); }
+  try { upload = createUploadRecord(space.id, name, size, type, id => objectName(space.id, id, name), maxSpaceBytes(), preview ? { files: preview.files, bytes: preview.bytes } : undefined); }
   catch (failure) {
+    if (failure instanceof PreviewLimitError) return accountResponse(previewGateBody(space, "limit", failure.message), 402);
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
     throw failure;
   }

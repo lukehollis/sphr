@@ -28,11 +28,14 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     // Repairs a quantity left behind by an earlier failed update.
     await syncQuantity(user.id).catch(log("Unable to update the subscription quantity:"));
   }
-  const notice = params.verified === "1" ? "Email address confirmed." : params.verified === "0" ? "That confirmation link has expired. Send a new one below."
-    : params.checkout && params.agent === "1" ? "Payment received. Your agent can upload the files now."
-    : params.checkout ? "Payment received. Add your files to each space." : undefined;
   const fresh = readUser(user.id)!;
   const spaces = await Promise.all(listCustomerSpaces(fresh.id).map(describeSpace));
+  // Paying after a free preview leaves the files already processed, so there is nothing left to add.
+  const processed = spaces.some(space => space.previewed && ["queued", "processing", "ready"].includes(space.status));
+  const notice = params.verified === "1" ? "Email address confirmed." : params.verified === "0" ? "That confirmation link has expired. Send a new one below."
+    : params.checkout && params.agent === "1" ? processed ? "Payment received. Your space is hosted now. Go back to your agent and it can make the space public." : "Payment received. Your agent can upload the files now."
+    : params.checkout && processed ? "Payment received. Your space is hosted now. Open it to make it public whenever you are ready."
+    : params.checkout ? "Payment received. Add your files to each space." : undefined;
   return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} plans={await readPlans()} notice={notice}
     fromCheckout={typeof params.checkout === "string"} agents={listAgentTokens(fresh.id)} tours={await describeTours(fresh.id)}
     following={await followingTours(fresh.id)} />;

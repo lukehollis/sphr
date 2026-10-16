@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { googleEvent } from "./Analytics";
+import { googleEvent, track } from "./Analytics";
 import { accountRequest } from "./AccountAuth";
 import SiteHeader from "./site/SiteHeader";
 import { ConstructionDrawing, SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
@@ -18,7 +18,7 @@ import type { ProfileCard, SharedTour } from "@/lib/server/profiles";
 import type { Plan } from "@/lib/server/billing";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
-export const legalLinks = [{ href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
+export const legalLinks = [{ href: "/pricing", label: "Pricing" }, { href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
 
 function formatDate(seconds: number | null) {
   return seconds ? new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "";
@@ -38,9 +38,9 @@ export async function openPortal() {
 /** The account pages' navigation, also used by server-rendered pages (it lives in a shared module). */
 export { accountNav };
 
-/** The status a space shows on its card. */
+/** The status a space shows on its card. A free preview that is still open is not offline: it is private to its owner. */
 export function spaceStatus(space: SpaceView) {
-  if (!space.hosted && space.status !== "unpaid") return "offline";
+  if (!space.hosted && space.status !== "unpaid" && !space.preview?.open) return "offline";
   if (space.status === "ready" && space.scene) return space.scene.public ? "public" : "private";
   return space.status;
 }
@@ -111,6 +111,27 @@ function BillingBar({ account, spaces, plans }: { account: AccountView; spaces: 
   </>;
 }
 
+/**
+ * What to see first once a free preview is ready: it is private, and hosting publishes it or keeps it. The space's
+ * own page has the button that opens payment; this points there. After the window it says the space is offline.
+ */
+function PreviewBar({ spaces }: { spaces: SpaceView[] }) {
+  const ready = spaces.find(space => !space.hosted && space.preview?.open && space.status === "ready" && space.scene);
+  const lapsed = spaces.find(space => !space.hosted && space.preview?.expired);
+  const left = ready?.preview?.daysLeft ?? 0;
+  useEffect(() => { if (ready) track("publish_gate_shown", { surface: "dashboard", left }); }, [ready?.id, left]); // eslint-disable-line react-hooks/exhaustive-deps -- once per preview
+  const until = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : "";
+  if (ready) return <div className="site-callout site-callout-action" role="status">
+    <p>Your preview of <strong>{ready.title}</strong> is ready. Only you can open it, until {until(ready.preview!.until)}. Start hosting to make it public or to keep it.</p>
+    <a className="site-button site-button-accent" href={`/account/spaces/${ready.id}`}>Publish or keep it<span aria-hidden="true">→</span></a>
+  </div>;
+  if (lapsed) return <div className="site-callout site-callout-action" role="status">
+    <p><strong>{lapsed.title}</strong> is offline because its free preview ended. Start hosting to bring it back, with the same link.</p>
+    <a className="site-button site-button-accent" href={`/account/plan?space=${lapsed.id}`}>Start hosting<span aria-hidden="true">→</span></a>
+  </div>;
+  return null;
+}
+
 /** The drawing from the empty state, with a scan line passing over it while an agent works. */
 function Working() {
   return <span className="space-art space-art-working" aria-hidden="true"><ConstructionDrawing /><i /></span>;
@@ -152,15 +173,19 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   }
 
   const working = space.status === "queued" || space.status === "processing";
-  const ready = space.status === "ready" && space.scene && space.hosted;
+  const previewing = !space.hosted && Boolean(space.preview?.open);
+  const ready = space.status === "ready" && space.scene && (space.hosted || previewing);
   let line = `Added ${shortDate(space.created)}`;
   if (space.status === "unpaid") line = "Complete payment to start uploading";
   else if (space.status === "draft") line = files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}, ${formatBytes(bytes)}` : "No files yet";
   else if (space.status === "queued") line = "Waiting for an agent";
   else if (space.status === "processing") line = space.job?.progress ?? "An agent is working on it";
   else if (space.status === "failed") line = space.message?.split("\n")[0] ?? "Processing could not finish";
+  else if (previewing && space.status === "ready") line = `Free preview, private to you${space.preview?.daysLeft ? `. ${space.preview.daysLeft} ${space.preview.daysLeft === 1 ? "day" : "days"} left` : ""}`;
+  else if (!space.hosted && space.preview?.expired) line = "Preview ended. Start hosting to bring it back";
   else if (!space.hosted) line = "Offline until billing restarts";
-  const tag = status === "draft" ? "Add files" : status === "queued" ? "In the queue" : undefined;
+  const tag = status === "draft" ? "Add files" : status === "queued" ? "In the queue"
+    : previewing && space.status === "ready" ? "Private preview" : !space.hosted && space.preview?.expired ? "Preview ended" : undefined;
 
   const media = <>
     {ready ? <img src={space.scene!.thumbnail} alt="" loading="lazy" width={960} height={640} />
@@ -171,7 +196,8 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   </>;
 
   return <article className={`space-card space-card-${space.status}`}>
-    {ready ? <a className="space-card-media" href={space.scene!.path} target="_blank" rel="noreferrer" aria-label={`Open ${space.title}`}>{media}</a>
+    {ready ? <a className="space-card-media" href={space.scene!.path} target="_blank" rel="noreferrer" aria-label={`Open ${space.title}`}
+      onClick={() => { if (previewing) track("preview_opened", { from: "card" }); }}>{media}</a>
       : <a className="space-card-media" href={manage} aria-label={`Manage ${space.title}`} tabIndex={-1}>{media}</a>}
     <div className="space-card-body">
       <h3><a href={manage}>{space.title}</a></h3>
@@ -356,8 +382,11 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
   const plan = currentPlan(plans, account.subscription);
   const perSpace = plans.find(item => item.spaces === null);
   const covers = active ? account.subscription?.plan?.spaces ?? null : null;
+  const perSpacePrice = perSpace && `${formatMoney(perSpace.amount, perSpace.currency)} ${formatPeriod(perSpace.interval, perSpace.intervalCount)}`;
   const priceHint = !account.billing ? undefined
-    : !active ? perSpace && `You start on pay as you go at ${formatMoney(perSpace.amount, perSpace.currency)} ${formatPeriod(perSpace.interval, perSpace.intervalCount)} for each space, and you can choose a plan before paying.`
+    : !active ? account.preview?.available
+      ? `Your first space is a free private preview. It is processed and opened for you before you pay anything, and holds up to ${account.preview.maxFiles} files and ${formatBytes(account.preview.maxBytes)}.${perSpacePrice ? ` Hosting it, to make it public or keep it past ${account.preview.days} days, is ${perSpacePrice} for each space.` : ""}`
+      : perSpace && `You start on pay as you go at ${perSpacePrice} for each space, and you can choose a plan before paying.`
     : covers !== null ? `${plan?.name ?? "Your plan"} covers ${covers} spaces and you have ${account.spaceCount}.`
     : account.subscription?.plan?.amount ? `Each space adds ${formatMoney(account.subscription.plan.amount, account.subscription.plan.currency)} ${formatPeriod(account.subscription.plan.interval, account.subscription.plan.intervalCount)}, prorated for this period.`
     : undefined;
@@ -391,6 +420,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
         <a className="site-button site-button-accent" href={`/account/join/${account.matchingTeam.joinCode}`}>Join {account.matchingTeam.name}<span aria-hidden="true">→</span></a>
       </div>}
       <BillingBar account={account} spaces={spaces} plans={plans} />
+      <PreviewBar spaces={spaces} />
 
       {spaces.length || pending.length ? <section aria-label="Spaces" className="spaces-grid">
         <button type="button" className="space-add" onClick={openFresh} disabled={blocked}>
@@ -411,7 +441,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
         <ConstructionDrawing />
         <span className="spaces-empty-copy">
           <strong>Add your first space</strong>
-          <span>Drop capture files or a whole folder anywhere on this page. The title comes from the file names, and an agent turns the files into a space you can share.</span>
+          <span>Drop capture files or a whole folder anywhere on this page. The title comes from the file names, and an agent turns the files into a space you can share.{account.preview?.available ? " Your first one is a free private preview, so you see the result before you pay." : ""}</span>
           <span className="site-button" aria-hidden="true">Add a space</span>
         </span>
       </button>}

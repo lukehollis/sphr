@@ -56,6 +56,8 @@ export function jobDetails(job: Job) {
   const bucket = uploadBucket();
   return {
     id: job.id, status: job.status, sceneId: job.sceneId, slug: `customer-${space.id}`, created: job.created, started: job.started,
+    // Jobs of free previews are listed after the others, so a runner that takes the first one serves paying customers first.
+    preview: job.preview,
     space: { id: space.id, title: space.title, notes: space.notes, output: space.output ?? "auto", reprocessing: Boolean(space.sceneId) },
     uploads: listUploads(space.id).filter(upload => upload.status === "complete").map(upload => ({
       id: upload.id, name: upload.name, size: upload.size, type: upload.type,

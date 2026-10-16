@@ -49,6 +49,8 @@ function store() {
       role TEXT NOT NULL CHECK(role IN ('owner','member')), created TEXT NOT NULL,
       PRIMARY KEY(team_id, user_id));
     CREATE INDEX IF NOT EXISTS team_members_team ON team_members(team_id);
+    CREATE TABLE IF NOT EXISTS preview_grants (user_id TEXT PRIMARY KEY, space_id TEXT UNIQUE, granted TEXT NOT NULL, ready TEXT,
+      max_files INTEGER, max_bytes INTEGER, note TEXT, hosted TEXT);
   `);
   // Databases from before plans were added gain the column; their subscriptions are per space.
   if (!(connection.prepare("PRAGMA table_info(subscriptions)").all() as { name: string }[]).some(column => column.name === "plan")) {
@@ -65,6 +67,10 @@ function store() {
   // When a customer saved a card without hosting anything yet, which is enough to build tours.
   if (!(connection.prepare("PRAGMA table_info(users)").all() as { name: string }[]).some(column => column.name === "card_saved")) {
     connection.exec("ALTER TABLE users ADD COLUMN card_saved TEXT");
+  }
+  // Jobs of free previews wait behind jobs of hosted spaces.
+  if (!(connection.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).some(column => column.name === "preview")) {
+    connection.exec("ALTER TABLE jobs ADD COLUMN preview INTEGER NOT NULL DEFAULT 0");
   }
   prepared = true;
   return connection;
@@ -768,6 +774,7 @@ export function saveSubscription(userId: string, subscription: Subscription) {
       period_end=excluded.period_end, cancel_at_period_end=excluded.cancel_at_period_end, cancel_at=excluded.cancel_at, updated=excluded.updated, plan=excluded.plan`)
       .run(userId, subscription.id, subscription.item, subscription.status, subscription.quantity, subscription.periodEnd,
         Number(subscription.cancelAtPeriodEnd), subscription.cancelAt, now(), subscription.plan ? JSON.stringify(subscription.plan) : null);
+    if (hostingStatuses.has(subscription.status)) markPreviewsHosted(teamUserIds(userId));
     return { saved: true, previous: current };
   });
 }
@@ -832,7 +839,11 @@ export function spaceForScene(sceneId: string) {
 /** A space the customer's plan does not cover; the customer can change plans to add it. */
 export class PlanLimitError extends AccountError {}
 
-export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null) {
+/** The account's free preview is already spent on another space. */
+export class PreviewUsedError extends AccountError {}
+
+/** `preview` spends the account's one free preview on the new space, which then opens for files without payment. */
+export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null, preview = false) {
   return transaction(() => {
     const users = teamUserIds(userId);
     const marks = users.map(() => "?").join(",");
@@ -852,6 +863,8 @@ export function createCustomerSpace(userId: string, title: string, status: "unpa
     const id = randomId(6);
     const stamp = now();
     store().prepare("INSERT INTO customer_spaces(id, user_id, title, status, created, updated) VALUES (?, ?, ?, ?, ?, ?)").run(id, userId, title, status, stamp, stamp);
+    // Thrown inside the transaction, so a lost race leaves no space behind.
+    if (preview && !claimPreview(userId, id)) throw new PreviewUsedError("Your free preview is already used.");
     return readCustomerSpace(id)!;
   });
 }
@@ -873,6 +886,8 @@ export function deleteCustomerSpace(id: string) {
   transaction(() => {
     store().prepare("UPDATE customer_spaces SET status='deleted', updated=? WHERE id=?").run(now(), id);
     store().prepare("UPDATE jobs SET status='canceled', finished=? WHERE space_id=? AND status IN ('queued','running','held')").run(now(), id);
+    // A preview deleted before anything was submitted cost no agent time, so its owner keeps the preview.
+    if (!store().prepare("SELECT 1 FROM jobs WHERE space_id=?").get(id)) store().prepare("UPDATE preview_grants SET space_id=NULL, ready=NULL WHERE space_id=?").run(id);
   });
 }
 
@@ -901,6 +916,66 @@ export function activateUnpaidSpaces(userId: string) {
   store().prepare(`UPDATE customer_spaces SET status='draft', updated=? WHERE user_id IN (${marks}) AND status='unpaid'`).run(now(), ...users);
 }
 
+// ---- Free previews ----
+// Each account sees one capture processed before it pays. The space is an ordinary draft space; the grant
+// marks it, and the space stays private until hosting starts. The grant outlives the space, so deleting and
+// adding again earns no second one. The window starts when the first result is ready and ends `previewDays` later
+// (lib/server/previews.ts). The operator can approve a bigger preview by setting max_files and max_bytes on an
+// account's row, even before it has used its preview (space_id NULL).
+
+export type PreviewGrant = { userId: string; spaceId: string | null; granted: string; ready: string | null; maxFiles: number | null;
+  maxBytes: number | null; note: string | null; hosted: string | null };
+type PreviewRow = { user_id: string; space_id: string | null; granted: string; ready: string | null; max_files: number | null; max_bytes: number | null; note: string | null;
+  hosted: string | null };
+const toPreviewGrant = (row: PreviewRow): PreviewGrant => ({ userId: row.user_id, spaceId: row.space_id, granted: row.granted, ready: row.ready,
+  maxFiles: row.max_files, maxBytes: row.max_bytes, note: row.note, hosted: row.hosted });
+
+/** Hosting has started for these accounts: their previews are ordinary spaces from then on, even if billing ends again later. */
+export function markPreviewsHosted(userIds: string[]) {
+  const marks = userIds.map(() => "?").join(",");
+  store().prepare(`UPDATE preview_grants SET hosted=? WHERE hosted IS NULL AND space_id IS NOT NULL AND user_id IN (${marks})`).run(now(), ...userIds);
+}
+
+/** The account's grant: spent on a space, or approved by the operator and not spent yet. */
+export function readPreviewGrant(userId: string) {
+  const row = store().prepare("SELECT * FROM preview_grants WHERE user_id=?").get(userId) as PreviewRow | undefined;
+  return row ? toPreviewGrant(row) : undefined;
+}
+
+/** The grant spent on this space, if it is a free preview. */
+export function readSpacePreview(spaceId: string) {
+  const row = store().prepare("SELECT * FROM preview_grants WHERE space_id=?").get(spaceId) as PreviewRow | undefined;
+  return row ? toPreviewGrant(row) : undefined;
+}
+
+/** Spends the account's grant on a space; false when it is already spent. */
+function claimPreview(userId: string, spaceId: string) {
+  return store().prepare(`INSERT INTO preview_grants(user_id, space_id, granted) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET space_id=excluded.space_id, granted=excluded.granted WHERE preview_grants.space_id IS NULL`)
+    .run(userId, spaceId, now()).changes === 1;
+}
+
+/** Turns a space that waits for payment into the account's free preview, so files can upload at once. */
+export function convertToPreview(spaceId: string, userId: string) {
+  return transaction(() => {
+    const space = readCustomerSpace(spaceId);
+    if (!space || space.status !== "unpaid") throw new AccountError("This space is not waiting for payment.");
+    if (!claimPreview(userId, space.id)) throw new PreviewUsedError("Your free preview is already used.");
+    store().prepare("UPDATE customer_spaces SET status='draft', updated=? WHERE id=?").run(now(), space.id);
+    return readCustomerSpace(space.id)!;
+  });
+}
+
+/** Previews started since a time, for the day's budget. A preview given back is not counted. */
+export function countPreviewsSince(since: string) {
+  return (store().prepare("SELECT count(*) AS count FROM preview_grants WHERE space_id IS NOT NULL AND granted >= ?").get(since) as { count: number }).count;
+}
+
+/** Agent runs a space has used or is waiting for. Jobs held for an operator are not the customer's. */
+export function previewRuns(spaceId: string) {
+  return (store().prepare("SELECT count(*) AS count FROM jobs WHERE space_id=? AND status IN ('queued','running','done','failed')").get(spaceId) as { count: number }).count;
+}
+
 // ---- Uploads ----
 
 export type UploadStatus = "uploading" | "complete" | "deleted";
@@ -910,10 +985,16 @@ const toUpload = (row: UploadRow): Upload => ({ id: row.id, spaceId: row.space_i
   object: row.object, session: row.session, status: row.status, created: row.created });
 export const maxUploadsPerSpace = 2000;
 
-export function createUploadRecord(spaceId: string, name: string, size: number, type: string, objectFor: (id: string) => string, maxBytes: number) {
+/** A free preview holds fewer files than a hosted space does; hosting lifts the limit. */
+export class PreviewLimitError extends AccountError {}
+
+export function createUploadRecord(spaceId: string, name: string, size: number, type: string, objectFor: (id: string) => string, maxBytes: number,
+  preview?: { files: number; bytes: number }) {
   return transaction(() => {
     const totals = store().prepare("SELECT count(*) AS count, coalesce(sum(size), 0) AS bytes FROM uploads WHERE space_id=? AND status<>'deleted'")
       .get(spaceId) as { count: number; bytes: number };
+    if (preview && totals.count >= preview.files) throw new PreviewLimitError(`A free preview holds up to ${preview.files} files.`);
+    if (preview && totals.bytes + size > preview.bytes) throw new PreviewLimitError(`A free preview holds up to ${formatBytes(preview.bytes)}.`);
     if (totals.count >= maxUploadsPerSpace) throw new AccountError(`A space can hold up to ${maxUploadsPerSpace} files. Combine files into a ZIP archive.`);
     if (totals.bytes + size > maxBytes) throw new AccountError(`Uploads for one space are limited to ${formatBytes(maxBytes)}.`);
     const id = randomId(8);
@@ -947,11 +1028,11 @@ export { formatBytes };
 // "held" jobs wait for an operator; the customer still sees the space as processing.
 export type JobStatus = "queued" | "running" | "held" | "done" | "failed" | "canceled";
 export type Job = { id: string; spaceId: string; sceneId: string; status: JobStatus; attempts: number; worker: string | null; message: string | null;
-  progress: string | null; created: string; started: string | null; finished: string | null };
+  progress: string | null; created: string; started: string | null; finished: string | null; preview: boolean };
 type JobRow = { id: string; space_id: string; scene_id: string; status: JobStatus; attempts: number; worker: string | null; message: string | null;
-  progress: string | null; created: string; started: string | null; finished: string | null };
+  progress: string | null; created: string; started: string | null; finished: string | null; preview: number };
 const toJob = (row: JobRow): Job => ({ id: row.id, spaceId: row.space_id, sceneId: row.scene_id, status: row.status, attempts: row.attempts,
-  worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished });
+  worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished, preview: row.preview === 1 });
 export const maxJobAttempts = 3;
 /** Shown on a space whose job the agent held for an operator, so the customer sees a reason rather than endless processing. */
 export function heldSpaceMessage() {
@@ -993,7 +1074,10 @@ export function submitCustomerSpace(spaceId: string, notes: string | null, outpu
     store().prepare("UPDATE jobs SET status='canceled', message='Replaced by a new submission. ' || COALESCE(message, ''), finished=? WHERE space_id=? AND status='held'")
       .run(now(), spaceId);
     // The scene ID is fixed before processing so a job can only publish its own space.
-    store().prepare("INSERT INTO jobs(id, space_id, scene_id, status, created) VALUES (?, ?, ?, 'queued', ?)").run(id, spaceId, space.sceneId ?? unusedSceneId(), now());
+    // Jobs of free previews wait behind jobs of hosted spaces, so a flood of previews never delays a customer who pays.
+    const preview = Boolean(readSpacePreview(spaceId)) && !hostingActive(space.userId);
+    store().prepare("INSERT INTO jobs(id, space_id, scene_id, status, preview, created) VALUES (?, ?, ?, 'queued', ?, ?)")
+      .run(id, spaceId, space.sceneId ?? unusedSceneId(), Number(preview), now());
     store().prepare("UPDATE customer_spaces SET status='queued', notes=?, output=?, message=NULL, updated=? WHERE id=?")
       .run(notes, output === undefined ? space.output : output, now(), spaceId);
     return readJob(id)!;
@@ -1008,7 +1092,7 @@ export function readJob(id: unknown) {
 
 export function listJobs(statuses: JobStatus[]) {
   const marks = statuses.map(() => "?").join(",");
-  return (store().prepare(`SELECT * FROM jobs WHERE status IN (${marks}) ORDER BY created`).all(...statuses) as JobRow[]).map(toJob);
+  return (store().prepare(`SELECT * FROM jobs WHERE status IN (${marks}) ORDER BY preview, created`).all(...statuses) as JobRow[]).map(toJob);
 }
 
 export function latestJob(spaceId: string) {
@@ -1096,15 +1180,18 @@ export function finishJob(id: string, outcome: { ok: true; message: string | nul
     const space = readCustomerSpace(job.spaceId)!;
     if (space.status === "deleted") {
       store().prepare("UPDATE jobs SET status='canceled', message=?, finished=? WHERE id=?").run(outcome.message, now(), id);
-      return { job: readJob(id)!, space, previousSceneId: null };
+      return { job: readJob(id)!, space, previousSceneId: null, previewStarted: false };
     }
     store().prepare("UPDATE jobs SET status=?, message=?, finished=? WHERE id=?").run(outcome.ok ? "done" : "failed", outcome.message, now(), id);
+    let previewStarted = false;
     if (outcome.ok) {
       store().prepare("UPDATE customer_spaces SET status='ready', scene_id=?, listing=?, message=?, updated=? WHERE id=?")
         .run(job.sceneId, JSON.stringify(outcome.listing), outcome.message, now(), space.id);
+      // A free preview's window starts with its first result, not when it was made or queued.
+      previewStarted = store().prepare("UPDATE preview_grants SET ready=? WHERE space_id=? AND ready IS NULL").run(now(), space.id).changes === 1;
     } else {
       store().prepare("UPDATE customer_spaces SET status='failed', message=?, updated=? WHERE id=?").run(outcome.message, now(), space.id);
     }
-    return { job: readJob(id)!, space: readCustomerSpace(space.id)!, previousSceneId: space.sceneId !== job.sceneId ? space.sceneId : null };
+    return { job: readJob(id)!, space: readCustomerSpace(space.id)!, previousSceneId: space.sceneId !== job.sceneId ? space.sceneId : null, previewStarted };
   });
 }

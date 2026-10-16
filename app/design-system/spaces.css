@@ -4,6 +4,12 @@
  * graph paper behind drawings only.
  */
 
+/* The free preview's result: the space is ready and private, and hosting is one step away. */
+.publish-gate { display: grid; gap: var(--space-2); padding: var(--space-3); border-left: 3px solid var(--accent); }
+.publish-gate h2 { margin: 0; font-size: 20px; line-height: var(--leading-heading); }
+.publish-gate p { max-width: 72ch; margin: 0; }
+.publish-gate .site-hint { color: var(--site-muted); }
+
 /* Page head */
 .spaces-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-2) var(--space-4); flex-wrap: wrap;
   padding-bottom: var(--space-3); margin-bottom: var(--space-4); border-bottom: var(--rule-section); }

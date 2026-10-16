@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   openGraph: { title, description, url: "/learn", images: [{ url: "/learn/builder.webp", width: 1600, height: 1000 }] }
 };
 
-const legal = [{ href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
+const legal = [{ href: "/pricing", label: "Pricing" }, { href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
 const start = "/account/tours/new";
 
 /** Prompts a teacher might start from, each for a kind of space the collection has. */

@@ -719,3 +719,152 @@ test('team accounts: self-serve owner billing, domain-restricted join links, inv
   assert.equal(store.readCustomerSpace(memberSpace.id)?.title, 'Member Space');
 });
 
+
+test('the free preview: one for each account, its limits, a window that starts with the first result, and a queue that serves paid jobs first', async () => {
+  const previews = await import('../lib/server/previews.ts');
+  const emails = await import('../lib/server/emails.ts');
+  const { db } = await import('../lib/server/admin-store.ts');
+  const verified = async name => { const person = await store.createPasswordUser(`${name}@example.com`, 'password one', null); store.markEmailVerified(person.id); return person; };
+  const upload = (space, name, size, limits) => store.createUploadRecord(space.id, name, size, 'image/jpeg', id => id, 1e9, limits);
+  const build = (space, ok = true) => {
+    const job = store.submitCustomerSpace(space.id, null);
+    store.claimJob(job.id, 'worker-a');
+    return { job, done: store.finishJob(job.id, ok ? { ok: true, message: 'Built.', listing: { sceneId: job.sceneId, slug: `customer-${space.id}` } } : { ok: false, message: 'No.' }) };
+  };
+  for (const name of ['SPHR_PREVIEW_DAYS', 'SPHR_PREVIEW_MAX_FILES', 'SPHR_PREVIEW_MAX_GB', 'SPHR_PREVIEW_MAX_RUNS', 'SPHR_PREVIEW_DAILY_LIMIT', 'SPHR_PREVIEW_ADDRESS_LIMIT']) delete process.env[name];
+
+  // The offer is made once, with limits a capture has to fit.
+  const user = await verified('previewer');
+  assert.deepEqual(previews.previewOffer(user.id), { available: true, used: false, days: 7, maxFiles: 100, maxBytes: 5e9 });
+  assert.equal(previews.previewRefusal(user.id), undefined);
+  assert.equal(previews.previewRefusal(user.id, { count: 100, bytes: 5e9 }), undefined, 'a capture right at the limits fits');
+  assert.equal(previews.previewRefusal(user.id, { count: 101, bytes: 10 }), 'large');
+  assert.equal(previews.previewRefusal(user.id, { count: 1, bytes: 36.7e9 }), 'large', 'a very large E57 needs payment or approval');
+
+  // Spending it makes an ordinary draft space that is private to its owner for as long as nothing is paid.
+  const space = store.createCustomerSpace(user.id, 'Porch', 'draft', null, true);
+  assert.equal(space.status, 'draft');
+  assert.deepEqual((({ open, expired, ready, until, runsLeft, files, bytes }) => ({ open, expired, ready, until, runsLeft, files, bytes }))(previews.spacePreview(space)),
+    { open: true, expired: false, ready: null, until: null, runsLeft: 3, files: 100, bytes: 5e9 }, 'the window has not started before a result');
+  assert.equal(previews.previewOpen(space), true);
+  assert.deepEqual([previews.previewOffer(user.id).available, previews.previewOffer(user.id).used, previews.previewRefusal(user.id)], [false, true, 'used']);
+  assert.throws(() => store.createCustomerSpace(user.id, 'Again', 'draft', null, true), store.PreviewUsedError);
+  assert.equal(store.payableSpaceCount(user.id), 1, 'the refused space leaves nothing behind');
+  const plain = store.createCustomerSpace(user.id, 'Plain', 'unpaid');
+  assert.equal(previews.spacePreview(plain), null, 'only the space the preview was spent on is a preview');
+  assert.throws(() => store.convertToPreview(plain.id, user.id), store.PreviewUsedError, 'a used preview cannot be spent again');
+
+  // Files and bytes are limited when each file is registered, so no page or agent can go past them.
+  const limits = { files: 2, bytes: 100 };
+  const first = upload(space, 'a.jpg', 60, limits);
+  assert.throws(() => upload(space, 'b.jpg', 60, limits), store.PreviewLimitError, 'bytes');
+  const second = upload(space, 'b.jpg', 40, limits);
+  assert.throws(() => upload(space, 'c.jpg', 1, limits), error => error instanceof store.PreviewLimitError && /holds up to 2 files/.test(error.message), 'files');
+  assert.doesNotThrow(() => upload(space, 'd.jpg', 1, undefined), 'a hosted space has no such limit');
+  for (const item of store.listUploads(space.id)) store.setUploadStatus(item.id, item.id === first.id || item.id === second.id ? 'complete' : 'deleted');
+
+  // The first result starts the window; a later result does not move it.
+  const { job, done } = build(space);
+  assert.equal(job.preview, true, 'its job is marked as a preview');
+  assert.equal(done.previewStarted, true);
+  const open = previews.spacePreview(done.space);
+  assert.equal(open.open, true);
+  assert.equal(open.daysLeft, 7);
+  assert.equal(Math.round((Date.parse(open.until) - Date.parse(open.ready)) / 864e5), 7, 'seven days from the first result');
+  assert.equal(open.runsLeft, 2);
+  const again = build(done.space);
+  assert.equal(again.done.previewStarted, false);
+  assert.equal(previews.spacePreview(again.done.space).ready, open.ready, 'processing again does not extend the window');
+  // Held jobs are not the customer's runs; failed ones are.
+  const held = store.submitCustomerSpace(space.id, null);
+  store.claimJob(held.id, 'worker-a');
+  store.holdJob(held.id, 'Unfamiliar format.');
+  assert.equal(previews.spacePreview(store.readCustomerSpace(space.id)).runsLeft, 1, 'a held job does not cost a run');
+  const last = build(store.readCustomerSpace(space.id), false);
+  assert.equal(previews.spacePreview(last.done.space).runsLeft, 0, 'the third run is the last');
+
+  // After its window the space is offline until hosting starts, which makes it an ordinary space again.
+  db().prepare('UPDATE preview_grants SET ready=? WHERE user_id=?').run(new Date(Date.now() - 8 * 864e5).toISOString(), user.id);
+  const ended = previews.spacePreview(store.readCustomerSpace(space.id));
+  assert.deepEqual([ended.open, ended.expired, ended.daysLeft], [false, true, null]);
+  assert.equal(previews.previewOpen(store.readCustomerSpace(space.id)), false);
+  const subscription = { id: 'sub_preview', item: 'si_preview', status: 'active', quantity: 1, periodEnd: null, cancelAtPeriodEnd: false, cancelAt: null, plan: null };
+  store.saveSubscription(user.id, subscription);
+  assert.equal(previews.spacePreview(store.readCustomerSpace(space.id)), null, 'hosting turns it into an ordinary space');
+  assert.equal(previews.previewOffer(user.id).available, false);
+  // For good: when billing ends the space goes offline like any other, and its old window does not reopen.
+  db().prepare('UPDATE preview_grants SET ready=? WHERE user_id=?').run(new Date().toISOString(), user.id);
+  store.saveSubscription(user.id, { ...subscription, status: 'canceled' });
+  assert.equal(previews.spacePreview(store.readCustomerSpace(space.id)), null, 'a lapsed subscription does not make the space a preview again');
+  assert.equal(previews.previewOpen(store.readCustomerSpace(space.id)), false);
+
+  // A preview deleted before anything was submitted cost nothing, so it is given back; after a submission it is not.
+  const kept = await verified('refund');
+  const mistake = store.createCustomerSpace(kept.id, 'Mistake', 'draft', null, true);
+  store.deleteCustomerSpace(mistake.id);
+  assert.equal(previews.previewOffer(kept.id).available, true, 'deleting an unused preview gives it back');
+  const used = store.createCustomerSpace(kept.id, 'Used', 'draft', null, true);
+  store.setUploadStatus(upload(used, 'x.jpg', 10, { files: 5, bytes: 1000 }).id, 'complete');
+  store.submitCustomerSpace(used.id, null);
+  store.deleteCustomerSpace(used.id);
+  assert.equal(previews.previewOffer(kept.id).used, true, 'a preview that was submitted stays spent');
+
+  // The site-wide budget for a day counts previews in use, and a preview given back frees its place.
+  process.env.SPHR_PREVIEW_DAILY_LIMIT = String(store.countPreviewsSince(new Date(Date.now() - 864e5).toISOString()) + 1);
+  const early = await verified('early');
+  const late = await verified('late');
+  assert.equal(previews.previewRefusal(early.id), undefined);
+  const budgeted = store.createCustomerSpace(early.id, 'Early', 'draft', null, true);
+  assert.equal(previews.previewRefusal(late.id), 'busy', 'the day is full');
+  store.deleteCustomerSpace(budgeted.id);
+  assert.equal(previews.previewRefusal(late.id), undefined, 'an unused preview given back frees its place');
+  delete process.env.SPHR_PREVIEW_DAILY_LIMIT;
+
+  // A space that waits for payment becomes the preview while it is unused.
+  const waiting = await verified('waiting');
+  const parked = store.createCustomerSpace(waiting.id, 'Parked', 'unpaid');
+  const converted = store.convertToPreview(parked.id, waiting.id);
+  assert.equal(converted.status, 'draft');
+  assert.equal(previews.spacePreview(converted).open, true);
+  assert.throws(() => store.convertToPreview(parked.id, waiting.id), /not waiting for payment/);
+
+  // The operator approves a bigger preview with the statement in docs/accounts.md, before or after the space is made.
+  const big = await verified('big');
+  const statement = `INSERT INTO preview_grants(user_id, granted, max_files, max_bytes, note)
+    SELECT id, datetime('now'), 500, 60000000000, 'approved for the 36 GB E57' FROM users WHERE email = 'big@example.com'
+    ON CONFLICT(user_id) DO UPDATE SET max_files = excluded.max_files, max_bytes = excluded.max_bytes, note = excluded.note;`;
+  db().exec(statement);
+  assert.deepEqual([previews.previewOffer(big.id).available, previews.previewOffer(big.id).maxFiles, previews.previewOffer(big.id).maxBytes], [true, 500, 60e9], 'an unspent approval is still on offer');
+  assert.equal(previews.previewRefusal(big.id, { count: 400, bytes: 36.7e9 }), undefined);
+  assert.equal(previews.previewRefusal(big.id, { count: 400, bytes: 61e9 }), 'large');
+  const bigSpace = store.createCustomerSpace(big.id, 'Big E57', 'draft', null, true);
+  assert.equal(previews.spacePreview(bigSpace).bytes, 60e9, 'the approved limits carry over to the space');
+  assert.equal(store.readPreviewGrant(big.id).note, 'approved for the 36 GB E57');
+
+  // Jobs of previews wait behind jobs of hosted spaces, however old they are.
+  const queued = store.listJobs(['queued']);
+  assert.ok(queued.length === 0 || queued.every(item => !item.preview), 'earlier jobs are all finished or held');
+  const slow = await verified('slow');
+  const slowSpace = store.createCustomerSpace(slow.id, 'Slow', 'draft', null, true);
+  store.setUploadStatus(upload(slowSpace, 'slow.jpg', 10, { files: 5, bytes: 1000 }).id, 'complete');
+  const previewJob = store.submitCustomerSpace(slowSpace.id, null);
+  const payer = await verified('payer');
+  store.saveSubscription(payer.id, { id: 'sub_payer', item: 'si_payer', status: 'active', quantity: 1, periodEnd: null, cancelAtPeriodEnd: false, cancelAt: null, plan: null });
+  const paidSpace = store.createCustomerSpace(payer.id, 'Paid', 'draft');
+  store.setUploadStatus(upload(paidSpace, 'paid.jpg', 10, undefined).id, 'complete');
+  const paidJob = store.submitCustomerSpace(paidSpace.id, null);
+  assert.equal(paidJob.preview, false);
+  assert.deepEqual(store.listJobs(['queued']).map(item => item.id), [paidJob.id, previewJob.id], 'paid first although the preview waited longer');
+
+  // What the ready email says about a preview, and what it leaves alone.
+  const origin = 'https://app.example';
+  const ready = emails.spaceReadyEmail('Spaces', origin, { id: 'abcdef123456', title: 'Porch' }, { path: '/s/0123456789ab/porch', public: false },
+    { until: '2026-10-23T09:00:00.000Z', price: '$2 a month for each space' });
+  assert.equal(ready.subject, 'Porch is ready');
+  assert.match(ready.text, /Your preview is ready/);
+  assert.match(ready.text, /free preview, so only you can open it, until October 23/);
+  assert.match(ready.text, /Hosting is \$2 a month for each space, and you can cancel any time/);
+  assert.match(ready.text, /Publish it or keep it hosted\nhttps:\/\/app\.example\/account\/spaces\/abcdef123456/);
+  assert.doesNotMatch(ready.text, /It is private for now/, 'a preview has its own wording');
+  assert.match(emails.spaceReadyEmail('Spaces', origin, { id: 'abcdef123456', title: 'Porch' }, { path: '/s/0123456789ab/porch' }).text, /private for now/, 'a hosted space keeps its wording');
+});

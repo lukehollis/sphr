@@ -200,6 +200,8 @@ export function smtpSink() {
   const server = createTcpServer(socket => {
     let buffer = '', data = false, message = '';
     socket.setEncoding('utf8');
+    // A client that hangs up in the middle of a reply is not a failure of the test.
+    socket.on('error', () => {});
     socket.write('220 localhost ESMTP\r\n');
     socket.on('data', chunk => {
       buffer += chunk;

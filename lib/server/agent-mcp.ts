@@ -58,7 +58,9 @@ async function call(context: McpContext, handler: (request: Request, extra: neve
     if (context.sessionId) saveMcpSecret(context.sessionId, {});
     throw new Problem(`This agent is no longer linked to the account. Call link_account to link it again.`, 401);
   }
-  if (!response.ok) throw new Problem(String(data.error ?? `The request failed with HTTP ${response.status}.`), response.status, data);
+  // Something a free preview does not cover: the person starts hosting on the plan page, or the agent offers Checkout (set_visibility does).
+  const gate = typeof data.gate === "string" && typeof data.plan === "string" ? ` The person starts hosting at ${publicOrigin(context.request)}${data.plan}.` : "";
+  if (!response.ok) throw new Problem(`${String(data.error ?? `The request failed with HTTP ${response.status}.`)}${gate}`, response.status, data);
   return data as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
@@ -69,13 +71,21 @@ const statusText: Record<string, string> = { unpaid: "waiting for payment", draf
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function describeSpace(context: McpContext, space: any) {
   const parts = [`${JSON.stringify(space.title)} (space_id ${space.id}) is ${statusText[space.status] ?? space.status}`];
-  if (space.status === "ready" && space.scene) parts.push(`at ${publicOrigin(context.request)}${space.scene.path}, ${space.scene.public ? "public" : "private (only the owner can open it)"}`);
+  const preview = space.preview && !space.hosted ? space.preview : undefined;
+  const until = preview?.until ? new Date(preview.until).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : "";
+  if (space.status === "ready" && space.scene) {
+    parts.push(`at ${publicOrigin(context.request)}${space.scene.path}, ${preview?.open ? `a free private preview that only the owner can open${until ? ` until ${until}` : ""}`
+      : preview?.expired ? "offline because its free preview ended"
+      : space.scene.public ? "public" : "private (only the owner can open it)"}`);
+  }
   if (space.job?.progress && ["queued", "processing"].includes(space.status)) parts.push(`latest step ${JSON.stringify(space.job.progress)}`);
   if (space.message && ["failed", "ready"].includes(space.status)) parts.push(`message ${JSON.stringify(space.message)}`);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const uploads = (space.uploads as any[]).filter(upload => upload.status !== "deleted");
   if (uploads.length) parts.push(`${uploads.filter(upload => upload.status === "complete").length} of ${uploads.length} files uploaded`);
   let line = `${parts.join(", ")}.`;
+  if (preview?.open && space.status === "ready") line += " To make it public, or keep it past the preview, the person starts hosting: call set_visibility with public true for a Stripe Checkout link.";
+  if (preview?.expired) line += ` The person starts hosting at ${spacePage(context, space.id)} to bring it back.`;
   if (["draft", "failed"].includes(space.status)) line += ` The person can drop files at ${spacePage(context, space.id)}.`;
   if (["queued", "processing"].includes(space.status)) line += ` ${siteBrand()} emails the account when it is ready.`;
   return line;
@@ -132,7 +142,9 @@ async function listPlans(_args: Record<string, unknown>, context: McpContext) {
   if (!account.billing) return "Hosting on this site needs no payment.";
   const current = account.subscription && ["active", "trialing", "past_due"].includes(account.subscription.status) ? account.subscription : undefined;
   return [current ? `The account already pays for hosting (${current.plan?.spaces ? `a plan for up to ${current.plan.spaces} spaces` : "pay as you go"}, ${account.spaceCount} spaces), so new spaces need no checkout.`
-    : "The account does not pay for hosting yet. The first space needs a Stripe Checkout for one of these, pay as you go unless the person picks a plan.",
+    : account.preview?.available
+      ? `The account does not pay for hosting yet. Its first space is a free private preview (up to ${account.preview.maxFiles} files and ${formatBytes(account.preview.maxBytes)}, kept ${account.preview.days} days once ready), so nothing is paid before the files upload. Hosting, one of these, publishes it or keeps it, and needs a Stripe Checkout.`
+      : "The account does not pay for hosting yet. The next space needs a Stripe Checkout for one of these, pay as you go unless the person picks a plan.",
   ...plans.map(describePlan), "Plans can be changed later on the plan page of the account."].join("\n");
 }
 
@@ -156,10 +168,12 @@ async function createSpace(args: Record<string, unknown>, context: McpContext) {
   let checkout = created.checkout as string | undefined;
   if (chosen && checkout && created.plan !== chosen) checkout = (await call(context, checkoutRoute as never, "/api/account/billing/checkout", { method: "POST", body: { plan: chosen } })).url;
   const lines = [`Created the space ${JSON.stringify(space.title)} (space_id ${space.id}).`];
-  if (checkout) lines.push(`Hosting needs payment before files can upload. Give the person this Stripe Checkout link ${checkout} and ask them to pay there (never ask for card details), then call wait_for_payment.`);
+  if (created.preview) lines.push(`It is the account's free private preview, so no payment is needed to upload and process it. Upload files you hold with upload_files (a preview holds up to ${space.preview?.files ?? "a limited number of"} files and ${space.preview ? formatBytes(space.preview.bytes) : "a few gigabytes"}), or give the person ${spacePage(context, space.id)} to drop files from their own device. Once it is ready it stays private for ${space.preview?.until ? "a few days" : "a short while"}; to publish it or keep it hosted, the person pays then.`);
+  else if (checkout && created.previewNote) lines.push(`${created.previewNote} Give the person this Stripe Checkout link ${checkout} and ask them to pay there (never ask for card details), then call wait_for_payment.`);
+  else if (checkout) lines.push(`Hosting needs payment before files can upload. Give the person this Stripe Checkout link ${checkout} and ask them to pay there (never ask for card details), then call wait_for_payment.`);
   else if (created.portal) lines.push(`Billing needs attention first. Give the person this link ${created.portal}, then call wait_for_payment.`);
   else if (space.status === "unpaid") lines.push(`${created.error ?? "Payment could not start."} Call wait_for_payment, which tries again.`);
-  else lines.push(`It is ready for files. Upload files you hold with upload_files, or give the person ${spacePage(context, space.id)} to drop files from their own device.`);
+  else if (!created.preview) lines.push(`It is ready for files. Upload files you hold with upload_files, or give the person ${spacePage(context, space.id)} to drop files from their own device.`);
   return lines.join(" ");
 }
 
@@ -169,6 +183,7 @@ async function waitForPayment(args: Record<string, unknown>, context: McpContext
   let nudged = false;
   for (;;) {
     const { space } = await call(context, readSpaceRoute as never, `/api/account/spaces/${id}`, { id });
+    if (space.status === "ready" && space.hosted) return `Payment received. The space is hosted now, so call set_visibility with public true when the person wants it public.`;
     if (space.status !== "unpaid" && space.hosted) return `Payment received. The space is ready for files. Upload files you hold with upload_files, or give the person ${spacePage(context, id)} to drop files from their own device.`;
     if (!nudged && Date.now() > deadline - paymentWait / 2) {
       nudged = true;
@@ -234,8 +249,16 @@ async function spaceStatus(args: Record<string, unknown>, context: McpContext) {
 
 async function setVisibility(args: Record<string, unknown>, context: McpContext) {
   const id = String(args.space_id ?? "");
-  const { space } = await call(context, editSpaceRoute as never, `/api/account/spaces/${id}`, { method: "PATCH", id, body: { public: Boolean(args.public) } });
-  return describeSpace(context, space);
+  let edited;
+  try { edited = await call(context, editSpaceRoute as never, `/api/account/spaces/${id}`, { method: "PATCH", id, body: { public: Boolean(args.public) } }); }
+  catch (error) {
+    // A free preview is private to its owner. Publishing it takes hosting, which starts in Stripe Checkout.
+    if (!(error instanceof Problem) || (error.data?.gate !== "publish" && error.data?.gate !== "ended")) throw error;
+    const next = await call(context, checkoutRoute as never, "/api/account/billing/checkout", { method: "POST", body: { space: id } });
+    if (next.paid) return "Hosting is already paid for. Call set_visibility again.";
+    throw new Problem(`${String(error.data?.error ?? "A free preview stays private.")} Give the person this Stripe Checkout link ${next.url} and ask them to pay there (never ask for card details), then call wait_for_payment with this space_id and call set_visibility again.`);
+  }
+  return describeSpace(context, edited.space);
 }
 
 // ---- Tours and scavenger hunts -------------------------------------------------------------
@@ -343,13 +366,13 @@ export const hostedTools: Tool[] = [
   { name: "link_account", run: linkAccount,
     description: "Links this agent to the person's account. Returns a link where the person signs in and approves a short code; call again once they have. Never ask for a password.",
     inputSchema: { type: "object", properties: { link_code: { type: "string", description: "Only for connections without a session, the link_code from the previous call." } } } },
-  { name: "list_plans", run: listPlans, description: "The ways to pay for hosting, with prices, and the account's current plan. Show them to the person before the first space.",
+  { name: "list_plans", run: listPlans, description: "The ways to pay for hosting, with prices, and the account's current plan. The first space is a free private preview, so show them when the person wants to publish it or keep it.",
     inputSchema: { type: "object", properties: {} } },
   { name: "create_space", run: createSpace,
-    description: "Creates a space for one capture. When the account does not pay for hosting yet, it returns a Stripe Checkout link for the plan the person chose (pay as you go when none is given) for them to pay; then call wait_for_payment. Never ask for card details.",
+    description: "Creates a space for one capture. An account that does not pay for hosting yet gets its first space as a free private preview: upload and process it with no payment. After that, it returns a Stripe Checkout link for the plan the person chose (pay as you go when none is given) for them to pay; then call wait_for_payment. Never ask for card details.",
     inputSchema: { type: "object", properties: { title: { type: "string", description: "Title of the space, 1 to 200 characters." },
       plan: { type: "string", description: "Optional plan name or ID from list_plans." } }, required: ["title"] } },
-  { name: "wait_for_payment", run: waitForPayment, description: "Waits up to 25 seconds for the person to finish paying in Stripe Checkout. Call it again to keep waiting.",
+  { name: "wait_for_payment", run: waitForPayment, description: "Waits up to 25 seconds for the person to finish paying in Stripe Checkout, whether for a space's first payment or to publish a free preview. Call it again to keep waiting.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema }, required: ["space_id"] } },
   { name: "upload_files", run: uploadFiles,
     description: "Starts resumable uploads for capture files you hold (for example photos or video the person shared with you) and returns where to PUT each file's bytes. For files on the person's own device, give them the space's page to drop the files instead.",
@@ -362,7 +385,7 @@ export const hostedTools: Tool[] = [
       submit: { type: "boolean", description: "Defaults to true." } }, required: ["space_id"] } },
   { name: "space_status", run: spaceStatus, description: "Status of one space, or every space on the account with its link when ready.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema } } },
-  { name: "set_visibility", run: setVisibility, description: "Makes a ready space public (anyone with the link) or private (only the owner). Ask the person first.",
+  { name: "set_visibility", run: setVisibility, description: "Makes a ready space public (anyone with the link) or private (only the owner). Ask the person first. A free preview cannot be public until hosting starts, so it returns a Stripe Checkout link for the person to pay.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema, public: { type: "boolean" } }, required: ["space_id", "public"] } },
   { name: "unlink_account", run: unlinkAccount, description: "Unlinks this agent from the account.", inputSchema: { type: "object", properties: {} } },
   { name: "find_tour_spaces", run: findTourSpaces,
@@ -392,7 +415,7 @@ export function hostedInstructions() {
   const local = process.env.SPHR_AGENT_CONNECTOR_URL?.trim();
   return `${brand} hosts 3D captures (laser scans and E57 files, Matterport exports, Gaussian splats, 360 photos and video, meshes, photo sets) as virtual spaces with guided tours that are shared with a link.
 
-This connector runs on the ${brand} server, so it cannot read files on the person's computer. Link the account with link_account (the person approves a code in their browser), show the plans before the first space, create one space per capture and send the person the Stripe Checkout link it returns, then wait_for_payment. Upload files you hold yourself with upload_files and finish_upload. For files on the person's own computer or phone, give them the space's page, where they drop the files and processing starts on its own.${local ? ` If you can run commands on the person's computer, the local connector uploads big files for them (${local}).` : ""} ${brand} emails the person when the space is ready. Never ask for passwords or card details.
+This connector runs on the ${brand} server, so it cannot read files on the person's computer. Link the account with link_account (the person approves a code in their browser) and create one space per capture. The account's first space is a free private preview, so upload and process it with no payment; when the result is ready, show the person, and offer hosting (list_plans) to publish it with a public link and embed or to keep it past the preview. A later space, or a preview that is used up, returns a Stripe Checkout link for the person to pay, then wait_for_payment. Upload files you hold yourself with upload_files and finish_upload. For files on the person's own computer or phone, give them the space's page, where they drop the files and processing starts on its own.${local ? ` If you can run commands on the person's computer, the local connector uploads big files for them (${local}).` : ""} ${brand} emails the person when the space is ready. Never ask for passwords or card details.
 
 Tours and scavenger hunts are built on a space (the person's own or one of ${brand}'s public spaces) and get their own link: find_tour_spaces, create_tour, then draft_tour with what the person wants in plain words and wait_for_tour; ${brand}'s tour agent sees the space, writes stops, places library models, effects, sound, looks (line drawing, blueprint, film noir and more, with transitions) and skies (a sunset, a storm, the Milky Way behind the space) and saves. Refine with get_tour and save_tour, find models with search_models, and share_tour when the person wants a link.`;
 }

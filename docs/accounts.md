@@ -11,16 +11,18 @@ The flow for a customer:
    Email accounts confirm their address before adding spaces.
 2. Add a space. *Add a space* (or files dragged anywhere onto *Your spaces*) opens a
    full-screen sheet that takes files or whole folders. The space is created at once, titled
-   from the file or folder names (the customer can change the title then or later). The
-   first space starts hosting: the sheet shows the ways to pay with pay as you go chosen
-   (a price per space each month) beside any plans that cover a set number of spaces for one
-   price, payment opens in a new tab for the chosen one, and the dropped files start
-   uploading in the first tab as soon as it goes through. On pay as you go, later spaces
-   join the same subscription, prorated on the next invoice. On a plan, spaces are added
-   until the plan is full; the sheet then keeps the files while the customer moves to a
-   plan with room. Prices appear in the sheet, on the plan page (`/account/plan`) and, for
-   subscribers, above their spaces. Sign-in, sign-up and an account without spaces leave
-   them out, because many visitors sign in only to open a space. When `SPHR_SOURCE_URL`
+   from the file or folder names (the customer can change the title then or later). An
+   account's first space is its **free private preview** (see below): its files upload and
+   are processed with nothing to pay, and payment comes when the result is ready, to publish
+   it or keep it. Any other space starts hosting first: the sheet shows the ways to pay with
+   pay as you go chosen (a price per space each month) beside any plans that cover a set
+   number of spaces for one price, payment opens in a new tab for the chosen one, and the
+   dropped files start uploading in the first tab as soon as it goes through. On pay as you
+   go, later spaces join the same subscription, prorated on the next invoice. On a plan,
+   spaces are added until the plan is full; the sheet then keeps the files while the customer
+   moves to a plan with room. Prices appear in the sheet, on the plan page (`/account/plan`)
+   and, for subscribers, above their spaces. Sign-in, sign-up and an account without spaces
+   leave them out, because many visitors sign in only to open a space. When `SPHR_SOURCE_URL`
    is set, the plan choice notes that the service is open source and links to its code, and
    when `SPHR_SALES_EMAIL` (or else `SPHR_CONTACT_EMAIL`) is set it offers larger customers an enterprise plan by email.
 3. Capture files of any kind upload from the sheet: Matterport or other E57 exports, Gaussian
@@ -35,8 +37,52 @@ The flow for a customer:
    latest step as it works. The customer is emailed when processing starts, when the space is
    published (with its preview image) and when it cannot be finished (including a job whose
    worker went quiet on its last attempt, which is worded as our failure, not the files'), and can then preview
-   it, make it public, and edit its title, start view and thumbnail. If the upload cannot
-   become a space, the page says what to upload instead.
+   it, make it public, and edit its title, start view and thumbnail (a free preview waits for hosting before it
+   can be made public). If the upload cannot become a space, the page says what to upload instead.
+
+## The free preview
+
+Payment used to come before any result, and the people who stopped at that screen never saw what the
+service does. Now an account's first space is a free private preview (`lib/server/previews.ts`, with the grants
+in `preview_grants` in the state database):
+
+- **What it is.** A signed-in customer with a confirmed email uploads one capture and has it processed with
+  nothing to pay. The space is an ordinary space whose grant marks it. Only its owner (and team, and the
+  operator) can open it: it cannot be public, embedded, built on by others or listed on a profile, because those
+  need hosting. Tours and scavenger hunts stay free, but on the customer's own space they start once it is hosted,
+  as before; the operator's public spaces are open to builders as always.
+- **The window.** It starts when the first result is ready, not when the space is made or queued, and lasts
+  `SPHR_PREVIEW_DAYS` (7). Then the space goes offline, with a notice on its page and the dashboard. Starting hosting
+  at any time, before or after, makes it a normal hosted space with the same link and ID, counted like any other
+  space in the subscription. Payment from a preview's page returns to that page (`/account/spaces/<id>`), where the
+  result screen shows the date, the price from Stripe and one button that opens Checkout. The ready email, the dashboard
+  and the plan page (`/account/plan?space=<id>`) say the same.
+- **Limits**, because each run costs agent time. One preview for each account, for good: deleting and adding
+  again does not earn another, but a preview deleted before anything was submitted costs nothing and is given back.
+  Up to `SPHR_PREVIEW_MAX_FILES` (100) files and `SPHR_PREVIEW_MAX_GB` (5) gigabytes in the space, enforced when each
+  file is registered, so a page or an agent cannot get past them; and `SPHR_PREVIEW_MAX_RUNS` (3) agent runs, held
+  jobs not counted. New previews are limited to `SPHR_PREVIEW_DAILY_LIMIT` (10) across the site in any 24 hours and
+  `SPHR_PREVIEW_ADDRESS_LIMIT` (5) from one network address. A capture over the limits, a used preview or a spent
+  budget falls back to the old way (the space waits for payment, with the reason shown), and a space waiting for
+  payment can be turned into the preview from its page while the preview is still unused. Jobs of previews run
+  after jobs of hosted spaces (`jobs.preview`), so a flood of previews never delays a customer who pays.
+- **Manual approval.** A bigger capture, such as a very large E57, needs payment or the operator's approval.
+  Approve it by raising the account's limits on its grant, before or after the account makes the space:
+
+  ```sh
+  sudo -u sphr sqlite3 /var/lib/sphr/admin.sqlite "INSERT INTO preview_grants(user_id, granted, max_files, max_bytes, note)
+    SELECT id, datetime('now'), 500, 60000000000, 'approved for the 36 GB E57' FROM users WHERE email = 'person@example.com'
+    ON CONFLICT(user_id) DO UPDATE SET max_files = excluded.max_files, max_bytes = excluded.max_bytes, note = excluded.note;"
+  ```
+
+  A row with no space (`space_id` NULL) is an unspent preview with those limits. Give a preview back the same way
+  (`UPDATE preview_grants SET space_id = NULL, ready = NULL WHERE user_id = …`), or extend a window by moving `ready`
+  later.
+- **Measuring it.** The server records `preview_started`, `preview_declined` (with the reason), `preview_ready`,
+  `publish_gate_hit` (someone tried to make a preview public), `publish_paid` (a subscription started for an
+  account that had a preview) and `space_published`; pages send `publish_gate_shown` and `preview_opened`. The
+  analytics report (`/admin/analytics`) has the funnel in that order and a table of where people who started a
+  preview stopped.
 
 Account emails (address confirmation, password resets, sign-in changes, the processing
 notices above, and billing notices when a payment fails, a cancellation is scheduled or hosting
@@ -232,6 +278,14 @@ SPHR_STRIPE_PRICE_ID=price_...                # pay as you go, per space
 SPHR_STRIPE_PLAN_PRICES=price_...,price_...   # optional plans covering a set number of spaces
 SPHR_STRIPE_WEBHOOK_SECRET=whsec_...
 # SPHR_STRIPE_AUTOMATIC_TAX=1                 # after enabling Stripe Tax
+
+# The free preview (the values shown are the defaults). Without billing there is no preview: spaces are free.
+# SPHR_PREVIEW_DAYS=7
+# SPHR_PREVIEW_MAX_FILES=100
+# SPHR_PREVIEW_MAX_GB=5
+# SPHR_PREVIEW_MAX_RUNS=3
+# SPHR_PREVIEW_DAILY_LIMIT=10
+# SPHR_PREVIEW_ADDRESS_LIMIT=5
 
 # Uploads. Without a bucket, files are kept under SPHR_STATE_DIR/uploads.
 SPHR_UPLOAD_BUCKET=example-customer-uploads
@@ -510,7 +564,7 @@ npm run build
 verification, the queue and billing (pay as you go, plans and plan changes) against a local
 stand-in for the Stripe API. `test:accounts-routes` starts a development server with local
 stand-ins for Stripe, the three identity providers and an SMTP server, then exercises
-sign-up, verification, every sign-in method, Checkout on each plan and webhooks, full plans
+sign-up, verification, every sign-in method, the free preview and its limits, Checkout on each plan and webhooks, full plans
 and plan changes, pausing and resuming hosting, resumable
 uploads, customer isolation, private viewing and editing, and the agent runner. Run it
 in a checkout without local capture packages, because it installs a test package into

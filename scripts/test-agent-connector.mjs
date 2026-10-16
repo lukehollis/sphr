@@ -236,28 +236,18 @@ try {
   assert.equal((await agentFetch('/api/account/billing/portal', { method: 'POST', body: '{}' })).status, 401, 'billing management stays in the browser');
   assert.equal((await agentFetch('/api/account/spaces/000000000000', { method: 'DELETE', body: '{}' })).status, 401, 'deleting spaces stays in the browser');
 
-  // ---- Plans, a space, and payment in the browser ----
+  // ---- Plans, and a first space that is a free private preview: nothing to pay before the files ----
   result = await connector.call('list_plans');
   assert.match(result.text, /does not pay for hosting yet/);
+  assert.match(result.text, /first space is a free private preview \(up to 100 files and 5\.0 GB, kept 7 days once ready\)/);
   assert.match(result.text, /Pay as you go, \$1\.00 a month for each space/);
   result = await connector.call('create_space', { title: 'Riverside studio', plan: 'Starter' });
   assert.ok(!result.error, result.text);
   const spaceId = result.text.match(/space_id ([a-f0-9]{12})/)[1];
-  assert.match(result.text, /Stripe Checkout/);
-  const sessions = [...stripeFake.state.sessions.values()];
-  const session = sessions.at(-1);
-  assert.equal(session.price, 'price_starter', 'the plan the person chose');
-  assert.equal(session.success_url, `${base}/account?checkout={CHECKOUT_SESSION_ID}&agent=1`, 'Checkout returns to a page that points back to the agent');
-  result = await connector.call('upload_files', { space_id: spaceId, paths: [path.join(captures, 'Riverside studio')] });
-  assert.ok(result.error && /waiting for payment/.test(result.text), 'uploads wait for payment');
-  const waiting = connector.call('wait_for_payment', { space_id: spaceId });
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  const subscription = stripeFake.state.pay(session.id);
-  assert.equal((await webhook({ id: 'evt_agent_paid', type: 'checkout.session.completed', data: { object: { id: session.id } } })).status, 200);
-  result = await waiting;
-  assert.match(result.text, /Payment received/);
-  assert.ok((await (await alice.get(`/account?checkout=${session.id}&agent=1`)).text()).includes('Your agent can upload the files now'));
-  assert.ok(subscription);
+  assert.match(result.text, /free private preview, so no payment is needed to upload and process it/);
+  assert.doesNotMatch(result.text, /Checkout|wait_for_payment/);
+  assert.match(result.text, /Call upload_files next/);
+  assert.equal(stripeFake.state.sessions.size, 0, 'no Checkout was prepared');
 
   // ---- Background upload, resumed and submitted ----
   result = await connector.call('upload_files', { space_id: spaceId, paths: [path.join(captures, 'Riverside studio')], notes: 'Ground floor studio, start at the lobby.' });
@@ -285,6 +275,33 @@ try {
   assert.ok(result.error && /not ready/.test(result.text));
   result = await connector.call('upload_files', { space_id: spaceId, paths: [path.join(captures, 'Riverside studio')] });
   assert.ok(result.error && /being processed/.test(result.text));
+
+  // ---- The result is private; publishing it takes hosting, and set_visibility opens payment ----
+  // The processing agent is not part of this test, so the space is made ready by hand.
+  const admin = new DatabaseSync(path.join(state, 'admin.sqlite'));
+  admin.prepare("UPDATE customer_spaces SET status='ready', scene_id='f0f0f0f0f0f0' WHERE id=?").run(spaceId);
+  admin.prepare('UPDATE preview_grants SET ready=? WHERE space_id=?').run(new Date().toISOString(), spaceId);
+  result = await connector.call('space_status', { space_id: spaceId });
+  assert.match(result.text, /To make it public, or keep it past the preview, the person starts hosting: call set_visibility with public true to open Stripe Checkout/);
+  result = await connector.call('set_visibility', { space_id: spaceId, public: true });
+  assert.ok(result.error, 'a free preview cannot be public');
+  assert.match(result.text, /A free preview stays private/);
+  assert.match(result.text, /Stripe Checkout/);
+  const publishSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(publishSession.quantity, 1);
+  assert.equal(publishSession.success_url, `${base}/account?checkout={CHECKOUT_SESSION_ID}&agent=1`, 'an agent that started payment gets a page that points back to it');
+  assert.equal(admin.prepare('SELECT count(*) AS n FROM visibility WHERE scene=? AND public=1').get('f0f0f0f0f0f0').n, 0);
+  const waiting = connector.call('wait_for_payment', { space_id: spaceId });
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const subscription = stripeFake.state.pay(publishSession.id);
+  assert.equal((await webhook({ id: 'evt_agent_paid', type: 'checkout.session.completed', data: { object: { id: publishSession.id } } })).status, 200);
+  result = await waiting;
+  assert.match(result.text, /Payment received\. The space "Riverside studio" is hosted now, so call set_visibility with public true/);
+  assert.ok((await (await alice.get(`/account?checkout=${publishSession.id}&agent=1`)).text()).includes('Go back to your agent and it can make the space public'), 'the return page says what is left');
+  result = await connector.call('set_visibility', { space_id: spaceId, public: true });
+  assert.ok(!result.error, result.text);
+  assert.equal(admin.prepare('SELECT public FROM visibility WHERE scene=?').get('f0f0f0f0f0f0').public, 1, 'hosted, it is public now');
+  assert.ok(subscription);
 
   // ---- A tour of one of the operator's public spaces, with a model made in Blender ----
   const court = path.join(root, 'public/datasets/legacy/temple-court');
@@ -479,16 +496,34 @@ try {
   result = await tool('link_account', {}, museSession);
   assert.match(result.text, /Linked to the SPHR account bob@example.com/);
   assert.ok(!/sphr_/.test(result.text), 'a session never shows the token');
-  assert.match((await tool('list_plans', {}, museSession)).text, /Starter, \$8\.00 a month for up to 6 spaces/);
+  result = await tool('list_plans', {}, museSession);
+  assert.match(result.text, /Starter, \$8\.00 a month for up to 6 spaces/);
+  assert.match(result.text, /first space is a free private preview/);
   result = await tool('create_space', { title: 'Harbor walk' }, museSession);
   const harbor = result.text.match(/space_id ([a-f0-9]{12})/)[1];
+  assert.match(result.text, /free private preview, so no payment is needed to upload and process it/);
+  assert.doesNotMatch(result.text, /checkout\.example/, 'no payment link for the preview');
+  assert.match((await tool('list_plans', {}, museSession)).text, /The next space needs a Stripe Checkout/, 'with the preview spent, the next space needs payment');
+  assert.match((await tool('space_status', { space_id: harbor }, museSession)).text, new RegExp(`drop files at ${base}/account/spaces/${harbor}`));
+  // A used-up preview is publishing in waiting: this one is a ready preview, and set_visibility hands out the Checkout link.
+  const bobAdmin = new DatabaseSync(path.join(state, 'admin.sqlite'));
+  bobAdmin.prepare("UPDATE customer_spaces SET status='ready', scene_id='f1f1f1f1f1f1' WHERE id=?").run(harbor);
+  bobAdmin.prepare('UPDATE preview_grants SET ready=? WHERE space_id=?').run(new Date().toISOString(), harbor);
+  result = await tool('set_visibility', { space_id: harbor, public: true }, museSession);
+  assert.ok(result.error);
+  assert.match(result.text, /A free preview stays private\. .*Stripe Checkout link https:\/\/checkout\.example\/\S+ and ask them to pay there \(never ask for card details\), then call wait_for_payment/);
+  bobAdmin.prepare("UPDATE customer_spaces SET status='draft', scene_id=NULL WHERE id=?").run(harbor);
+  // The second space starts with payment, as before: the preview is spent.
+  result = await tool('create_space', { title: 'Second harbor' }, museSession);
+  const secondHarbor = result.text.match(/space_id ([a-f0-9]{12})/)[1];
   const checkoutLink = result.text.match(/https:\/\/checkout\.example\/\S+/)[0];
   assert.ok(checkoutLink);
+  assert.match(result.text, /Your free preview is already used, so this space starts with payment\. Give the person this Stripe Checkout link/);
   const bobSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(bobSession.quantity, 2, 'both spaces are covered');
   stripeFake.state.pay(bobSession.id);
   await webhook({ id: 'evt_bob_paid', type: 'checkout.session.completed', data: { object: { id: bobSession.id } } });
-  assert.match((await tool('wait_for_payment', { space_id: harbor }, museSession)).text, /Payment received/);
-  assert.match((await tool('space_status', { space_id: harbor }, museSession)).text, new RegExp(`drop files at ${base}/account/spaces/${harbor}`));
+  assert.match((await tool('wait_for_payment', { space_id: secondHarbor }, museSession)).text, /Payment received/);
   // Tours from the cloud: the same tools, with models by address.
   assert.equal((await tool('find_tour_spaces', { query: 'court' }, museSession)).text,
     '0b0b0b0b0b02: Garden court (SPHR space, a Gaussian splat)\n0b0b0b0b0b01: Temple court (SPHR space, 360 photos, 1 places to stand)', 'spaces say what kind of capture they are');

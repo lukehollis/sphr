@@ -14,15 +14,17 @@ uploads files straight from this computer, resumes after interruptions and keeps
    instead of searching their disk. One capture is one space.
 2. `link_account` when not linked. A browser page opens where the person approves a short code.
    Never ask for a password.
-3. Before the first space, `list_plans` and let the person choose. Pay as you go is the default.
-4. `create_space` with the suggested title. If hosting needs payment, Stripe Checkout opens in the
-   browser for the person to pay. Never ask for card details. Then `wait_for_payment`.
+3. `create_space` with the suggested title. The account's first space is a free private preview: no
+   payment comes before the files upload, and the result stays private for a few days. A later space, or
+   a used-up preview, opens Stripe Checkout in the browser for the person to pay (`list_plans` shows
+   the prices). Never ask for card details. Then `wait_for_payment`.
 5. `upload_files` with every file of the capture in one call, with `notes` when the person says what the
    capture is or how the tour should go. It returns at once and submits the space when the upload ends.
    Captures become a 3DGS (3D Gaussian splat) by default, and E57 scans a 360 panorama tour; pass
    `output: "tour"` or `output: "splat"` only when the person asks for the other one.
 6. Tell the person roughly how long the upload will take (`space_status`) and that {{name}} emails them
-   when the space is ready. Spaces start private; `set_visibility` only when they ask to share.
+   when the space is ready. Spaces start private; `set_visibility` only when they ask to share. A free
+   preview cannot go public until hosting starts, so `set_visibility` opens Stripe Checkout for them to pay.
 
 ## Tours and scavenger hunts
 

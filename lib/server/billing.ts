@@ -1,6 +1,6 @@
 import Stripe from "stripe";
-import { AccountError, activateUnpaidSpaces, billableSpaceCount, billingUserId, cancellationDate, cancellationScheduled, hostingStatuses, payableSpaceCount,
-  readStoredSubscription, readSubscription, readUser, saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity,
+import { AccountError, activateUnpaidSpaces, billableSpaceCount, billingUserId, cancellationDate, cancellationScheduled, hostingStatuses, listCustomerSpaces, payableSpaceCount,
+  readSpacePreview, readStoredSubscription, readSubscription, readUser, saveSubscription, setCardSaved, setCheckoutSession, setStripeCustomer, setSubscriptionQuantity,
   userIdForCustomer, userTeam, type Subscription, type SubscriptionPlan, type User } from "./accounts-store";
 import { serialized } from "./serialize";
 import { describePrice, notifyTeam } from "./team-notify";
@@ -121,8 +121,10 @@ function assertBillingManager(userId: string) {
  * reused, a paid one is applied, and a customer whose subscription still exists in Stripe
  * is sent to the billing portal instead, so a customer is never subscribed twice. Without
  * a plan named, an open session keeps its plan while that plan still covers every space.
+ * `space` is the space whose page the customer paid from (a free preview they are publishing): Checkout then
+ * returns there, unless an agent started it and is waiting on the dashboard message.
  */
-export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string): Promise<CheckoutStart> {
+export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string, space?: string): Promise<CheckoutStart> {
   assertBillingManager(user.id);
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
@@ -169,7 +171,10 @@ export async function startCheckout(user: User, origin: string, planId?: unknown
       plan = await resolvePlan(undefined);
     }
     const quantity = plan.spaces === null ? count : 1;
-    if (open?.url && openLine?.quantity === quantity && openLine.price?.id === plan.id) return { url: open.url, plan: plan.id };
+    const returnTo = space && !fromAgent ? `${origin}/account/spaces/${space}` : undefined;
+    const successUrl = back || (returnTo ? `${returnTo}?checkout={CHECKOUT_SESSION_ID}` : `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`);
+    // An open session is only reused when it returns to the same page.
+    if (open?.url && openLine?.quantity === quantity && openLine.price?.id === plan.id && open.success_url === successUrl) return { url: open.url, plan: plan.id };
     if (open) await stripe().checkout.sessions.expire(open.id);
     const existing = (await stripe().subscriptions.list({ customer, status: "all", limit: 20 })).data.filter(item => liveStatuses.has(item.status));
     if (existing.length) {
@@ -181,8 +186,8 @@ export async function startCheckout(user: User, origin: string, planId?: unknown
       line_items: [{ price: plan.id, quantity }],
       subscription_data: { metadata: { sphr_user: user.id } },
       // An agent is waiting to upload; the page tells the customer to go back to it.
-      success_url: back || `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`,
-      cancel_url: `${origin}/account`,
+      success_url: successUrl,
+      cancel_url: returnTo ?? `${origin}/account`,
       ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
     });
     setCheckoutSession(current.id, session.id);
@@ -303,6 +308,13 @@ async function announceBillingChange(userId: string, previous: Subscription | un
   const fields: [string, string | number | null][] = [["Account", email], ["Plan", price], ["Status", next.status]];
   if (!wasHosting && hosting) {
     saveEvent("subscription_started", { userId, props: { plan: next.plan?.price ?? "", amount: next.plan?.amount ?? 0, spaces: next.quantity } });
+    // A customer who paid after seeing a free preview: the step this change exists to measure.
+    const previews = listCustomerSpaces(userId).filter(space => readSpacePreview(space.id));
+    if (previews.length) {
+      const ready = previews.map(space => readSpacePreview(space.id)!.ready).filter((value): value is string => Boolean(value)).sort()[0];
+      saveEvent("publish_paid", { userId, props: { plan: next.plan?.price ?? "", amount: next.plan?.amount ?? 0, ready: Boolean(ready),
+        ...(ready ? { days: Math.max(0, Math.floor((Date.now() - Date.parse(ready)) / 86400000)) } : {}) } });
+    }
     return notifyTeam({ title: "New subscription", tone: "money", fields: [...fields, ["Spaces billed", next.plan?.spaces ? null : next.quantity]] });
   }
   if (!previous || previous.id !== next.id) return;

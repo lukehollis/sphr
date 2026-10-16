@@ -5,6 +5,6 @@ export function operator() {
   return {
     name: process.env.SPHR_OPERATOR_NAME?.trim() || "the operator of this site",
     contact: contactEmail() ?? null,
-    updated: process.env.SPHR_POLICIES_UPDATED?.trim() || "2026-09-22"
+    updated: process.env.SPHR_POLICIES_UPDATED?.trim() || "2026-10-16"
   };
 }

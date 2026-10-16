@@ -1,5 +1,6 @@
 import { analyticsStore } from "./analytics-store";
 import { hostingStatuses } from "./accounts-store";
+import { previewDays } from "./previews";
 import { formatBytes } from "../bytes";
 
 // The operator's view of the analytics: the steps from a first visit to a live space, where
@@ -19,10 +20,24 @@ const steps: { key: string; label: string; test: (event: Event) => boolean }[] =
   { key: "opened", label: "Opened the upload sheet", test: event => event.name === "upload_opened" },
   { key: "files", label: "Chose files", test: event => event.name === "files_chosen" },
   { key: "space", label: "Created a space", test: event => event.name === "space_created" },
+  { key: "uploaded", label: "Uploaded files", test: event => event.name === "space_submitted" },
+  { key: "live", label: "Space was ready (a free preview, or paid)", test: event => event.name === "space_ready" },
+  { key: "gate", label: "Saw the publish prompt", test: event => event.name === "publish_gate_shown" },
   { key: "payment", label: "Opened payment", test: event => event.name === "checkout_opened" },
   { key: "paid", label: "Paid", test: event => event.name === "subscription_started" },
-  { key: "uploaded", label: "Uploaded files", test: event => event.name === "space_submitted" },
-  { key: "live", label: "Space went live", test: event => event.name === "space_ready" }
+  { key: "published", label: "Made a space public", test: event => event.name === "space_published" }
+];
+// The free preview, for the people who started one: where each one stopped. Steps can be skipped, as in the funnel above.
+const previewSteps: { label: string; test: (event: Event) => boolean }[] = [
+  { label: "Started a free preview", test: event => event.name === "preview_started" },
+  { label: "Uploaded its files", test: event => event.name === "space_submitted" },
+  { label: "Preview was ready", test: event => event.name === "preview_ready" },
+  { label: "Opened the private preview", test: event => event.name === "preview_opened" },
+  { label: "Saw the publish prompt", test: event => event.name === "publish_gate_shown" },
+  { label: "Tried to make it public", test: event => event.name === "publish_gate_hit" },
+  { label: "Opened payment", test: event => event.name === "checkout_opened" },
+  { label: "Paid", test: event => event.name === "publish_paid" },
+  { label: "Made it public", test: event => event.name === "space_published" }
 ];
 // The upload sheet's phases, as the place someone left it.
 const phases: Record<string, string> = { empty: "before choosing files", creating: "while the space was being made", payment: "at the payment step",
@@ -54,17 +69,23 @@ function describe(event: Event) {
       : `${key} ${value}`).join(", ");
 }
 
-function accountStage(row: { email_verified: number; statuses: string | null; sub: string | null }) {
+function accountStage(row: { email_verified: number; statuses: string | null; sub: string | null; preview_space: string | null; preview_ready: string | null }) {
   const statuses = (row.statuses ?? "").split(",").filter(Boolean);
   const live = statuses.filter(status => status !== "deleted");
   if (!row.email_verified) return "Email not confirmed";
   if (!statuses.length) return "No space yet";
   if (!live.length) return "Deleted their space";
-  if (live.includes("ready")) return "Live";
+  const hosting = Boolean(row.sub && hostingStatuses.has(row.sub));
+  // A free preview that nobody has paid for yet: open until its window ends.
+  const previewing = Boolean(row.preview_space) && !hosting;
+  if (live.includes("ready")) {
+    if (!previewing) return "Live";
+    return row.preview_ready && Date.parse(row.preview_ready) + previewDays() * 86400000 <= Date.now() ? "Preview ended, not paid" : "Preview ready, not paid";
+  }
   if (live.some(status => status === "queued" || status === "processing")) return "Processing";
   if (live.includes("failed")) return "Needs attention";
-  if (live.includes("unpaid") && !(row.sub && hostingStatuses.has(row.sub))) return "Stopped at payment";
-  return "Paid, no files yet";
+  if (live.includes("unpaid") && !hosting) return "Stopped at payment";
+  return previewing ? "Preview started, no files yet" : "Paid, no files yet";
 }
 
 export function analyticsReport(days: number) {
@@ -100,6 +121,10 @@ export function analyticsReport(days: number) {
 
   const reached = steps.map(step => new Set(events.filter(step.test).map(event => event.person)));
   const funnel = steps.map((step, index) => ({ key: step.key, label: step.label, total: reached[index].size }));
+  const at = (key: string) => reached[steps.findIndex(step => step.key === key)];
+  // Of the people who started a free preview, how many reached each later step.
+  const started = new Set(events.filter(event => event.name === "preview_started").map(event => event.person));
+  const previews = previewSteps.map(step => ({ label: step.label, total: new Set(events.filter(step.test).map(event => event.person).filter(person => started.has(person))).size }));
 
   const everyone = [...new Set(events.map(event => event.person))];
   const sources = new Map<string, { source: string; medium: string; people: number; signups: number; spaces: number; paid: number }>();
@@ -108,9 +133,9 @@ export function analyticsReport(days: number) {
     const key = visitor?.source ?? "Unknown";
     const entry = sources.get(key) ?? { source: key, medium: visitor?.medium ?? "", people: 0, signups: 0, spaces: 0, paid: 0 };
     entry.people++;
-    if (reached[2].has(person)) entry.signups++;
-    if (reached[6].has(person)) entry.spaces++;
-    if (reached[8].has(person)) entry.paid++;
+    if (at("signup").has(person)) entry.signups++;
+    if (at("space").has(person)) entry.spaces++;
+    if (at("paid").has(person)) entry.paid++;
     sources.set(key, entry);
   }
 
@@ -140,20 +165,26 @@ export function analyticsReport(days: number) {
 
   const lastSeen = new Map<string, string>();
   for (const event of events) if (event.person.startsWith("u:")) lastSeen.set(event.person.slice(2), event.at);
+  // The grants table appears with the first account request after the release that added it.
+  const hasGrants = hasAccounts && Boolean(connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preview_grants'").get());
   const accounts = hasAccounts ? (connection.prepare(`SELECT u.id, u.email, u.email_verified, u.created, u.password IS NOT NULL AS password,
       (SELECT group_concat(provider) FROM identities i WHERE i.user_id=u.id) AS providers,
       (SELECT status FROM subscriptions s WHERE s.user_id=u.id) AS sub,
-      (SELECT group_concat(status) FROM customer_spaces c WHERE c.user_id=u.id) AS statuses
+      (SELECT group_concat(status) FROM customer_spaces c WHERE c.user_id=u.id) AS statuses,
+      ${hasGrants ? "(SELECT space_id FROM preview_grants g WHERE g.user_id=u.id)" : "NULL"} AS preview_space,
+      ${hasGrants ? "(SELECT ready FROM preview_grants g WHERE g.user_id=u.id)" : "NULL"} AS preview_ready
     FROM users u ORDER BY u.created DESC LIMIT 200`).all() as { id: string; email: string; email_verified: number; created: string; password: number;
-      providers: string | null; sub: string | null; statuses: string | null }[])
+      providers: string | null; sub: string | null; statuses: string | null; preview_space: string | null; preview_ready: string | null }[])
     .filter(row => !internalUsers.has(row.id))
     .map(row => ({ email: row.email, created: row.created, method: row.providers ?? (row.password ? "email" : "unknown"),
       source: sourceOf(`u:${row.id}`), stage: accountStage(row), lastSeen: lastSeen.get(row.id) ?? null })) : [];
 
   return {
     days, since,
-    totals: { people: everyone.length, views: views.length, signups: reached[2].size, paid: reached[8].size },
+    totals: { people: everyone.length, views: views.length, signups: at("signup").size, paid: at("paid").size },
     funnel,
+    previews,
+    declined: count(events.filter(event => event.name === "preview_declined"), event => String(event.data.reason ?? "unknown")),
     sources: [...sources.values()].sort((a, b) => b.people - a.people),
     referrers: people(views, event => event.data.ref ? String(event.data.ref) : undefined, event => event.person),
     landings: people(events, event => firstVisitor.get(event.person)?.landing, event => event.person),

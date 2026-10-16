@@ -13,8 +13,11 @@ import type { SpaceView } from "@/lib/server/customer-spaces";
 
 /*
  * Adding a space: a full-screen sheet that takes dropped files or folders. The space is
- * created at once with a title taken from the file names. When hosting has not started
- * yet, the sheet shows the plans with pay as you go chosen and payment opens in a new
+ * created at once with a title taken from the file names. An account's first space is a
+ * free private preview, so its files upload and are processed before any payment, and
+ * payment publishes it or keeps it (the space's page asks once the result is ready). When
+ * the free preview is not on offer for the capture (used, too large, or the day's budget
+ * gone), the sheet shows the plans with pay as you go chosen and payment opens in a new
  * tab. When the customer's plan is full, the files wait while they change plans. The
  * files upload while this page stays open, even after the sheet is closed, and
  * processing starts on its own shortly after the upload.
@@ -40,6 +43,10 @@ export type Batch = {
   autoStart: boolean;
   /** What the customer chose to build; unset leaves it to the default for the files. */
   output?: Output;
+  /** The space is the account's free preview: no payment comes before the files. */
+  preview?: boolean;
+  /** Why the free preview was not given, when payment comes first for this capture. */
+  note?: string;
 };
 
 export type Output = "splat" | "tour";
@@ -96,8 +103,9 @@ export function useUploadBatches(onChange: () => void) {
       running.current.set(key, (running.current.get(key) ?? 0) + 1);
       void uploadFile(spaceId, next.file, update => patchTransfer(key, transferKey, update))
         .catch(failure => {
-          track("upload_error", { step: "upload", message: (failure as Error).message });
-          patchTransfer(key, transferKey, { state: "failed", error: (failure as Error).message });
+          const { message, data } = failure as Error & { data?: { gate?: string; plan?: string } };
+          track("upload_error", { step: "upload", message });
+          patchTransfer(key, transferKey, { state: "failed", error: message, gate: data?.gate ? data.plan : undefined });
         })
         .finally(() => {
           running.current.set(key, (running.current.get(key) ?? 1) - 1);
@@ -133,20 +141,27 @@ export function useUploadBatches(onChange: () => void) {
     setTimeout(() => pump(key), 0);
   }, [patch, pump]);
 
-  /** Creates the space, then pays (if needed) and uploads. A full plan holds the files until the plan changes. */
-  const create = useCallback(async (key: string, title: string) => {
+  /**
+   * Creates the space, then pays (if needed) and uploads. A full plan holds the files until the plan changes.
+   * `files` is what is about to upload, so the server can say whether the free preview fits it.
+   */
+  const create = useCallback(async (key: string, title: string, files?: { count: number; bytes: number }) => {
     patch(key, { phase: "creating", error: undefined });
     try {
-      const result = await accountRequest("/api/account/spaces", { title });
+      const result = await accountRequest("/api/account/spaces", { title, ...(files ? { files } : {}) });
       spaceOf.current.set(key, result.space.id);
       patch(key, { spaceId: result.space.id });
       change.current();
       const checkout = result.checkout ?? result.portal;
       if (result.space.status === "unpaid") {
-        // An open payment keeps the plan chosen for it.
-        patch(key, { phase: "payment", checkoutUrl: checkout, plan: result.plan ?? null, error: result.error });
+        // An open payment keeps the plan chosen for it. A capture the free preview did not take says why.
+        patch(key, { phase: "payment", checkoutUrl: checkout, plan: result.plan ?? null, error: result.error,
+          note: result.previewDeclined === "large" || result.previewDeclined === "busy" ? result.previewNote : undefined });
         remember(result.space.id);
-      } else begin(key);
+      } else {
+        patch(key, { preview: Boolean(result.preview) });
+        begin(key);
+      }
     } catch (failure) {
       const { message, data } = failure as Error & { data?: { planFull?: boolean } };
       track(data?.planFull ? "plan_full" : "upload_error", { step: "create", message });
@@ -160,7 +175,7 @@ export function useUploadBatches(onChange: () => void) {
     const title = titleFromFiles(files);
     setBatches(items => [...items, { key, title, phase: "creating", transfers: [], autoStart: true }]);
     enqueue(key, files);
-    await create(key, title);
+    await create(key, title, { count: files.length, bytes: files.reduce((total, item) => total + item.file.size, 0) });
     return key;
   }, [create, enqueue]);
 
@@ -191,7 +206,7 @@ export function useUploadBatches(onChange: () => void) {
       await accountRequest("/api/account/billing/plan", { plan });
       change.current();
       patch(key, { preparing: false });
-      await create(key, batch.title);
+      await create(key, batch.title, { count: batch.transfers.length, bytes: batch.transfers.reduce((total, item) => total + item.size, 0) });
     } catch (failure) {
       patch(key, { preparing: false, error: (failure as Error).message });
     }
@@ -602,6 +617,8 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
 }) {
   const count = batch.transfers.length;
   const files = `${count} ${count === 1 ? "file" : "files"}`;
+  // A failure a free preview cannot get past: hosting lifts it.
+  const gate = batch.transfers.find(entry => entry.state === "failed" && entry.gate)?.gate;
   if (batch.phase === "creating") return <div className="upload-status"><h3>Setting up the space</h3><p>{files}, {formatBytes(total)}</p></div>;
 
   if (batch.phase === "payment") {
@@ -612,6 +629,7 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
       <h3>{batch.checkoutOpened ? "Waiting for payment" : "Start hosting"}</h3>
       {plan && <p>{plan.spaces === null ? `You're on pay as you go, so each space you upload adds ${price}.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}`
         : `${plan.name} covers up to ${plan.spaces} spaces for ${price}.`}</p>}
+      {batch.note && <p className="site-note" role="status">{batch.note}</p>}
       {plans.length > 1 && <PlanPicker plans={plans} selected={plan?.id ?? null} needed={billing?.spaces || 1} name={`plan-${batch.key}`}
         label="How you pay" disabled={batch.preparing} onSelect={id => void uploads.choosePlan(batch.key, id)} />}
       {billing && <EnterpriseNote email={billing.salesEmail} />}
@@ -639,7 +657,8 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
     <Meter value={total ? sent / total * 100 : 0} label="Upload progress" />
     <OutputChoice batch={batch} uploads={uploads} />
     {failed ? <div className="site-actions">
-      <button type="button" className="site-button" onClick={() => uploads.retry(batch.key)}>Try again</button>
+      {gate ? <a className="site-button site-button-accent" href={gate}>Start hosting<span aria-hidden="true">→</span></a>
+        : <button type="button" className="site-button" onClick={() => uploads.retry(batch.key)}>Try again</button>}
       {done > 0 && <button type="button" className="site-link" onClick={() => uploads.skipFailed(batch.key)}>Leave {failed === 1 ? "it" : "them"} out</button>}
     </div> : <p className="site-hint">You can close this sheet. Uploads keep going while this page stays open.</p>}
   </div>;
@@ -660,7 +679,8 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
 
   if (batch.phase === "processing") return <div className="upload-status upload-status-done">
     <h3>Processing started</h3>
-    <p>An agent is turning your files into a space. We will email you when it is ready, so you can close this sheet.</p>
+    <p>{batch.preview ? "An agent is turning your files into a space. It stays private to you, and we will email you when it is ready to open. Then you can start hosting to publish it, so you can close this sheet."
+      : "An agent is turning your files into a space. We will email you when it is ready, so you can close this sheet."}</p>
     <div className="site-actions">
       <button type="button" className="site-button" onClick={() => { uploads.dismiss(batch.key); onClose(); }}>Done</button>
       {!existing && batch.spaceId && <a className="site-link" href={`/account/spaces/${batch.spaceId}`}>Open the space page</a>}

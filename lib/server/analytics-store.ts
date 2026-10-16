@@ -17,7 +17,9 @@ export const keepDays = 400;
 // Steps only the server can vouch for; pages cannot send them.
 export const serverEvents = new Set(["sign_up", "login", "login_failed", "logout", "verify_sent", "email_verified", "password_reset",
   "space_created", "checkout_started", "checkout_failed", "subscription_started", "subscription_ended", "space_submitted", "space_ready", "space_failed",
-  "space_deleted", "agent_linked", "followed", "tour_hearted", "card_saved"]);
+  "space_deleted", "agent_linked", "followed", "tour_hearted", "card_saved",
+  // The free preview: started (or refused, with the reason), ready to open, publishing refused until hosting, paid after seeing one, made public.
+  "preview_started", "preview_declined", "preview_ready", "publish_gate_hit", "publish_paid", "space_published"]);
 let prepared = false;
 
 export function analyticsEnabled() {

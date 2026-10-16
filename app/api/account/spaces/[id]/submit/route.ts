@@ -2,6 +2,7 @@ import { AccountError, cleanText, listUploads, parseSpaceOutput, readCustomerSpa
 import { allowAttempt } from "@/lib/server/admin-store";
 import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted } from "@/lib/server/accounts";
 import { describeSpace } from "@/lib/server/customer-spaces";
+import { previewGateBody, previewMaxRuns, spacePreview } from "@/lib/server/previews";
 import { announceJob } from "@/lib/server/job-signal";
 import { filesReceivedEmail } from "@/lib/server/emails";
 import { contactEmail, siteBrand } from "@/lib/server/brand";
@@ -15,7 +16,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const space = readCustomerSpace((await params).id);
   if (!space || !sameTeam(space.userId, user.id) || space.status === "deleted") return accountResponse({ error: "Space not found." }, 404);
   if (space.status === "unpaid") return accountResponse({ error: "Complete payment before submitting." }, 402);
-  if (!spaceHosted(space)) return accountResponse({ error: "Update your billing details to continue." }, 402);
+  // A free preview is processed a few times at most, and only while its window is open.
+  const preview = spaceHosted(space) ? null : spacePreview(space);
+  if (!spaceHosted(space) && !preview) return accountResponse({ error: "Update your billing details to continue." }, 402);
+  if (preview?.expired) return accountResponse(previewGateBody(space, "ended"), 402);
+  if (preview && preview.runsLeft < 1) return accountResponse(previewGateBody(space, "limit", `A free preview is processed ${previewMaxRuns()} times at most.`), 402);
   // Each submission runs an agent; the limits survive deleting and recreating spaces.
   if (!allowAttempt([[attemptKey("submit", user.id), 20], [attemptKey("submit-space", space.id), 5]], 24 * 60 * 60 * 1000)) {
     const contact = contactEmail();

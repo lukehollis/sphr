@@ -60,7 +60,7 @@ export default function PlanPicker({ plans, selected, onSelect, needed, current,
             {current === plan.id ? <em>Your plan</em> : !fits && <em>Too small</em>}</span>
           <span className="plan-option-price"><b>{formatMoney(plan.amount, plan.currency)}</b>
             <span>{formatPeriod(plan.interval, plan.intervalCount)}{plan.spaces === null ? " for each space" : ""}</span></span>
-          <span className="plan-option-detail">{plan.spaces === null ? "Charged as you upload" : `Up to ${plan.spaces} spaces`}</span>
+          <span className="plan-option-detail">{plan.spaces === null ? "Charged for each space you host" : `Up to ${plan.spaces} spaces`}</span>
         </label>;
       })}
     </div>

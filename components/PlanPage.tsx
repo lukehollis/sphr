@@ -14,6 +14,8 @@ function formatDate(seconds: number) {
   return new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
+const previewDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+
 const price = (plan: Plan) => `${formatMoney(plan.amount, plan.currency)} ${formatPeriod(plan.interval, plan.intervalCount)}`;
 const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.name;
 
@@ -23,9 +25,11 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
  * (`build`), for the agent's drafts, it comes before any space: pay as you go only saves a card then.
  * From a tour's class results (`results`), it also comes before any space; the page offers only
  * the plans that show every player (pay as you go bills nothing until there is a space, so it can't).
+ * From a space's page (`forSpace`), it publishes a free preview or keeps it: Checkout returns to that space.
  */
-export default function PlanPage({ account: initial, plans, brand, build, results }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
-  /** The customer's tour whose class results they came to see in full. */ results?: string }) {
+export default function PlanPage({ account: initial, plans, brand, build, results, forSpace }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
+  /** The customer's tour whose class results they came to see in full. */ results?: string;
+  /** The space being published or kept after its free preview. */ forSpace?: { id: string; title: string; until: string | null; expired: boolean } }) {
   const [account, setAccount] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -44,7 +48,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
     try { await work(); } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
   }
   const pay = () => run(async () => {
-    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...results ? { results } : build ? { build } : {} });
+    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...results ? { results } : build ? { build } : forSpace ? { space: forSpace.id } : {} });
     // Without a link, a payment made earlier was just applied.
     window.location.assign(result.url ?? "/account");
   });
@@ -76,8 +80,11 @@ export default function PlanPage({ account: initial, plans, brand, build, result
       : `You're on ${current.name} at ${price(current)}, which covers up to ${current.spaces} spaces. You have ${spaces}.`;
   } else if (active) lead = "Your plan is not offered any more. You can keep it or choose another below.";
   else if (paused) lead = "Hosting is paused until a payment goes through. Update your payment method to change plans.";
-  else {
-    lead = perSpace ? `You're on pay as you go, so each space you upload adds ${price(perSpace)}.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}`
+  else if (forSpace) {
+    lead = forSpace.expired ? `${forSpace.title} is offline because its free preview ended. Start hosting to bring it back, with the same link.`
+      : `Start hosting to make ${forSpace.title} public with a link you can share and an embed, or to keep it after its free preview${forSpace.until ? ` ends on ${previewDate(forSpace.until)}` : ""}.${perSpace ? ` Pay as you go is ${price(perSpace)} for each space.` : ""}`;
+  } else {
+    lead = perSpace ? `Pay as you go is ${price(perSpace)} for each space you host.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}${account.preview?.available ? " Your first capture is a free private preview, so you pay when you publish it or keep it." : ""}`
       : "Plans could not be loaded. Try again in a moment.";
   }
   return <div className="site"><div className="site-frame">
@@ -114,7 +121,9 @@ export default function PlanPage({ account: initial, plans, brand, build, result
           : saveCard ? "Your card is saved on a secure page and nothing is charged today. Then you go straight to building."
           : building && forResults ? "You pay on a secure checkout page and can cancel any time. Then you're back at your class results."
           : building ? "You pay on a secure checkout page and can cancel any time. Then you go straight to building."
+          : forSpace ? "You pay on a secure checkout page, can cancel any time, and come back to your space afterwards."
           : spaces > 0 ? "You pay on a secure checkout page and can cancel any time."
+          : account.preview?.available ? "Nothing to pay yet. Your first capture is a free private preview, and you pay when you publish it or keep it."
           : "You pay once you add your first space."}</p>
         <EnterpriseNote email={account.salesEmail} />
         <OpenSourceNote brand={brand} sourceUrl={account.sourceUrl} />

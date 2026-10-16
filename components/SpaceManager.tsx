@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { accountRequest } from "./AccountAuth";
+import { googleEvent, track } from "./Analytics";
 import { accountNav, legalLinks, spaceStatus } from "./AccountDashboard";
 import SiteHeader from "./site/SiteHeader";
 import { SectionHeader, SiteFooter, StatusMark } from "./site/Chrome";
 import UploadModal, { batchActive, useUploadBatches } from "./UploadModal";
 import { getJson } from "./uploads";
 import { formatBytes } from "@/lib/bytes";
+import { formatMoney, formatPeriod } from "@/lib/price";
+import type { Plan } from "@/lib/server/billing";
 import type { AccountView, SpaceView } from "@/lib/server/customer-spaces";
 
 const describe: Record<string, string> = {
@@ -19,15 +22,59 @@ const describe: Record<string, string> = {
   failed: "Processing could not finish. Add or replace files, then submit again."
 };
 
-export default function SpaceManager({ space: initial, account, brand }: { space: SpaceView; account: AccountView; brand: string }) {
+/** A date without a time zone surprise: the preview's last day, as the server sees it. */
+export const previewDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : "";
+const days = (count: number) => `${count} ${count === 1 ? "day" : "days"}`;
+
+/**
+ * The result screen of a free preview: the space is ready and private, and hosting publishes it or keeps it.
+ * One button opens Checkout on pay as you go and returns here; the plans are one link away.
+ */
+export function PublishGate({ space, plans, surface = "space" }: { space: SpaceView; plans: Plan[]; surface?: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const preview = space.preview!;
+  const perSpace = plans.find(plan => plan.spaces === null);
+  const price = perSpace && `${formatMoney(perSpace.amount, perSpace.currency)} ${formatPeriod(perSpace.interval, perSpace.intervalCount)}`;
+  useEffect(() => { track("publish_gate_shown", { surface, left: preview.daysLeft ?? 0 }); }, [surface, preview.daysLeft]);
+  async function host() {
+    setBusy(true); setError("");
+    track("checkout_opened", { plan: perSpace?.id ?? "", from: "preview" });
+    try {
+      const result = await accountRequest("/api/account/billing/checkout", { space: space.id, ...(perSpace ? { plan: perSpace.id } : {}) });
+      // Without a link, a payment made earlier was just applied.
+      window.location.assign(result.url ?? `/account/spaces/${space.id}`);
+    } catch (failure) { setError((failure as Error).message); setBusy(false); }
+  }
+  return <section className="site-callout publish-gate" aria-labelledby="publish-gate-title">
+    <h2 id="publish-gate-title">Your preview is ready</h2>
+    <p>Only you can open it, until {previewDate(preview.until)} ({days(preview.daysLeft ?? 0)} left). Start hosting to make it public with a link you can share and an embed
+      for your own site, or to keep it after that date. Hosting also lets you build tours and scavenger hunts on it. It is the same space and the same link either way.</p>
+    {error && <p className="site-alert" role="alert">{error}</p>}
+    <div className="site-actions">
+      <button type="button" className="site-button site-button-accent" disabled={busy} onClick={() => void host()}>
+        {busy ? "Opening payment…" : price ? `Host it for ${price}` : "Start hosting"}<span aria-hidden="true">→</span></button>
+      <a className="site-link" href={`/account/plan?space=${space.id}`}>See all plans</a>
+    </div>
+    {price && <p className="site-hint">Pay as you go is billed for each space and you can cancel any time. You pay on Stripe's secure checkout page and come back here.</p>}
+  </section>;
+}
+
+export default function SpaceManager({ space: initial, account, brand, plans = [], notice, fromCheckout = false }: { space: SpaceView; account: AccountView; brand: string; plans?: Plan[];
+  notice?: string; fromCheckout?: boolean }) {
   const [space, setSpace] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(notice ?? "");
   const [modal, setModal] = useState(false);
   const [batchKey, setBatchKey] = useState<string | null>(null);
   const notes = useRef<HTMLTextAreaElement>(null);
-  const editable = ["draft", "failed", "ready"].includes(space.status) && space.hosted;
+  // A free preview is private to its owner, and usable until its window ends.
+  const preview = space.hosted ? null : space.preview;
+  const previewing = Boolean(preview?.open);
+  const lapsed = Boolean(preview?.expired);
+  const usable = space.hosted || previewing;
+  const editable = ["draft", "failed", "ready"].includes(space.status) && usable;
   const complete = space.uploads.filter(upload => upload.status === "complete");
 
   const refresh = useCallback(async () => {
@@ -38,6 +85,13 @@ export default function SpaceManager({ space: initial, account, brand }: { space
   const uploads = useUploadBatches(refresh);
   const batch = uploads.batches.find(item => item.key === batchKey);
   const uploading = uploads.batches.some(item => batchActive(item));
+
+  // Paying from a preview returns here. Google Analytics counts the payment once per Checkout session; the server records it for the site's own numbers.
+  useEffect(() => {
+    const plan = account.subscription?.plan;
+    if (fromCheckout && initial.hosted && plan) googleEvent("purchase", { transaction_id: new URLSearchParams(window.location.search).get("checkout") ?? "",
+      currency: plan.currency.toUpperCase(), value: ((plan.amount ?? 0) * (plan.spaces ? 1 : account.subscription?.quantity ?? 1)) / 100 });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, on arrival from Checkout
 
   const waiting = space.status === "queued" || space.status === "processing";
   useEffect(() => {
@@ -86,18 +140,33 @@ export default function SpaceManager({ space: initial, account, brand }: { space
     finally { setBusy(false); }
   }
   async function destroy() {
-    if (!window.confirm(`Delete ${space.title}? It goes offline immediately, billing for it stops, and its uploaded files are deleted. This cannot be undone.`)) return;
+    const spent = space.previewed && !space.hosted && space.job ? " Your free preview is used up, so deleting it does not give you another." : "";
+    if (!window.confirm(`Delete ${space.title}? It goes offline immediately, billing for it stops, and its uploaded files are deleted. This cannot be undone.${spent}`)) return;
     setBusy(true); setError("");
     try { await accountRequest(`/api/account/spaces/${space.id}`, undefined, "DELETE"); window.location.assign("/account"); }
     catch (failure) { setError((failure as Error).message); setBusy(false); }
   }
 
-  const steps = [...(account.billing ? ["Payment"] : []), "Upload", "Processing", "Hosted"];
+  // A space that started as the free preview has no payment step before its files; payment comes after the preview.
+  const steps = [...(account.billing && !space.previewed ? ["Payment"] : []), "Upload", "Processing", ...(space.previewed ? ["Preview"] : []), "Hosted"];
   const reached = space.status === "unpaid" ? "Payment" : ["draft", "failed"].includes(space.status) ? "Upload"
-    : ["queued", "processing"].includes(space.status) ? "Processing" : "Hosted";
+    : ["queued", "processing"].includes(space.status) ? "Processing" : space.previewed && !space.hosted ? "Preview" : "Hosted";
   const current = steps.indexOf(reached);
-  const detail = space.hosted || space.status === "unpaid" ? describe[space.status] : "This space is offline because billing ended.";
+  const detail = previewing && space.status === "ready" ? `Your free preview is private. Only you can open it, until ${previewDate(preview!.until)}.`
+    : previewing && space.status === "draft" ? "This is your free preview. Add your capture files and processing starts on its own once they are uploaded. The result stays private to you."
+    : lapsed ? `Your free preview ended${preview!.until ? ` on ${previewDate(preview!.until)}` : ""}, so this space is offline. Start hosting to bring it back.`
+    : space.hosted || space.status === "unpaid" ? describe[space.status] : "This space is offline because billing ended.";
   const status = spaceStatus(space);
+  const gate = previewing && space.status === "ready" && space.scene ? <PublishGate space={space} plans={plans} /> : null;
+  async function startPreview() {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await accountRequest(`/api/account/spaces/${space.id}/preview`);
+      setSpace(result.space);
+      setMessage("Your free preview has started. Add your capture files below.");
+    } catch (failure) { setError((failure as Error).message); }
+    finally { setBusy(false); }
+  }
 
   return <div className="site"><div className="site-frame">
     <SiteHeader brand={brand} nav={accountNav(account, "space")} account={account.email} signOut="account" />
@@ -105,7 +174,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
         <div><h1>{space.title}</h1></div>
-        <StatusMark status={status} label={status === "offline" ? "Offline" : undefined} />
+        <StatusMark status={status} label={status === "offline" ? "Offline" : previewing && status === "private" ? "Private preview" : undefined} />
       </div>
       <ol className="site-steps" aria-label="Progress">{steps.map((step, index) => <li key={step}
         className={index < current || (index === current && space.status === "ready") ? "done" : index === current ? "current" : ""}
@@ -115,13 +184,19 @@ export default function SpaceManager({ space: initial, account, brand }: { space
         {error && <p className="site-alert" role="alert">{error}</p>}
       </div>
 
+      {gate}
+      {lapsed && space.status !== "unpaid" && <div className="site-callout site-callout-action" role="status">
+        <p>{detail}</p>
+        <a className="site-button site-button-accent" href={`/account/plan?space=${space.id}`}>Start hosting<span aria-hidden="true">→</span></a>
+      </div>}
+
       <div className="site-space">
         <div className="site-space-main">
-          {space.scene && <section className="site-block" aria-labelledby="scene-heading">
-            <SectionHeader title={<span id="scene-heading">Space</span>} />
-            <a className="site-plate" href={space.scene.path} target="_blank" rel="noreferrer">
+          {space.scene && (usable || !space.previewed) && <section className="site-block" aria-labelledby="scene-heading">
+            <SectionHeader title={<span id="scene-heading">{previewing ? "Private preview" : "Space"}</span>} />
+            <a className="site-plate" href={space.scene.path} target="_blank" rel="noreferrer" onClick={() => { if (previewing) track("preview_opened", { from: "space_page" }); }}>
               <img src={space.scene.thumbnail} alt="" width={960} height={640} />
-              <span className="site-plate-caption">Open space<span aria-hidden="true">↗</span></span>
+              <span className="site-plate-caption">{previewing ? "Open your preview" : "Open space"}<span aria-hidden="true">↗</span></span>
             </a>
           </section>}
 
@@ -129,7 +204,8 @@ export default function SpaceManager({ space: initial, account, brand }: { space
             <SectionHeader title={<span id="files-heading">Files</span>}>{space.uploads.length > 0 && <span className="site-count">{space.uploads.length}</span>}</SectionHeader>
             {editable && <div className="space-files-add">
               <button type="button" className="site-button" onClick={openUploads}>{uploading ? "Show the upload" : "Add files"}<span aria-hidden="true">+</span></button>
-              <p className="site-hint">Or drop files or a folder anywhere on this page. Up to {formatBytes(account.maxSpaceBytes)} per space.</p>
+              <p className="site-hint">Or drop files or a folder anywhere on this page. {previewing
+                ? `A free preview holds up to ${preview!.files} files and ${formatBytes(preview!.bytes)}.` : `Up to ${formatBytes(account.maxSpaceBytes)} per space.`}</p>
             </div>}
             {space.uploads.length > 0 ? <ul className="site-files" aria-label="Uploaded files">{space.uploads.map(upload => <li key={upload.id}>
               <span className="site-file-name">{upload.name}</span>
@@ -140,6 +216,7 @@ export default function SpaceManager({ space: initial, account, brand }: { space
               <div className="site-field"><label htmlFor="notes">Notes for processing <span className="site-optional">Optional</span></label>
                 <textarea className="site-input" ref={notes} id="notes" name="notes" maxLength={2000} rows={3} defaultValue={space.notes ?? ""} placeholder="Capture device, what the space is, anything we should know" /></div>
               <div><button type="submit" className="site-button" disabled={busy}>{space.status === "ready" ? "Reprocess with these files" : "Start processing"}<span aria-hidden="true">→</span></button></div>
+              {previewing && <p className="site-hint">A free preview can be processed {preview!.runsLeft} more {preview!.runsLeft === 1 ? "time" : "times"}. Hosting lifts that.</p>}
             </form>}
           </section>
         </div>
@@ -150,7 +227,10 @@ export default function SpaceManager({ space: initial, account, brand }: { space
             <p>{detail}</p>
             {waiting && space.job?.progress && <p className="site-progress" aria-live="polite"><span>Latest step</span>{space.job.progress}</p>}
             {space.message && !waiting && <blockquote className="site-quote">{space.message}</blockquote>}
-            {space.status === "unpaid" && <a className="site-button site-button-accent site-button-block" href="/account/plan">Complete payment<span aria-hidden="true">→</span></a>}
+            {space.status === "unpaid" && account.preview?.available && <button type="button" className="site-button site-button-accent site-button-block" disabled={busy}
+              onClick={() => void startPreview()}>Try it free first<span aria-hidden="true">→</span></button>}
+            {space.status === "unpaid" && <a className={`site-button site-button-block${account.preview?.available ? " site-button-secondary" : " site-button-accent"}`} href="/account/plan">Complete payment<span aria-hidden="true">→</span></a>}
+            {space.status === "unpaid" && account.preview?.available && <p className="site-hint">A free preview lets you upload now. Up to {account.preview.maxFiles} files and {formatBytes(account.preview.maxBytes)}, private to you, and you pay only to publish it or keep it past {days(account.preview.days)}.</p>}
           </div>
           {space.scene && <div className="site-aside-block">
             <h3>Sharing</h3>
@@ -159,18 +239,19 @@ export default function SpaceManager({ space: initial, account, brand }: { space
                 disabled={busy || !space.hosted} onClick={() => { if ((space.scene!.public ? "public" : "private") !== value) void patch({ public: value === "public" }, value === "public" ? "Anyone with the link can now open this space." : "Only you can open this space now."); }}>
                 {value === "public" ? "Public" : "Private"}</button>)}
             </div>
-            <p className="site-hint">{space.scene.public ? "Anyone with the link can open it." : "Only you can open it while it is private."}</p>
-            <label className="site-check">
+            <p className="site-hint">{previewing ? "A free preview stays private. Public links and embeds come with hosting."
+              : space.scene.public ? "Anyone with the link can open it." : "Only you can open it while it is private."}</p>
+            {!previewing && <label className="site-check">
               <input type="checkbox" checked={space.scene.builders} disabled={busy || !space.hosted}
                 onChange={event => void patch({ builders: event.target.checked }, event.target.checked
                   ? space.scene!.public ? "Anyone who opens this space can now build on it." : "Others can build on this space once it is public."
                   : "Only you can build on this space now. Tours others made on it are offline until you allow building again.")} />
               Allow others to build on this space
-            </label>
-            <p className="site-hint">{space.scene.builders && !space.scene.public ? "This starts once the space is public. "
-              : ""}People who open it can make their own guided tours and scavenger hunts on it, with their own effects, models and sound. Your space itself never changes.</p>
-            <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/edit`}>Edit title and start view</a>
-            <a className="site-button site-button-secondary site-button-block" href={`/account/tours/new?scene=${space.scene.sceneId}`}>Make a tour or scavenger hunt</a>
+            </label>}
+            {!previewing && <p className="site-hint">{space.scene.builders && !space.scene.public ? "This starts once the space is public. "
+              : ""}People who open it can make their own guided tours and scavenger hunts on it, with their own effects, models and sound. Your space itself never changes.</p>}
+            {(usable || !space.previewed) && <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/edit`}>Edit title and start view</a>}
+            {space.hosted && <a className="site-button site-button-secondary site-button-block" href={`/account/tours/new?scene=${space.scene.sceneId}`}>Make a tour or scavenger hunt</a>}
           </div>}
           <div className="site-aside-block">
             <h3>Settings</h3>
@@ -185,6 +266,6 @@ export default function SpaceManager({ space: initial, account, brand }: { space
     </main>
     <SiteFooter brand={brand} links={legalLinks} />
     <UploadModal open={modal} onClose={() => { setModal(false); void refresh(); }} uploads={uploads} batchKey={batch ? batchKey : null}
-      onBatch={key => setBatchKey(key)} existing={space} maxBytes={account.maxSpaceBytes} />
+      onBatch={key => setBatchKey(key)} existing={space} maxBytes={previewing ? preview!.bytes : account.maxSpaceBytes} />
   </div></div>;
 }

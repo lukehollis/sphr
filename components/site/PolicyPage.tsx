@@ -4,7 +4,7 @@ import SiteHeader from "./SiteHeader";
 
 export type PolicySection = { id: string; title: string; body: ReactNode };
 
-const policies = [{ href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
+const policies = [{ href: "/pricing", label: "Pricing" }, { href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
 
 /** Terms and privacy: numbered sections with a contents column, like a chapter of the manual. */
 export default function PolicyPage({ brand, code, title, lede, sections }:

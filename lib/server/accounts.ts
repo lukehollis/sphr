@@ -5,6 +5,7 @@ import { createUserSession, createUserToken, deleteUserSession, hostingActive, r
   type CustomerSpace, type User } from "./accounts-store";
 import { adminResponse, cookieOptions, isAdmin, readAdminBody, sameOrigin } from "./auth";
 import { billingEnabled } from "./billing";
+import { previewOpen } from "./previews";
 import { sendMail, sendNotice, type MailContent } from "./mail";
 import { verificationEmail } from "./emails";
 import { siteBrand, siteOrigin } from "./brand";
@@ -60,7 +61,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12})?|\/profile|\/team|\/join\/[a-z0-9-]{6,80}|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour)?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
+const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12}|\?space=[a-f0-9]{12})?|\/profile|\/team|\/join\/[a-z0-9-]{6,80}|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour|\?checkout=cs_[A-Za-z0-9_]{1,200})?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }
@@ -109,12 +110,17 @@ export async function ownedSpace(id: string, request?: Request) {
 
 /**
  * Viewer access. Customer spaces stop being served when deleted or when billing
- * lapses; the operator can still open them to help.
+ * lapses; the operator can still open them to help. A free preview is served to its owner only.
  */
 export async function sceneAccess(sceneId: string): Promise<"allowed" | "login" | "unavailable"> {
   const space = accountsEnabled() ? spaceForScene(sceneId) : undefined;
   if (await isAdmin()) return "allowed";
-  if (space && !spaceHosted(space)) return "unavailable";
+  if (space && !spaceHosted(space)) {
+    // A free preview opens for its owner and team alone, public or not, until its window ends.
+    if (!previewOpen(space)) return "unavailable";
+    const viewer = await currentUser();
+    return viewer && sameTeam(viewer.id, space.userId) ? "allowed" : viewer ? "unavailable" : "login";
+  }
   if (isScenePublic(sceneId)) return "allowed";
   const user = await currentUser();
   if (space && user && sameTeam(user.id, space.userId)) return "allowed";

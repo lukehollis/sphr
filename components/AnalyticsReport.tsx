@@ -12,6 +12,8 @@ const names: Record<string, string> = {
   subscription_started: "Paid", subscription_ended: "Billing ended", plan_full: "Plan was full", upload_error: "Upload problem",
   upload_closed: "Closed the upload sheet", upload_cancelled: "Cancelled the space", space_submitted: "Uploaded files", space_ready: "Space went live",
   space_failed: "Space needs attention", space_deleted: "Deleted a space", agent_linked: "Linked an agent",
+  preview_started: "Started a free preview", preview_declined: "Free preview not given", preview_ready: "Preview was ready", preview_opened: "Opened the private preview",
+  publish_gate_shown: "Saw the publish prompt", publish_gate_hit: "Tried to make it public", publish_paid: "Paid after a free preview", space_published: "Made a space public",
   client_error: "Error in their browser", server_error: "Server error"
 };
 const percent = (part: number, whole: number) => whole ? `${Math.round((part / whole) * 100)}%` : "";
@@ -63,6 +65,26 @@ export default function AnalyticsReport({ report, brand, enabled }: { report: Re
           })}</tbody>
         </table></div>
         <p className="site-hint">Each person counts once per step. Steps can be skipped, for example by an agent that adds the space, so a later step can be larger.</p>
+      </section>
+
+      <section className="site-block" aria-labelledby="analytics-previews">
+        <SectionHeader title={<span id="analytics-previews">Free previews: where people stop</span>} />
+        <div className="analytics-scroll"><table className="site-table analytics-funnel">
+          <thead><tr><th scope="col">Step</th><th scope="col" className="site-number">People</th><th scope="col">Share of those who started</th>
+            <th scope="col" className="site-number">Stopped here</th></tr></thead>
+          <tbody>{report.previews.map((step, index) => {
+            const first = report.previews[0]?.total ?? 0;
+            const before = index ? report.previews[index - 1].total : step.total;
+            return <tr key={step.label}>
+              <th scope="row">{step.label}</th>
+              <td className="site-number">{step.total}</td>
+              <td><span className="analytics-bar"><span style={{ width: first ? `${Math.max(step.total ? 1 : 0, (step.total / first) * 100)}%` : 0 }} /></span></td>
+              <td className="site-number">{index && before > step.total ? before - step.total : ""}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+        <p className="site-hint">Only people who started a free preview. A preview is private to its owner and open for a few days after its result is ready, so people near the end may still pay.</p>
+        {report.declined.length > 0 && <div className="analytics-grid"><Tally title="Free previews not given" rows={report.declined} unit="Times" /></div>}
       </section>
 
       <section className="site-block" aria-labelledby="analytics-sources">

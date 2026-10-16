@@ -6,6 +6,8 @@ export type PickedFile = { file: File; path: string };
 export type Transfer = {
   key: string; name: string; size: number; sent: number;
   state: "waiting" | "uploading" | "retrying" | "done" | "failed"; error?: string;
+  /** Where hosting starts, when the failure is something a free preview does not cover (more files or bytes than it holds, or its window ended). */
+  gate?: string;
   /** The server's record, once the upload has started. */
   uploadId?: string;
 };

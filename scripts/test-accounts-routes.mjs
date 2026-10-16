@@ -57,6 +57,8 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr', SPHR_SALES_EMAIL: 'hello@example.com',
   NEXT_PUBLIC_SPHR_ANALYTICS: '1', SPHR_ANALYTICS_ORIGINS: 'https://home.example',
   SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '',
+  // The free preview holds three files and 20 MB here, 3 new previews a day from one address, and 8 a day on the whole site.
+  SPHR_PREVIEW_MAX_FILES: '3', SPHR_PREVIEW_MAX_GB: '0.02', SPHR_PREVIEW_ADDRESS_LIMIT: '3', SPHR_PREVIEW_DAILY_LIMIT: '8',
   SPHR_LIBRARY_FILE: path.join(state, 'library.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
@@ -204,6 +206,11 @@ try {
   assert.match(verification, /^Reply-To: help@example\.com$/m, 'replies to account emails reach the contact address');
   assert.match(verification, /guided tours and scavenger hunts/, 'confirmation speaks of tours and hunts too');
   assert.ok((await (await anonymous.get('/terms')).text()).includes('mailto:help@example.com'), 'the terms name the contact address');
+  const pricing = await anonymous.get('/pricing');
+  assert.equal(pricing.status, 200, 'the pricing page is public');
+  const pricingText = (await pricing.text()).replace(/<!-- -->/g, '');
+  assert.ok(pricingText.includes('Pay as you go, $1 a month for each space') && pricingText.includes('Starter, $8 a month, up to 6 spaces'), 'the pricing page lists the plans as Stripe has them');
+  assert.ok(pricingText.includes('free preview') && pricingText.includes('mailto:hello@example.com'), 'the pricing page describes the free preview and names where to write for a larger plan');
   const verifyToken = verification.match(/\/account\/verify\?token=([a-f0-9]{64})/)[1];
   // Opening the link (or a scanner prefetching it) only shows a confirmation page.
   assert.equal(location(await anonymous.get(`/api/account/verify?token=${verifyToken}`)), `${base}/account/verify?token=${verifyToken}`);
@@ -216,34 +223,35 @@ try {
   const aliceLaptop = new Browser();
   assert.equal((await aliceLaptop.post('/api/account/login', { email: 'ALICE@example.com', password: 'alice password' })).status, 200);
 
-  // ---- First space: Checkout, then the return from Stripe applies the payment ----
-  response = await alice.post('/api/account/spaces', { title: 'Riverside studio' });
+  // ---- First space: a free private preview, so files upload and are processed before anything is paid ----
+  const bytes = randomBytes(9 * 1024 * 1024 + 123);
+  response = await alice.post('/api/account/spaces', { title: 'Riverside studio', files: { count: 1, bytes: bytes.length } });
   let body = await response.json();
   assert.equal(response.status, 200);
-  assert.match(body.checkout, /^https:\/\/checkout\.example\//);
-  assert.equal(body.space.status, 'unpaid');
-  assert.equal(body.plan, 'price_space', 'new customers start on pay as you go');
+  assert.equal(body.preview, true, 'the first space is the free preview');
+  assert.equal(body.checkout, undefined, 'no payment comes first');
+  assert.equal(body.space.status, 'draft', 'the space opens for files at once');
+  assert.deepEqual([body.space.hosted, body.space.previewed, body.space.preview.open, body.space.preview.ready, body.space.preview.runsLeft], [false, true, true, null, 3]);
+  assert.equal(stripeFake.state.sessions.size, 0, 'no Checkout was prepared');
   const studio = body.space;
-  const [firstSession] = stripeFake.state.sessions.values();
-  assert.equal(firstSession.quantity, 1);
-  assert.equal(firstSession.success_url, `${base}/account?checkout={CHECKOUT_SESSION_ID}`);
-  assert.equal((await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name: 'scan.e57', size: 10 })).status, 402, 'uploads wait for payment');
-  assert.ok((await (await alice.get('/account')).text()).includes('Complete payment'));
-  const subscription = stripeFake.state.pay(firstSession.id);
-  assert.equal((await alice.get(`/account?checkout=${firstSession.id}`)).status, 200);
-  body = await (await alice.get(`/api/account/spaces/${studio.id}`)).json();
-  assert.equal(body.space.status, 'draft', 'returning from Checkout opens the space for uploads');
-  assert.equal(body.space.hosted, true);
+  const offer = (await (await alice.get('/api/account/spaces')).json()).account.preview;
+  assert.deepEqual([offer.available, offer.used, offer.maxFiles, offer.maxBytes], [false, true, 3, 2e7], 'the preview is spent, with the limits in force');
+  assert.ok((await (await alice.get('/account')).text()).includes('Riverside studio'));
 
-  // A second space joins the subscription immediately.
-  body = await (await alice.post('/api/account/spaces', { title: 'Gallery' })).json();
-  assert.equal(body.space.status, 'draft');
-  assert.equal(body.checkout, undefined);
-  assert.equal(subscription.items.data[0].quantity, 2);
-  const gallery = body.space;
+  // The preview holds fewer files than a hosted space, checked as each file is registered, whatever the page says.
+  response = await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name: 'walkthrough.mp4', size: 25e6 });
+  body = await response.json();
+  assert.equal(response.status, 402);
+  assert.deepEqual([body.gate, body.plan], ['limit', `/account/plan?space=${studio.id}`]);
+  assert.match(body.error, /A free preview holds up to 20 MB\. Start hosting to go past it\./);
+  const tiny = [];
+  for (const name of ['one.txt', 'two.txt', 'three.txt']) tiny.push((await (await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name, size: 1 })).json()).upload.id);
+  response = await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name: 'four.txt', size: 1 });
+  assert.equal(response.status, 402);
+  assert.match((await response.json()).error, /A free preview holds up to 3 files/);
+  for (const id of tiny) assert.equal((await alice.request(`/api/account/uploads/${id}`, { method: 'DELETE', json: {} })).status, 200);
 
   // ---- Resumable uploads (local storage speaks the Cloud Storage protocol) ----
-  const bytes = randomBytes(9 * 1024 * 1024 + 123);
   response = await alice.post(`/api/account/spaces/${studio.id}/uploads`, { name: '../../Riverside scan.e57', size: bytes.length, type: 'application/octet-stream' });
   body = await response.json();
   assert.equal(response.status, 200);
@@ -292,6 +300,7 @@ try {
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].slug, `customer-${studio.id}`);
   assert.equal(jobs[0].space.output, 'tour', 'the worker learns what the customer asked for');
+  assert.equal(jobs[0].preview, true, 'and which jobs run for a free preview');
   assert.deepEqual(jobs[0].uploads.map(item => [item.name, item.size, item.source.url]), [['Riverside scan.e57', bytes.length, `/api/worker/uploads/${upload.id}`]]);
   const reserved = jobs[0].sceneId;
   const unisolated = spawn(process.execPath, [path.join(root, 'scripts/worker/agent-runner.mjs'), 'run', '--once'], { cwd: root, stdio: 'ignore',
@@ -311,8 +320,11 @@ try {
   assert.equal(body.space.message, 'Built a panorama tour from your 360 photo.');
   assert.equal(body.space.scene.sceneId, reserved, 'the space is published under the reserved ID');
   assert.equal(body.space.scene.public, false, 'new spaces start private');
+  assert.deepEqual([body.space.hosted, body.space.preview.open, body.space.preview.daysLeft], [false, true, 7], 'the window starts with the first result');
   const readyMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Riverside studio is ready'));
-  assert.ok(readyMail.includes('It is private for now'), 'a new space is called private');
+  assert.ok(readyMail.includes('free preview, so only you can open it, until'), 'a preview is called a free preview, private until its date');
+  assert.ok(readyMail.includes('Hosting is $1 a month for each space, and you can cancel any time'), 'with the price from Stripe');
+  assert.ok(readyMail.includes(`/account/spaces/${studio.id}`) && readyMail.includes('Publish it or keep it hosted'), 'and where to publish it');
   const scenePath = body.space.scene.path;
   // Only the listed runtime files are installed, and the space is not added to a shared index.
   const installed = path.join(datasets, `customer-${studio.id}`);
@@ -328,9 +340,74 @@ try {
   response = await alice.request(`/api/admin/scenes/${reserved}/edit`, { method: 'PUT', json: { title: 'Riverside studio, 2nd floor', revision: 0 } });
   assert.equal(response.status, 200, 'owners edit their titles');
   assert.equal((await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.title, 'Riverside studio, 2nd floor');
-  assert.equal((await alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json: { public: true } })).status, 200);
+  // The link follows the title; the space's ID is what stays.
+  const renamedPath = (await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.scene.path;
+  assert.equal(location(await alice.get(scenePath)), renamedPath, 'the old link leads its owner to the current one');
+
+  // ---- The result screen asks for payment to publish: a preview stays private until hosting starts ----
+  const patchSpace = json => alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json });
+  response = await patchSpace({ public: true });
+  body = await response.json();
+  assert.equal(response.status, 402, 'a free preview cannot be public');
+  assert.deepEqual([body.gate, body.plan], ['publish', `/account/plan?space=${studio.id}`]);
+  assert.match(body.error, /A free preview stays private\. Start hosting to make it public and to embed it\./);
+  assert.equal((await patchSpace({ builders: true })).status, 402, 'nor open to builders');
+  assert.equal((await patchSpace({ public: false })).status, 200, 'making it private is always allowed');
+  assert.equal((await patchSpace({ title: 'Riverside studio, 2nd floor' })).status, 200, 'and renaming it');
+  assert.equal(database().prepare('SELECT count(*) AS n FROM visibility WHERE scene=? AND public=1').get(reserved).n, 0, 'nothing was made public');
+  // Even a public flag set some other way opens it for no one else.
+  database().prepare('INSERT OR REPLACE INTO visibility VALUES (?, 1)').run(reserved);
+  assert.equal(location(await anonymous.get(renamedPath)), `/account/login?next=${encodeURIComponent(renamedPath)}`, 'a preview is served to its owner alone');
+  assert.equal((await bob.get(renamedPath)).status, 404);
+  database().prepare('UPDATE visibility SET public=0 WHERE scene=?').run(reserved);
+  const windowEnd = (await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.preview.until;
+  const until = new Date(windowEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
+  let resultPage = (await (await alice.get(`/account/spaces/${studio.id}`)).text()).replaceAll('<!-- -->', '');
+  for (const text of ['Your preview is ready', `Only you can open it, until ${until} (7 days left)`, 'Host it for $1 a month', 'See all plans', `/account/plan?space=${studio.id}`,
+    'Private preview', 'A free preview stays private. Public links and embeds come with hosting.']) assert.ok(resultPage.includes(text), text);
+  assert.ok(!resultPage.includes('Make a tour or scavenger hunt'), 'tours on a preview start once it is hosted');
+  // The result screen's own steps arrive from the page; the steps only the server may report are refused.
+  await beacon(alice, [{ name: 'publish_gate_shown', path: `127.0.0.1/account/spaces/${studio.id}`, props: { surface: 'space', left: 7 } },
+    { name: 'preview_opened', path: `127.0.0.1/account/spaces/${studio.id}`, props: { from: 'space_page' } }, { name: 'preview_ready' }, { name: 'publish_paid' }, { name: 'preview_started' }]);
+  assert.deepEqual(database().prepare('SELECT name FROM analytics_events WHERE visitor=? ORDER BY id').all(alice.cookies.get('sphr_vid')).map(row => row.name), ['publish_gate_shown', 'preview_opened'],
+    'a page cannot claim that a preview was ready or paid for');
+  const dashboard = (await (await alice.get('/account')).text()).replaceAll('<!-- -->', '');
+  assert.ok(dashboard.includes('Publish or keep it') && dashboard.includes('Private preview') && dashboard.includes('Free preview, private to you. 7 days left'), 'the dashboard points at the result');
+  const spacePlanPage = (await (await alice.get(`/account/plan?space=${studio.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(spacePlanPage.includes('Start hosting to make Riverside studio, 2nd floor public') && spacePlanPage.includes('or to keep it after its free preview ends on'), 'the plan page speaks of this space');
+
+  // Paying from the result: Checkout returns to the space's page, and the same space and link are hosted.
+  response = await alice.post('/api/account/billing/checkout', { space: studio.id });
+  body = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(body.url, /^https:\/\/checkout\.example\//);
+  assert.equal(body.plan, 'price_space', 'pay as you go unless another plan is chosen');
+  const previewSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(previewSession.quantity, 1, 'only the previewed space is billed');
+  assert.equal(previewSession.success_url, `${base}/account/spaces/${studio.id}?checkout={CHECKOUT_SESSION_ID}`);
+  assert.equal(previewSession.cancel_url, `${base}/account/spaces/${studio.id}`);
+  assert.equal((await alice.post('/api/account/billing/checkout', { space: studio.id })).status, 200);
+  assert.equal(stripeFake.state.sessions.size, 1, 'an open session for the same page is reused');
+  const subscription = stripeFake.state.pay(previewSession.id);
+  assert.equal(location(await new Browser().get(`/account/spaces/${studio.id}?checkout=${previewSession.id}`)), `/account/login?next=${encodeURIComponent(`/account/spaces/${studio.id}?checkout=${previewSession.id}`)}`,
+    'paying in another browser still lands on the result after signing in');
+  resultPage = (await (await alice.get(`/account/spaces/${studio.id}?checkout=${previewSession.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(resultPage.includes('Payment received. This space is hosted now.'), 'back from Checkout, the payment is applied');
+  assert.ok(!resultPage.includes('Your preview is ready'), 'and the prompt is gone');
+  body = await (await alice.get(`/api/account/spaces/${studio.id}`)).json();
+  assert.deepEqual([body.space.hosted, body.space.preview, body.space.previewed, body.space.status], [true, null, true, 'ready']);
+  assert.equal(subscription.items.data[0].quantity, 1);
+  assert.equal((await patchSpace({ public: true })).status, 200, 'hosted, it can be made public');
   const publicPath = (await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.scene.path;
+  assert.equal(publicPath, renamedPath, 'with the same link');
   assert.equal((await anonymous.get(publicPath)).status, 200, 'public spaces open for anyone');
+
+  // A second space joins the subscription immediately.
+  body = await (await alice.post('/api/account/spaces', { title: 'Gallery' })).json();
+  assert.equal(body.space.status, 'draft');
+  assert.equal(body.checkout, undefined);
+  assert.equal(subscription.items.data[0].quantity, 2);
+  const gallery = body.space;
 
   // Stripe ends the subscription: hosting pauses for everyone but the operator.
   subscription.status = 'canceled';
@@ -787,9 +864,13 @@ try {
   await signInWith(grace, 'google', { sub: 'google-grace', email: 'grace@example.com', email_verified: true, name: 'Grace' });
   assert.ok(!(await (await grace.get('/account')).text()).includes('a month'), 'no prices before a space is added');
   body = await (await grace.post('/api/account/spaces', { title: 'Grace 1' })).json();
-  assert.equal(body.plan, 'price_space');
+  assert.equal(body.preview, true, 'her first space is the free preview');
+  assert.equal(body.plan, undefined);
+  // With the preview spent, the next space starts with payment, as before.
+  body = await (await grace.post('/api/account/spaces', { title: 'Grace 2' })).json();
+  assert.deepEqual([body.space.status, body.previewDeclined, body.plan], ['unpaid', 'used', 'price_space']);
   let page = (await (await grace.get('/account/plan')).text()).replaceAll('<!-- -->', '');
-  for (const text of ['Start hosting', "You're on pay as you go", 'Pay as you go', 'Starter', '$8', 'Up to 6 spaces', 'Pro', '$50', 'Enterprise', '$249',
+  for (const text of ['Start hosting', 'Pay as you go is $1 a month for each space you host', 'Pay as you go', 'Starter', '$8', 'Up to 6 spaces', 'Pro', '$50', 'Enterprise', '$249',
     'Up to 200 spaces', 'open source software', 'https://source.example/sphr']) assert.ok(page.includes(text.replaceAll("'", '&#x27;')) || page.includes(text), text);
   assert.equal((await grace.post('/api/account/billing/checkout', { plan: 'price_nope' })).status, 400, 'only offered plans');
   body = await (await grace.post('/api/account/billing/checkout', { plan: 'price_starter' })).json();
@@ -799,7 +880,7 @@ try {
   assert.deepEqual([graceSession.price, graceSession.quantity], ['price_starter', 1], 'a plan is one unit');
   const graceSubscription = stripeFake.state.pay(graceSession.id);
   assert.equal((await webhook({ id: 'evt_grace', type: 'checkout.session.completed', data: { object: { id: graceSession.id, object: 'checkout.session' } } })).status, 200);
-  for (let index = 2; index <= 6; index++) assert.equal((await grace.post('/api/account/spaces', { title: `Grace ${index}` })).status, 200);
+  for (let index = 3; index <= 6; index++) assert.equal((await grace.post('/api/account/spaces', { title: `Grace ${index}` })).status, 200);
   assert.equal(graceSubscription.items.data[0].quantity, 1, 'spaces within a plan leave its price alone');
   page = (await (await grace.get('/account')).text()).replaceAll('<!-- -->', '');
   assert.ok(page.includes('Starter') && page.includes('6 of 6 spaces') && page.includes('Change plan'), 'the plan and its room are shown');
@@ -820,6 +901,133 @@ try {
   page = (await (await grace.get('/account')).text()).replaceAll('<!-- -->', '');
   assert.ok(page.includes('Pay as you go') && page.includes('7 spaces') && page.includes('$7 a month'), 'pay as you go shows the spaces and what they cost');
   assert.equal((await bob.post('/api/account/billing/plan', { plan: 'price_pro' })).status, 400, 'changing plans needs hosting');
+
+  // ---- The free preview: what falls back to payment, and the limits that keep its cost bounded ----
+  database().prepare("UPDATE users SET email_verified=1 WHERE email LIKE 'crowd%@example.com'").run();
+  const crowd = async (index, address) => {
+    const person = new Browser();
+    assert.equal((await person.post('/api/account/login', { email: `crowd${index}@example.com`, password: 'crowd password' }, { headers: { 'X-Real-IP': address } })).status, 200);
+    return { person, id: database().prepare('SELECT id FROM users WHERE email=?').get(`crowd${index}@example.com`).id,
+      create: (title, files) => person.post('/api/account/spaces', { title, ...(files ? { files } : {}) }, { headers: { 'X-Real-IP': address } }) };
+  };
+  const tinyUpload = async (person, spaceId, name = 'tiny.bin') => {
+    const registered = await (await person.post(`/api/account/spaces/${spaceId}/uploads`, { name, size: 4 })).json();
+    assert.equal((await fetch(base + registered.url, { method: 'PUT', body: 'data', headers: { Origin: base, 'Content-Range': 'bytes 0-3/4',
+      Cookie: [...person.cookies].map(([key, value]) => `${key}=${value}`).join('; ') } })).status, 200);
+    assert.equal((await person.post(`/api/account/uploads/${registered.upload.id}/complete`)).status, 200);
+    return registered.upload;
+  };
+
+  // A capture too big for a preview goes the old way: the space waits for payment and says why. Nothing of the preview is spent.
+  const huge = await crowd(0, '203.0.113.10');
+  response = await huge.create('Huge E57', { count: 1, bytes: 36.7e9 });
+  body = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual([body.space.status, body.previewDeclined, body.plan], ['unpaid', 'large', 'price_space']);
+  assert.match(body.checkout, /^https:\/\/checkout\.example\//);
+  assert.match(body.previewNote, /larger than a free preview holds/);
+  const hugeSpace = body.space;
+  assert.equal(database().prepare('SELECT count(*) AS n FROM preview_grants WHERE user_id=?').get(huge.id).n, 0, 'declining spends nothing');
+  response = await huge.person.post(`/api/account/spaces/${hugeSpace.id}/uploads`, { name: 'x.e57', size: 10 });
+  assert.equal(response.status, 402, 'it waits for payment');
+  assert.match((await response.json()).error, /Start your free preview or complete payment before uploading/, 'and offers the preview that is still unused');
+  // From its page the owner can still use the preview on it (the page may not have known what would be dropped); the limits then bind each file.
+  response = await huge.person.post(`/api/account/spaces/${hugeSpace.id}/preview`);
+  body = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual([body.space.status, body.space.preview.open, body.preview], ['draft', true, true]);
+  response = await huge.person.post(`/api/account/spaces/${hugeSpace.id}/uploads`, { name: 'x.e57', size: 25e6 });
+  assert.equal(response.status, 402);
+  assert.equal((await response.json()).gate, 'limit', 'a page or an agent cannot get past the limits');
+  assert.equal((await huge.person.post(`/api/account/spaces/${hugeSpace.id}/preview`)).status, 409, 'it already is the preview');
+  // A second space while the preview is spent: back to payment, with nothing more to say about it.
+  body = await (await huge.create('Second')).json();
+  assert.deepEqual([body.space.status, body.previewDeclined], ['unpaid', 'used']);
+  response = await huge.person.post(`/api/account/spaces/${body.space.id}/preview`);
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).reason, 'used');
+  assert.equal((await new Browser().post(`/api/account/spaces/${hugeSpace.id}/preview`)).status, 401);
+  assert.equal((await bob.post(`/api/account/spaces/${hugeSpace.id}/preview`)).status, 404, "another customer's space is not theirs to start");
+
+  // A preview is processed three times at most, and only while its window is open.
+  await tinyUpload(huge.person, hugeSpace.id);
+  for (const index of [1, 2, 3]) database().prepare("INSERT INTO jobs(id, space_id, scene_id, status, created) VALUES (?, ?, ?, 'failed', ?)")
+    .run(`${'e'.repeat(15)}${index}`, hugeSpace.id, `${'d'.repeat(11)}${index}`, new Date().toISOString());
+  response = await huge.person.post(`/api/account/spaces/${hugeSpace.id}/submit`, {});
+  body = await response.json();
+  assert.equal(response.status, 402);
+  assert.deepEqual([body.gate, body.plan], ['limit', `/account/plan?space=${hugeSpace.id}`]);
+  assert.match(body.error, /A free preview is processed 3 times at most\. Start hosting to go past it\./);
+  database().prepare('DELETE FROM jobs WHERE space_id=?').run(hugeSpace.id);
+  database().prepare('UPDATE preview_grants SET ready=? WHERE user_id=?').run(new Date(Date.now() - 8 * 864e5).toISOString(), huge.id);
+  for (const [label, run] of [['more files', () => huge.person.post(`/api/account/spaces/${hugeSpace.id}/uploads`, { name: 'late.bin', size: 4 })],
+    ['processing', () => huge.person.post(`/api/account/spaces/${hugeSpace.id}/submit`, {})]]) {
+    response = await run();
+    assert.equal(response.status, 402, `${label} after the window`);
+    assert.equal((await response.json()).gate, 'ended');
+  }
+  assert.equal((await huge.person.request(`/api/account/spaces/${hugeSpace.id}`, { method: 'PATCH', json: { public: true } })).status, 409, 'a space that is not built cannot be published');
+  const lapsed = (await (await huge.person.get(`/account/spaces/${hugeSpace.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(lapsed.includes('Your free preview ended on') && lapsed.includes('so this space is offline') && lapsed.includes('Start hosting'), 'the space page says it is offline');
+  assert.ok(!lapsed.includes('Your preview is ready'));
+  assert.ok((await (await huge.person.get('/account')).text()).replaceAll('<!-- -->', '').includes('is offline because its free preview ended'), 'and so does the dashboard');
+
+  // Many people share one network (a school): the first few get the preview there, the rest start with payment.
+  for (const index of [1, 2, 3]) {
+    const student = await crowd(index, '203.0.113.50');
+    body = await (await student.create(`School ${index}`, { count: 2, bytes: 1000 })).json();
+    assert.equal(body.preview, true, `preview ${index} from one school address`);
+  }
+  body = await (await (await crowd(4, '203.0.113.50')).create('School 4', { count: 2, bytes: 1000 })).json();
+  assert.deepEqual([body.space.status, body.previewDeclined], ['unpaid', 'busy'], 'the address has had its share for the day');
+  assert.match(body.previewNote, /Free previews are paused for today.*Try again tomorrow/);
+  // The whole site has a budget too: eight previews in a day here, and six have been given.
+  const queue = await crowd(5, '203.0.113.60');
+  body = await (await queue.create('Atrium', { count: 1, bytes: 4 })).json();
+  assert.equal(body.preview, true);
+  const atrium = body.space;
+  assert.equal((await (await (await crowd(6, '203.0.113.61')).create('Atrium 2', { count: 1, bytes: 4 })).json()).preview, true);
+  body = await (await (await crowd(7, '203.0.113.62')).create('Atrium 3', { count: 1, bytes: 4 })).json();
+  assert.deepEqual([body.space.status, body.previewDeclined], ['unpaid', 'busy'], 'the day is full');
+
+  // Jobs of previews wait behind jobs of hosted spaces, however long they have waited.
+  await tinyUpload(queue.person, atrium.id);
+  assert.equal((await queue.person.post(`/api/account/spaces/${atrium.id}/submit`, {})).status, 200);
+  const graceEight = (await (await grace.post('/api/account/spaces', { title: 'Grace 8' })).json()).space;
+  await tinyUpload(grace, graceEight.id);
+  assert.equal((await grace.post(`/api/account/spaces/${graceEight.id}/submit`, {})).status, 200);
+  jobs = (await (await worker('/api/worker/jobs?status=queued')).json()).jobs;
+  assert.deepEqual(jobs.map(item => [item.space.id, item.preview]), [[graceEight.id, false], [atrium.id, true]], 'the paying customer goes first although the preview was queued earlier');
+  assert.equal((await grace.request(`/api/account/spaces/${graceEight.id}`, { method: 'DELETE', json: {} })).status, 200);
+
+  // The preview is built, opens for its owner alone, goes offline when its window ends, and comes back when hosting starts.
+  const atriumRun = spawn(process.execPath, [path.join(root, 'scripts/worker/agent-runner.mjs'), 'run', '--once', '--allow-unisolated'], { cwd: root, env: { ...process.env,
+    SPHR_WORKER_URL: base, SPHR_WORKER_TOKEN: workerToken, SPHR_WORKER_DIR: path.join(state, 'jobs'), SPHR_WORKER_PUBLISH: 'local', SPHR_WORKER_LOCAL_DATASETS: datasets,
+    SPHR_AGENT_COMMAND: JSON.stringify([process.execPath, path.join(root, 'scripts/test-support/fake-agent.mjs'), '{job}']) }, stdio: 'ignore' });
+  assert.equal(await new Promise(resolve => atriumRun.on('exit', resolve)), 0);
+  const atriumView = (await (await queue.person.get(`/api/account/spaces/${atrium.id}`)).json()).space;
+  assert.deepEqual([atriumView.status, atriumView.preview.open, atriumView.preview.daysLeft], ['ready', true, 7]);
+  const atriumPath = atriumView.scene.path;
+  assert.equal((await queue.person.get(atriumPath)).status, 200, 'the owner opens the preview');
+  assert.equal(location(await anonymous.get(atriumPath)), `/account/login?next=${encodeURIComponent(atriumPath)}`, 'no one else does');
+  assert.equal((await bob.get(atriumPath)).status, 404);
+  database().prepare('UPDATE preview_grants SET ready=? WHERE user_id=?').run(new Date(Date.now() - 8 * 864e5).toISOString(), queue.id);
+  assert.equal((await queue.person.get(atriumPath)).status, 404, 'after the window not even the owner does');
+  assert.equal((await anonymous.get(atriumPath)).status, 404);
+  assert.deepEqual([(await (await queue.person.get(`/api/account/spaces/${atrium.id}`)).json()).space.preview.expired], [true]);
+  response = await queue.person.request(`/api/account/spaces/${atrium.id}`, { method: 'PATCH', json: { public: true } });
+  assert.equal(response.status, 402, 'publishing needs hosting, before and after the window');
+  assert.equal((await response.json()).gate, 'ended');
+  response = await queue.person.post('/api/account/billing/checkout', { space: atrium.id });
+  assert.equal(response.status, 200);
+  const lateSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(lateSession.quantity, 1);
+  stripeFake.state.pay(lateSession.id);
+  assert.equal((await queue.person.get(`/account/spaces/${atrium.id}?checkout=${lateSession.id}`)).status, 200);
+  assert.equal((await queue.person.get(atriumPath)).status, 200, 'hosting brings it back, at the same link');
+  assert.equal((await queue.person.request(`/api/account/spaces/${atrium.id}`, { method: 'PATCH', json: { public: true } })).status, 200);
+  assert.equal((await anonymous.get(atriumPath)).status, 200);
+  console.log('Passed: the free preview: private to its owner, publishing and builders refused until hosting, Checkout back to the result, limits on files, bytes and runs, the window, the address and daily budgets, fallbacks to payment and priority for paid jobs.');
 
   // ---- Password reset signs out every session ----
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'nobody@example.com' })).status, 200, 'no account enumeration');
@@ -846,6 +1054,20 @@ try {
   const report = (await (await operator.get('/admin/analytics?days=7')).text()).replaceAll('<!-- -->', '');
   for (const text of ['From a first visit to a live space', 'Created an account', 'Where people came from', 'newsletter', 'dana@example.com',
     'Where each account is now', 'Live', 'What recent people did']) assert.ok(report.includes(text), text);
+  // The free preview in the report: its own funnel, why previews were not given, and where each account stands.
+  for (const text of ['Saw the publish prompt', 'Made a space public', 'Free previews: where people stop', 'Started a free preview', 'Preview was ready', 'Opened the private preview',
+    'Tried to make it public', 'Free previews not given', 'Preview started, no files yet', 'Stopped at payment']) assert.ok(report.includes(text), text);
+  const steps = database().prepare("SELECT e.name, e.props FROM analytics_events e JOIN users u ON u.id = e.user_id WHERE u.email='alice@example.com' ORDER BY e.id").all();
+  const stepNames = steps.map(step => step.name);
+  for (const name of ['preview_started', 'space_created', 'space_submitted', 'space_ready', 'preview_ready', 'publish_gate_hit', 'checkout_started', 'subscription_started', 'publish_paid', 'space_published']) {
+    assert.ok(stepNames.includes(name), `Alice's ${name}`);
+  }
+  assert.ok(stepNames.indexOf('preview_ready') < stepNames.indexOf('publish_gate_hit') && stepNames.indexOf('publish_gate_hit') < stepNames.indexOf('checkout_started')
+    && stepNames.indexOf('checkout_started') < stepNames.indexOf('publish_paid') && stepNames.indexOf('publish_paid') < stepNames.indexOf('space_published'), 'in the order people go');
+  assert.equal(JSON.parse(steps.find(step => step.name === 'checkout_started').props).for, 'preview', 'payment started from a preview says so');
+  assert.deepEqual(JSON.parse(steps.find(step => step.name === 'publish_paid').props), { plan: 'price_space', amount: 100, ready: true, days: 0 }, 'and so does paying after one');
+  assert.deepEqual(database().prepare("SELECT props FROM analytics_events WHERE name='preview_declined' ORDER BY id").all().map(row => JSON.parse(row.props).reason), ['large', 'busy', 'busy'],
+    'previews not given are counted with the reason, and a second space after the preview is not');
   console.log('Passed: first-touch analytics, sibling-site events, crawler filtering, the funnel report, repeat confirmation links and the agent address page.');
 
   // The operator's public spaces are open to builders until the operator closes one.
@@ -874,7 +1096,9 @@ try {
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');
   assert.deepEqual(about('Scavenger hunt started', 'Account', 'bob@example.com').map(item => item.fields['Whose space']).sort(), ["Someone else's", 'Spacery']);
   assert.equal(about('Players started a scavenger hunt', 'Account', 'alice@example.com').length, 1, 'the operator hears once a day when a class starts playing');
-  assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Waiting for first payment');
+  assert.equal(about('Space created', 'Title', 'Riverside studio')[0].fields.Status, 'Free preview, ready for files');
+  assert.equal(about('Space created', 'Title', 'Grace 2')[0].fields.Status, 'Waiting for first payment', 'a space after the preview still waits for payment');
+  assert.equal(about('Preview ready', 'Account', 'alice@example.com').length, 1, 'the operator hears when a preview is ready');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));
   assert.equal(about('Space held for review', 'Title', 'Stalled capture').length, 1, 'a stalled job is announced once');

@@ -186,18 +186,38 @@ export function filesReceivedEmail(brand: string, origin: string, space: SpaceRe
   });
 }
 
-/** `scene.public` is the space's visibility now: a space processed again keeps the visibility its owner chose. */
-export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, scene?: { path: string; thumbnail?: string; public?: boolean }) {
+/**
+ * `scene.public` is the space's visibility now: a space processed again keeps the visibility its owner chose.
+ * `preview` is set while the space is the account's free preview: private until its date, with hosting one step away.
+ */
+export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, scene?: { path: string; thumbnail?: string; public?: boolean },
+  preview?: { until: string | null; price?: string }) {
   const viewer = scene ? `${origin}${scene.path}` : spacePage(origin, space);
   // Installations that publish locally list the thumbnail by path; mail needs the full address.
   const thumbnail = scene?.thumbnail?.startsWith("/") ? `${origin}${scene.thumbnail}` : scene?.thumbnail;
   const shared = scene?.public === true;
+  const image = thumbnail ? [{ kind: "image" as const, src: thumbnail, href: viewer, alt: space.title }] : [];
+  if (preview) {
+    const until = preview.until ? new Date(preview.until).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : "";
+    return render({
+      brand, origin, subject: `${space.title} is ready`,
+      preheader: until ? `Your free preview is ready. Only you can open it until ${until}.` : "Your free preview is ready. Only you can open it.",
+      eyebrow: space.title, heading: "Your preview is ready",
+      blocks: [
+        ...image,
+        { kind: "text", text: `This is your free preview, so only you can open it${until ? `, until ${until}` : ""}. Look it over. When you are happy with it, start hosting to make it public with a link you can share and embed, or to keep it past that date. It is the same space and the same link either way.` },
+        ...(preview.price ? [{ kind: "text" as const, text: `Hosting is ${preview.price}, and you can cancel any time.` }] : [])
+      ],
+      action: { label: "Open your preview", url: viewer },
+      secondary: { label: "Publish it or keep it hosted", url: spacePage(origin, space) }
+    });
+  }
   return render({
     brand, origin, subject: `${space.title} is ready`,
     preheader: shared ? "Your space is hosted, and anyone with its link can open it." : "Your space is hosted. Only you can open it until you make it public.",
     eyebrow: space.title, heading: "Your space is ready",
     blocks: [
-      ...(thumbnail ? [{ kind: "image" as const, src: thumbnail, href: viewer, alt: space.title }] : []),
+      ...image,
       { kind: "text", text: shared ? "It is public, so anyone with the link can open it. Change who can see it on the space page."
         : "It is private for now, so only you can open it. Make it public on the space page whenever you want to share the link." }
     ],

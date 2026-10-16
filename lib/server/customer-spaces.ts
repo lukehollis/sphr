@@ -1,8 +1,9 @@
 import { readSceneEdits, readSceneTourTitles } from "./admin-store";
 import { isScenePublic, sceneBuildersChoice } from "./admin-store";
-import { cancellationDate, cancellationScheduled, latestJob, listUploads, matchingDomainTeam, payableSpaceCount, readSubscription, userTeam, type CustomerSpace, type User } from "./accounts-store";
+import { cancellationDate, cancellationScheduled, latestJob, listUploads, matchingDomainTeam, payableSpaceCount, readSpacePreview, readSubscription, userTeam, type CustomerSpace, type User } from "./accounts-store";
 import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
+import { previewOffer, spacePreview } from "./previews";
 import { salesEmail, sourceUrl } from "./brand";
 import { maxSpaceBytes } from "./uploads";
 import { readSourceScenes } from "../scene-catalog";
@@ -16,6 +17,10 @@ export async function describeSpace(space: CustomerSpace) {
   return {
     id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, output: space.output, message: space.message,
     created: space.created, updated: space.updated, hosted: spaceHosted(space),
+    /** Set while the space is the account's free preview: private to its owner, for a few days after its first result. */
+    preview: spacePreview(space),
+    /** The space began as the account's free preview, whether or not hosting has started since. */
+    previewed: Boolean(readSpacePreview(space.id)),
     scene: listing ? { sceneId: listing.sceneId, path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(listing.sceneId),
       builders: sceneBuildersChoice(listing.sceneId) ?? false } : null,
     job: job ? { status: job.status, created: job.created, started: job.started, finished: job.finished,
@@ -33,6 +38,8 @@ export function describeAccount(user: User) {
   return {
     email: user.email, name: user.name, emailVerified: user.emailVerified, hasPassword: user.hasPassword, providers: user.providers,
     billing: billingEnabled(), maxSpaceBytes: maxSpaceBytes(), sourceUrl: sourceUrl() ?? null, salesEmail: salesEmail() ?? null,
+    /** The free preview on offer to this account: null without billing. */
+    preview: previewOffer(user.id),
     /** Spaces that count toward a plan: every space not deleted. */
     spaceCount: payableSpaceCount(user.id),
     team: membership ? {

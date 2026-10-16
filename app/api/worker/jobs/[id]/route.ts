@@ -4,6 +4,9 @@ import { accountsEnabled, notifyOwner, publicOrigin } from "@/lib/server/account
 import { jobDetails, jobListing, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { listingRevision, removePublishedScene } from "@/lib/server/published-assets";
 import { spaceFailedEmail, spaceReadyEmail } from "@/lib/server/emails";
+import { readPlans } from "@/lib/server/billing";
+import { spacePreview } from "@/lib/server/previews";
+import { formatPlanPrice } from "@/lib/price";
 import { contactEmail, siteBrand } from "@/lib/server/brand";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
@@ -72,12 +75,17 @@ export async function POST(request: Request, { params }: Params) {
         void removePublishedScene(job.sceneId, revision).catch(error => console.error("Unable to remove earlier revisions:", error instanceof Error ? error.message : error));
       }
       if (result.job.status === "done") {
+        // The account's free preview: ready to open privately, with hosting one step away.
+        const preview = spacePreview(result.space);
         await recordEvent("space_ready", { userId: result.space.userId });
-        void notifyTeam({ title: "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
+        if (preview) await recordEvent("preview_ready", { userId: result.space.userId, props: { first: result.previewStarted } });
+        void notifyTeam({ title: preview ? "Preview ready" : "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
           ["Account", readUser(result.space.userId)?.email], ["Link", `${publicOrigin(request)}${listing.scenePath}`], ["Note", message]] });
+        // The price comes from Stripe (cached); the email goes without it when Stripe cannot be reached.
+        const price = preview ? await readPlans().then(plans => plans[0] && formatPlanPrice(plans[0])).catch(() => undefined) : undefined;
         // A space processed again keeps its scene ID and the visibility its owner chose.
         void notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
-          { path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(job.sceneId) }));
+          { path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(job.sceneId) }, preview ? { until: preview.until, price } : undefined));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }
