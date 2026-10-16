@@ -20,6 +20,7 @@ registerHooks({
 });
 
 const { xrPanelFor, nextButtonLabel } = await import('../lib/xr-panel.ts');
+const { textDirection } = await import('../lib/tour-html.ts');
 
 const state = (extra = {}) => ({ loading: { label: 'Ready', progress: 1, ready: true }, activeSpaceIndex: 0, activePointIndex: 1,
   viewMode: 'FPV', guided: true, muted: false, showText: true, debug: false, navigating: false, ...extra });
@@ -77,4 +78,15 @@ test('the closing card, exploring freely, and spaces without a tour', () => {
   assert.equal(free.title, 'Delphi');
   assert.deepEqual(ids(free), ['guide *']);
   assert.equal(xrPanelFor({ state: state({ guided: false }), point: stop, hasGuidedTour: false, isLastPoint: false }), null);
+});
+
+test('text runs the way its first letter does, so Arabic and Hebrew read right to left', () => {
+  assert.equal(textDirection('مرحبًا بكم في دير سانت كاترين.'), 'rtl');
+  assert.equal(textDirection('1500 عام'), 'rtl');
+  assert.equal(textDirection('שלום'), 'rtl');
+  assert.equal(textDirection('Welcome to the monastery.'), 'ltr');
+  assert.equal(textDirection('“Sinai” جبل'), 'ltr');
+  assert.equal(textDirection('聖カタリナ修道院'), 'ltr');
+  assert.equal(textDirection('1500'), 'ltr');
+  assert.equal(textDirection(undefined), 'ltr');
 });

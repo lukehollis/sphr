@@ -35,11 +35,14 @@ function continueTarget(url: string) {
   catch { return "_top"; }
 }
 
-/** Text written in the tour builder is plain; older authored tours carry HTML. */
+/**
+ * Text written in the tour builder is plain; older authored tours carry HTML. Either runs
+ * in the direction of its first letters, so an Arabic or Hebrew stop reads right to left.
+ */
 function StopText({ value, plain, className }: { value?: string | null; plain: boolean; className: string }) {
   if (!value) return null;
-  if (!plain) return <div className={className} dangerouslySetInnerHTML={{ __html: value }} />;
-  return <div className={className}>{paragraphs(value).map((part, index) => <p key={index}>{part}</p>)}</div>;
+  if (!plain) return <div className={className} dir="auto" dangerouslySetInnerHTML={{ __html: value }} />;
+  return <div className={className} dir="auto">{paragraphs(value).map((part, index) => <p key={index}>{part}</p>)}</div>;
 }
 
 /** The closing card after the last stop of a tour or the last find of a hunt. */
@@ -126,8 +129,8 @@ export default function TourOverlay({ point, ui, description, state, isLastPoint
     <section className={`tour-overlay${styleClass}`} aria-live="polite">
       {state.guided && Boolean(text || secondaryText || primaryFile || mapUrl || hunt) && (
         <div className={hunt ? "tour-copy tour-hunt" : "tour-copy"} ref={copy}>
-          {hunt && <p className="tour-hunt-step">{found ? "Found" : `Clue ${hunt.step} of ${hunt.steps}`}{point.title ? <span>{point.title}</span> : null}</p>}
-          {!hunt && point.title && plain && <p className="tour-stop-title">{point.title}</p>}
+          {hunt && <p className="tour-hunt-step">{found ? "Found" : `Clue ${hunt.step} of ${hunt.steps}`}{point.title ? <span dir="auto">{point.title}</span> : null}</p>}
+          {!hunt && point.title && plain && <p className="tour-stop-title" dir="auto">{point.title}</p>}
           {mapUrl && <div><iframe className="tour-map" src={mapUrl} title="Tour location map" referrerPolicy="no-referrer-when-downgrade" />
             <a className="tour-media-link" href={mapUrl.replace(/([?&])output=embed(&|$)/, '$1')} target="_blank" rel="noopener noreferrer">Open map</a></div>}
           {point.files?.map((file, index) => <TourMedia key={`${point.id}-${index}`} file={file} />)}

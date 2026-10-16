@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { XrPanel } from "@/lib/types";
+import { textDirection } from "@/lib/tour-html";
 
 /** Canvas pixels across the panel; a pixel is about a millimeter at the panel's width. */
 const WIDTH = 1024;
@@ -13,7 +14,7 @@ const GAP = 2;
 const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
 const ACCENT = "#0098db";
 
-type Line = { text: string; font: string; color: string; height: number; rule?: boolean };
+type Line = { text: string; font: string; color: string; height: number; rule?: boolean; rtl?: boolean };
 type ButtonBox = { id: string; enabled: boolean; x: number; y: number; w: number; h: number };
 /** Where a ray meets the panel: the button under it (when it can be pressed) and how far away. */
 export type PanelHit = { button: string | null; distance: number; point: THREE.Vector3 };
@@ -118,16 +119,19 @@ export class TourPanel {
     if (!panel) { this.height = 0; this.texture.needsUpdate = true; return; }
     const inner = WIDTH - PAD * 2;
     const lines: Line[] = [];
-    const add = (text: string, font: string, color: string, lineHeight: number, rule?: boolean) => {
+    // Each block runs the way its first letter does, and a stop's paragraphs go together, as on screen.
+    const add = (text: string, font: string, color: string, lineHeight: number, rule?: boolean, direction = textDirection(text)) => {
       context.font = font;
-      for (const line of wrap(context, text, rule ? inner - 24 : inner)) lines.push({ text: line, font, color, height: lineHeight, rule });
+      const rtl = direction === "rtl";
+      for (const line of wrap(context, text, rule ? inner - 24 : inner)) lines.push({ text: line, font, color, height: lineHeight, rule, rtl });
     };
     const gap = (height: number) => lines.push({ text: "", font: "", color: "", height });
     if (panel.eyebrow) { add(panel.eyebrow.toUpperCase(), `600 22px ${FONT}`, "#a9b0b8", 32); gap(8); }
     if (panel.title) { add(panel.title, `700 40px ${FONT}`, "#ffffff", 50); gap(14); }
+    const direction = textDirection(panel.paragraphs.join(" "));
     panel.paragraphs.forEach((paragraph, index) => {
       if (index) gap(16);
-      add(paragraph, `400 30px ${FONT}`, "#f0f0f0", 42);
+      add(paragraph, `400 30px ${FONT}`, "#f0f0f0", 42, false, direction);
     });
     if (panel.note) { gap(20); add(panel.note, `400 28px ${FONT}`, "#ffffff", 40, true); }
     const textHeight = lines.reduce((sum, line) => sum + line.height, 0);
@@ -150,10 +154,14 @@ export class TourPanel {
     let y = PAD - this.scroll;
     for (const line of lines) {
       if (line.text) {
+        const indent = line.rule ? 24 : 0;
         context.font = line.font;
         context.fillStyle = line.color;
-        context.fillText(line.text, PAD + (line.rule ? 24 : 0), y + line.height * 0.76);
-        if (line.rule) { context.fillStyle = ACCENT; context.fillRect(PAD, y, 4, line.height); }
+        // Right-to-left lines start at the right edge, and a note's rule moves there too.
+        context.direction = line.rtl ? "rtl" : "ltr";
+        context.textAlign = line.rtl ? "right" : "left";
+        context.fillText(line.text, line.rtl ? WIDTH - PAD - indent : PAD + indent, y + line.height * 0.76);
+        if (line.rule) { context.fillStyle = ACCENT; context.fillRect(line.rtl ? WIDTH - PAD - 4 : PAD, y, 4, line.height); }
       }
       y += line.height;
     }
@@ -184,8 +192,10 @@ export class TourPanel {
       context.font = `600 28px ${FONT}`;
       context.fillStyle = !box.enabled ? "#7d828a" : button.primary ? "#000000" : "#ffffff";
       context.textAlign = "center";
+      context.direction = textDirection(button.label);
       context.fillText(fit(context, button.label, box.w - 24), box.x + box.w / 2, box.y + box.h / 2 + 10);
       context.textAlign = "left";
+      context.direction = "ltr";
     }
 
     this.texture.needsUpdate = true;

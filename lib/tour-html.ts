@@ -36,3 +36,12 @@ export function sanitizeTourHtml(html: string | null | undefined) {
   copy(source, output);
   return output.innerHTML;
 }
+
+// Letters of the scripts written right to left: Hebrew, Arabic, Syriac, Thaana, N'Ko and others.
+const rightToLeft = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+
+/** The way text runs, from its first letter, as a browser decides it for dir="auto". */
+export function textDirection(text: string | null | undefined): "ltr" | "rtl" {
+  const letter = text?.match(/\p{L}/u)?.[0];
+  return letter && rightToLeft.test(letter) ? "rtl" : "ltr";
+}
