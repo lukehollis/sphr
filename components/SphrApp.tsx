@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
 import { ViewerSession, type ViewerEntry } from "@/lib/viewer/ViewerSession";
+import { GraphicsUnavailable } from "@/lib/three/glContext";
 import HudControls, { type SpaceDetails, type TourHeart } from "@/components/HudControls";
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
@@ -186,6 +187,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
       } catch (error) {
         if (cancelled) return;
         console.error(error);
+        // The space never opened, so no lost-context notice would come from the viewer itself.
+        if (error instanceof GraphicsUnavailable && error.graphics === "lost") reportError("webgl", new Error("WebGL context lost at start"), error.details);
         editor?.onReady(null, error instanceof Error ? error.message : 'Unable to load scene.');
         // A page framing this one (mused.com's tours) can offer another tour instead.
         if (!editor && window.parent !== window) window.parent.postMessage({ type: "spacery:error", page: window.location.pathname }, "*");

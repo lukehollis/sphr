@@ -50,14 +50,23 @@ const source = {
 function setup(t) {
   const priorDocument = globalThis.document;
   const priorRenderers = globalThis.renderers;
-  const element = () => ({ dataset: {}, style: {}, children: [], append(child) { this.children.push(child); }, setAttribute() {}, remove() { this.removed = true; } });
-  globalThis.document = { createElement: element };
+  const priorContexts = globalThis.contexts;
+  // Each canvas's WebGL context, in the order canvases ask: 'ready' unless a test queues 'lost' or 'none'.
+  const context = kind => kind === 'none' ? null : { VERTEX_SHADER: 1, HIGH_FLOAT: 2, lost: kind === 'lost',
+    isContextLost() { return this.lost; }, getShaderPrecisionFormat() { return this.lost ? null : { precision: 23 }; } };
+  const element = () => ({ dataset: {}, style: {}, children: [], listeners: {}, append(child) { this.children.push(child); }, setAttribute() {}, remove() { this.removed = true; },
+    addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); },
+    removeEventListener(type, listener) { this.listeners[type] = (this.listeners[type] ?? []).filter(item => item !== listener); },
+    getContext() { if (!('gl' in this)) this.gl = context(globalThis.contexts.shift() ?? 'ready'); return this.gl; } });
+  globalThis.document = { createElement: element, hidden: false, addEventListener() {}, removeEventListener() {} };
   globalThis.renderers = [];
-  const container = element(), states = [];
-  const session = new ViewerSession(container, structuredClone(source), { onState: state => states.push(structuredClone(state)) });
-  t.after(() => { session.dispose(); globalThis.document = priorDocument; globalThis.renderers = priorRenderers; });
-  return { session, container, states };
+  globalThis.contexts = [];
+  const container = element(), states = [], restored = [];
+  const session = new ViewerSession(container, structuredClone(source), { onState: state => states.push(structuredClone(state)), onContextRestored: details => restored.push(details) });
+  t.after(() => { session.dispose(); globalThis.document = priorDocument; globalThis.renderers = priorRenderers; globalThis.contexts = priorContexts; });
+  return { session, container, states, restored };
 }
+const settle = () => new Promise(resolve => setImmediate(resolve));
 async function open(session) {
   const pending = session.init();
   renderers[0].complete();
@@ -148,4 +157,55 @@ test('disposing during a model load never reveals a late renderer', async t => {
   assert.equal(container.children[1].style.opacity, '0');
   assert.equal(renderers[0].disposed, true);
   assert.equal(renderers[1].disposed, true);
+});
+
+test('a context lost from the start that comes back opens the space on its canvas', async t => {
+  const { session, container, restored } = setup(t);
+  contexts.push('lost');
+  const opening = session.init();
+  await settle();
+  assert.equal(renderers.length, 0);
+  const canvas = container.children[0].children[0];
+  canvas.gl.lost = false;
+  for (const listener of canvas.listeners.webglcontextrestored) listener();
+  await settle();
+  assert.equal(renderers[0].canvas, canvas);
+  renderers[0].complete(); await opening;
+  assert.equal(session.getState().loading.ready, true);
+  assert.match(restored[0], /^lost at start, back after/);
+});
+
+test('a new canvas takes over when the lost context stays lost', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { session, container, restored } = setup(t);
+  contexts.push('lost', 'ready');
+  const opening = session.init();
+  await settle();
+  const [first] = container.children[0].children;
+  t.mock.timers.tick(3000);
+  await settle();
+  assert.equal(first.removed, true);
+  assert.notEqual(renderers[0].canvas, first);
+  renderers[0].complete(); await opening;
+  assert.equal(session.getState().loading.ready, true);
+  assert.match(restored[0], /^lost at start, a new canvas drew/);
+});
+
+test('a space whose graphics never start says so in plain words instead of failing in three.js', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { session } = setup(t);
+  contexts.push('lost', 'lost');
+  const opening = session.init();
+  const failure = assert.rejects(opening, error => error.graphics === 'lost' && /quit and reopen the browser/.test(error.message) && /a new canvas lost too/.test(error.details));
+  await settle(); t.mock.timers.tick(3000);
+  await settle(); t.mock.timers.tick(3000);
+  await failure;
+  assert.equal(renderers.length, 0);
+});
+
+test('a browser without WebGL 2 is told so at once', async t => {
+  const { session } = setup(t);
+  contexts.push('none');
+  await assert.rejects(session.init(), error => error.graphics === 'none' && /can't show 3D graphics/.test(error.message));
+  assert.equal(renderers.length, 0);
 });

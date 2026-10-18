@@ -1,6 +1,7 @@
 import { normalizeTour } from '@/lib/bootstrap';
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, XrPanel } from '@/lib/types';
 import { SphrRuntime, type EntryView, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
+import { contextBack, GraphicsUnavailable, openContext } from '@/lib/three/glContext';
 import { assertNativeBootstrap } from './native';
 import { nextTourLocation, tourSegment } from './segments';
 
@@ -13,6 +14,7 @@ export class ViewerSession {
   private active?: Stage;
   private pending?: Stage;
   private disposed = false;
+  private readonly closing = new AbortController();
   private viewInset = 0;
   private switching = false;
   private retiring = new Map<Stage, ReturnType<typeof setTimeout>>();
@@ -46,6 +48,36 @@ export class ViewerSession {
     stage?.element.remove();
   }
 
+  private canvasIn(element: HTMLElement) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'sphr-canvas';
+    canvas.setAttribute('aria-label', 'SPHR interactive scene');
+    element.append(canvas);
+    return canvas;
+  }
+
+  /**
+   * The browser gave the space a context that was lost from the start. It may come back, or a new canvas may get one
+   * that works (asking for the everyday graphics chip this time). Either way the analytics hear of it.
+   */
+  private async regainGraphics(element: HTMLElement, canvas: HTMLCanvasElement) {
+    const started = performance.now();
+    const hidden = document.hidden ? ', opened hidden' : '';
+    const after = () => `${((performance.now() - started) / 1000).toFixed(1)} s`;
+    if (await contextBack(canvas, this.closing.signal)) {
+      this.callbacks.onContextRestored?.(`lost at start${hidden}, back after ${after()}`);
+      return canvas;
+    }
+    canvas.remove();
+    if (this.disposed) return canvas;
+    const fresh = this.canvasIn(element);
+    let graphics = openContext(fresh, true);
+    if (graphics === 'lost' && await contextBack(fresh, this.closing.signal)) graphics = 'ready';
+    if (graphics !== 'ready') throw new GraphicsUnavailable('lost', `lost at start${hidden}, a new canvas ${graphics === 'none' ? 'got none' : 'lost too'}, ${after()}`);
+    this.callbacks.onContextRestored?.(`lost at start${hidden}, a new canvas drew after ${after()}`);
+    return fresh;
+  }
+
   private async activate(spaceIndex: number, pointIndex?: number, view?: EntryView) {
     const segment = tourSegment(this.bootstrap, spaceIndex, pointIndex ?? 0);
     const previous = this.active;
@@ -63,10 +95,11 @@ export class ViewerSession {
     this.emit();
     try {
       if (segment.space.availability?.status === 'unavailable') throw new Error(segment.space.availability.message);
-      const canvas = document.createElement('canvas');
-      canvas.className = 'sphr-canvas';
-      canvas.setAttribute('aria-label', 'SPHR interactive scene');
-      element.append(canvas);
+      let canvas = this.canvasIn(element);
+      const graphics = openContext(canvas);
+      if (graphics === 'none') throw new GraphicsUnavailable('none');
+      if (graphics === 'lost') canvas = await this.regainGraphics(element, canvas);
+      if (this.disposed) return;
       stage.three = new SphrRuntime(canvas, segment.bootstrap, {
         onState: state => {
           if (this.disposed || (this.pending ?? this.active) !== stage) return;
@@ -254,6 +287,7 @@ export class ViewerSession {
 
   dispose() {
     this.disposed = true;
+    this.closing.abort();
     for (const [stage, timer] of this.retiring) { clearTimeout(timer); this.release(stage); }
     this.retiring.clear();
     this.release(this.pending);
