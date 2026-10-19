@@ -4,6 +4,7 @@
 @import "./design-system/site.css";
 @import "./design-system/spaces.css";
 @import "./design-system/profiles.css";
+@import "./design-system/pricing.css";
 
 * { box-sizing: border-box; }
 html, body {

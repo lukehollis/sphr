@@ -12,7 +12,7 @@ import { allPlayersShown } from "@/lib/server/tour-plays";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Plan", robots: { index: false, follow: false } };
 
-export default async function AccountPlanPage({ searchParams }: { searchParams: Promise<{ build?: string; results?: string; space?: string }> }) {
+export default async function AccountPlanPage({ searchParams }: { searchParams: Promise<{ build?: string; results?: string; space?: string; plan?: string }> }) {
   if (!accountsEnabled() || !billingEnabled()) notFound();
   const query = await searchParams;
   const raw = query.build;
@@ -23,7 +23,10 @@ export default async function AccountPlanPage({ searchParams }: { searchParams: 
   const spaceId = typeof query.space === "string" && /^[a-f0-9]{12}$/.test(query.space) ? query.space : undefined;
   // Choosing a plan to see every player of one of the customer's tours (lib/server/tour-plays.ts).
   const results = typeof query.results === "string" && /^[a-f0-9]{12}$/.test(query.results) ? query.results : undefined;
-  if (!user) redirect(`/account/login?next=${encodeURIComponent(results ? `/account/plan?results=${results}` : build ? `/account/plan?build=${build}` : spaceId ? `/account/plan?space=${spaceId}` : "/account/plan")}`);
+  // A plan picked on the pricing page, chosen here already.
+  const picked = typeof query.plan === "string" && /^price_[A-Za-z0-9]{1,100}$/.test(query.plan) ? query.plan : undefined;
+  if (!user) redirect(`/account/login?next=${encodeURIComponent(results ? `/account/plan?results=${results}` : build ? `/account/plan?build=${build}`
+    : spaceId ? `/account/plan?space=${spaceId}` : picked ? `/account/plan?plan=${picked}` : "/account/plan")}`);
   const tour = results ? readUserTour(results) : undefined;
   const resultsTour = tour && sameTeam(tour.userId, user.id) ? results : undefined;
   if (resultsTour && allPlayersShown(user.id)) redirect(`/account/tours/${resultsTour}/results`);
@@ -40,5 +43,6 @@ export default async function AccountPlanPage({ searchParams }: { searchParams: 
   const mine = owned && owned.status !== "deleted" && sameTeam(owned.userId, user.id) ? owned : undefined;
   const preview = mine ? spacePreview(mine) : null;
   const forSpace = mine && !resultsTour && !build ? { id: mine.id, title: mine.title, until: preview?.until ?? null, expired: Boolean(preview?.expired) } : undefined;
-  return <PlanPage brand={siteBrand()} account={account} plans={offered} build={resultsTour ? undefined : build} results={resultsTour} forSpace={forSpace} />;
+  return <PlanPage brand={siteBrand()} account={account} plans={offered} build={resultsTour ? undefined : build} results={resultsTour} forSpace={forSpace}
+    picked={offered.some(plan => plan.id === picked) ? picked : undefined} />;
 }

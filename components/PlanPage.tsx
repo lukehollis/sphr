@@ -26,10 +26,13 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
  * From a tour's class results (`results`), it also comes before any space; the page offers only
  * the plans that show every player (pay as you go bills nothing until there is a space, so it can't).
  * From a space's page (`forSpace`), it publishes a free preview or keeps it: Checkout returns to that space.
+ * From the pricing page (`picked`), that plan is chosen already, and a plan covering a set number of
+ * spaces can be paid for before any space.
  */
-export default function PlanPage({ account: initial, plans, brand, build, results, forSpace }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
+export default function PlanPage({ account: initial, plans, brand, build, results, forSpace, picked }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
   /** The customer's tour whose class results they came to see in full. */ results?: string;
-  /** The space being published or kept after its free preview. */ forSpace?: { id: string; title: string; until: string | null; expired: boolean } }) {
+  /** The space being published or kept after its free preview. */ forSpace?: { id: string; title: string; until: string | null; expired: boolean };
+  /** The plan chosen on the pricing page. */ picked?: string }) {
   const [account, setAccount] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -39,9 +42,11 @@ export default function PlanPage({ account: initial, plans, brand, build, result
   const forResults = Boolean(results) && !active;
   const paused = Boolean(subscription && !active && ["unpaid", "incomplete", "paused"].includes(subscription.status));
   const current = active ? currentPlan(plans, subscription) : undefined;
-  const [choice, setChoice] = useState<string | null>(null);
+  const [choice, setChoice] = useState<string | null>(picked ?? null);
   const selected = plans.find(plan => plan.id === choice) ?? current ?? plans[0];
   const spaces = account.spaceCount;
+  // Before any space, a plan covering a set number of spaces is paid for now; pay as you go waits for a space.
+  const upfront = spaces === 0 && Boolean(selected && selected.spaces !== null);
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError(""); setMessage("");
@@ -77,12 +82,14 @@ export default function PlanPage({ account: initial, plans, brand, build, result
     lead = `Building tours and scavenger hunts by hand is free. With a plan the agent drafts them for you as often as you like.${perSpace ? ` Pay as you go costs nothing until you host a space of your own, then ${price(perSpace)} for each.` : ""}`;
   } else if (active && current) {
     lead = current.spaces === null ? `You're on pay as you go with ${spaces} ${spaces === 1 ? "space" : "spaces"}${total ? `, ${total}` : ""}.`
-      : `You're on ${current.name} at ${price(current)}, which covers up to ${current.spaces} spaces. You have ${spaces}.`;
+      : `You're on ${current.name} at ${price(current)}, which covers ${current.spaces === 1 ? "one space" : `up to ${current.spaces} spaces`}. You have ${spaces}.`;
   } else if (active) lead = "Your plan is not offered any more. You can keep it or choose another below.";
   else if (paused) lead = "Hosting is paused until a payment goes through. Update your payment method to change plans.";
   else if (forSpace) {
     lead = forSpace.expired ? `${forSpace.title} is offline because its free preview ended. Start hosting to bring it back, with the same link.`
       : `Start hosting to make ${forSpace.title} public with a link you can share and an embed, or to keep it after its free preview${forSpace.until ? ` ends on ${previewDate(forSpace.until)}` : ""}.${perSpace ? ` Pay as you go is ${price(perSpace)} for each space.` : ""}`;
+  } else if (spaces === 0 && plans.length > 1) {
+    lead = `Building tours and scavenger hunts is free. A plan shows every player in your class results, lets the agent draft as often as you like, and covers a set number of spaces of your own.${perSpace ? ` Pay as you go is ${price(perSpace)} for each space you host.` : ""}`;
   } else {
     lead = perSpace ? `Pay as you go is ${price(perSpace)} for each space you host.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}${account.preview?.available ? " Your first capture is a free private preview, so you pay when you publish it or keep it." : ""}`
       : "Plans could not be loaded. Try again in a moment.";
@@ -92,7 +99,8 @@ export default function PlanPage({ account: initial, plans, brand, build, result
     <main className="site-main">
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
-        <div><h1>{building ? forResults ? "Choose a plan to see every player" : "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting" : "Start hosting"}</h1></div>
+        <div><h1>{building ? forResults ? "Choose a plan to see every player" : "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting"
+          : spaces === 0 ? "Choose a plan" : "Start hosting"}</h1></div>
         {active && subscription?.periodEnd ? <p>{subscription.cancelAtPeriodEnd ? "Hosting ends" : "Renews"} {formatDate(subscription.periodEnd)}</p> : null}
       </div>
       <p className="plan-lead">{lead}</p>
@@ -113,7 +121,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
             <button type="button" className="site-button" disabled={busy || !selected || selected.id === current?.id} onClick={change}>
               {busy ? "Changing plans…" : selected && selected.id !== current?.id ? `Switch to ${planLabel(selected)}` : "Choose another plan"}</button>
             <button type="button" className="site-link" disabled={busy} onClick={portal}>Billing and invoices</button>
-          </> : spaces > 0 || building ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
+          </> : spaces > 0 || building || upfront ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
             {busy ? "Opening payment…" : saveCard ? "Add a card" : "Continue to payment"}<span aria-hidden="true">→</span></button>
           : <a className="site-button" href="/account">Add a space<span aria-hidden="true">→</span></a>}
         </div>
@@ -122,7 +130,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
           : building && forResults ? "You pay on a secure checkout page and can cancel any time. Then you're back at your class results."
           : building ? "You pay on a secure checkout page and can cancel any time. Then you go straight to building."
           : forSpace ? "You pay on a secure checkout page, can cancel any time, and come back to your space afterwards."
-          : spaces > 0 ? "You pay on a secure checkout page and can cancel any time."
+          : spaces > 0 || upfront ? "You pay on a secure checkout page and can cancel any time."
           : account.preview?.available ? "Nothing to pay yet. Your first capture is a free private preview, and you pay when you publish it or keep it."
           : "You pay once you add your first space."}</p>
         <EnterpriseNote email={account.salesEmail} />

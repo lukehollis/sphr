@@ -14,7 +14,11 @@ export const fakePrices = {
   price_space: { unit_amount: 100, product: { id: 'prod_space', name: 'Pay as you go' }, metadata: {} },
   price_starter: { unit_amount: 800, product: { id: 'prod_starter', name: 'Starter' }, metadata: { sphr_plan: 'starter', sphr_spaces: '6' } },
   price_pro: { unit_amount: 5000, product: { id: 'prod_pro', name: 'Pro' }, metadata: { sphr_plan: 'pro', sphr_spaces: '30' } },
-  price_enterprise: { unit_amount: 24900, product: { id: 'prod_enterprise', name: 'Enterprise' }, metadata: { sphr_plan: 'enterprise', sphr_spaces: '200' } }
+  price_enterprise: { unit_amount: 24900, product: { id: 'prod_enterprise', name: 'Enterprise' }, metadata: { sphr_plan: 'enterprise', sphr_spaces: '200' } },
+  // A teacher's plan, monthly or yearly, and a school's, yearly.
+  price_classroom: { unit_amount: 900, product: { id: 'prod_classroom', name: 'Classroom' }, metadata: { sphr_plan: 'classroom', sphr_spaces: '1' } },
+  price_classyear: { unit_amount: 7900, interval: 'year', product: { id: 'prod_classroom', name: 'Classroom' }, metadata: { sphr_plan: 'classroom', sphr_spaces: '1' } },
+  price_school: { unit_amount: 49900, interval: 'year', product: { id: 'prod_school', name: 'School' }, metadata: { sphr_plan: 'school', sphr_spaces: '5' } }
 };
 
 // A small stand-in for the Stripe API, keeping just enough state for billing flows.
@@ -25,7 +29,7 @@ export function fakeStripe({ checkoutBase = 'https://checkout.example' } = {}) {
   const price = (priceId, expand) => {
     const known = fakePrices[priceId] ?? { unit_amount: 100, product: { id: 'prod_other', name: 'Other' }, metadata: {} };
     return { id: priceId, object: 'price', active: true, currency: 'usd', unit_amount: known.unit_amount, metadata: known.metadata,
-      nickname: null, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
+      nickname: null, recurring: { interval: known.interval ?? 'month', interval_count: 1, usage_type: 'licensed' },
       product: expand ? { object: 'product', ...known.product } : known.product.id };
   };
   const handler = async (request, response) => {

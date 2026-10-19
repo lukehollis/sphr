@@ -54,7 +54,7 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_APPLE_PRIVATE_KEY: apple.privateKey.export({ format: 'pem', type: 'pkcs8' }).replace(/\n/g, '\\n'),
   SPHR_LINKEDIN_CLIENT_ID: clients.linkedin.id, SPHR_LINKEDIN_CLIENT_SECRET: clients.linkedin.secret,
   SPHR_STRIPE_SECRET_KEY: 'sk_test_fake', SPHR_STRIPE_PRICE_ID: 'price_space', SPHR_STRIPE_WEBHOOK_SECRET: webhookSecret, SPHR_STRIPE_TEST_API: stripeServer.base,
-  SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise', SPHR_SOURCE_URL: 'https://source.example/sphr', SPHR_SALES_EMAIL: 'hello@example.com',
+  SPHR_STRIPE_PLAN_PRICES: 'price_starter,price_pro,price_enterprise,price_classroom,price_classyear,price_school', SPHR_SOURCE_URL: 'https://source.example/sphr', SPHR_SALES_EMAIL: 'hello@example.com',
   NEXT_PUBLIC_SPHR_ANALYTICS: '1', SPHR_ANALYTICS_ORIGINS: 'https://home.example',
   SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '',
   // The free preview holds three files and 20 MB here, 3 new previews a day from one address, and 8 a day on the whole site.
@@ -208,9 +208,20 @@ try {
   assert.ok((await (await anonymous.get('/terms')).text()).includes('mailto:help@example.com'), 'the terms name the contact address');
   const pricing = await anonymous.get('/pricing');
   assert.equal(pricing.status, 200, 'the pricing page is public');
-  const pricingText = (await pricing.text()).replace(/<!-- -->/g, '');
-  assert.ok(pricingText.includes('Pay as you go, $1 a month for each space') && pricingText.includes('Starter, $8 a month, up to 6 spaces'), 'the pricing page lists the plans as Stripe has them');
-  assert.ok(pricingText.includes('free preview') && pricingText.includes('mailto:hello@example.com'), 'the pricing page describes the free preview and names where to write for a larger plan');
+  const pricingText = (await pricing.text()).replace(/<!-- -->/g, '').replaceAll('&#x27;', "'");
+  for (const text of ['Teachers and schools', 'Recommended for teachers', 'Classroom', '$79', 'or $9 a month', 'Save 27% yearly', 'School', '$499',
+    'Hosting your own spaces', 'Pay as you go', '$1', 'a month for each space', 'Starter', '$8', 'Enterprise', '$249', 'up to 200 spaces'])
+    assert.ok(pricingText.includes(text), `the pricing page shows "${text}" as Stripe has it`);
+  assert.ok(pricingText.indexOf('Classroom') < pricingText.indexOf('Hosting your own spaces'), 'teachers come first');
+  for (const price of ['price_classyear', 'price_classroom', 'price_school', 'price_starter', 'price_enterprise'])
+    assert.ok(pricingText.includes(`/account/signup?next=${encodeURIComponent(`/account/plan?plan=${price}`)}`), `${price} signs a visitor up, then opens the plan page with it chosen`);
+  assert.ok(pricingText.includes(`/account/signup?next=${encodeURIComponent('/account/tours/new')}`), 'the free plan starts with building');
+  assert.ok(pricingText.includes('free private preview') && pricingText.includes('mailto:hello@example.com'), 'the pricing page describes the free preview and names where to write for a larger plan');
+  const pickedNext = encodeURIComponent('/account/plan?plan=price_classyear');
+  const pickedSignup = (await (await anonymous.get(`/account/signup?next=${pickedNext}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(pickedSignup.includes(pickedNext), 'sign-up keeps the chosen plan for after');
+  assert.ok(pickedSignup.includes('Classroom, $79 a year') && pickedSignup.includes('Then pay for Classroom'), 'and names it');
+  assert.equal(location(await anonymous.get('/account/plan?plan=price_classyear')), `/account/login?next=${pickedNext}`, 'and so does sign-in');
   const verifyToken = verification.match(/\/account\/verify\?token=([a-f0-9]{64})/)[1];
   // Opening the link (or a scanner prefetching it) only shows a confirmation page.
   assert.equal(location(await anonymous.get(`/api/account/verify?token=${verifyToken}`)), `${base}/account/verify?token=${verifyToken}`);
@@ -858,6 +869,33 @@ try {
   assert.equal((await alice.get('/api/account/spaces/' + studio.id)).status, 404, 'password sessions end');
   assert.equal((await new Browser().post('/api/account/login', { email: 'alice@example.com', password: 'alice password' })).status, 401);
   await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Google sign-in added'));
+
+  // ---- A teacher buys a plan from the pricing page, before any space ----
+  const tess = new Browser();
+  await signInWith(tess, 'google', { sub: 'google-tess', email: 'tess@school.example', email_verified: true, name: 'Tess' });
+  let teacherPage = (await (await tess.get('/pricing')).text()).replaceAll('<!-- -->', '');
+  assert.ok(teacherPage.includes('Your account') && !teacherPage.includes('/account/signup?next='), 'signed in, the plan buttons pay instead of signing up');
+  assert.equal((await tess.post('/api/account/billing/checkout', {})).status, 400, 'without a space, a plan has to be named');
+  assert.equal((await tess.post('/api/account/billing/checkout', { plan: 'price_space' })).status, 400, 'pay as you go waits for a space');
+  teacherPage = (await (await tess.get('/account/plan?plan=price_classyear')).text()).replaceAll('<!-- -->', '');
+  assert.ok(teacherPage.includes('Choose a plan') && teacherPage.includes('class results') && teacherPage.includes('Continue to payment'), 'the plan page offers to pay before any space');
+  assert.match(teacherPage, /<input(?=[^>]*value="price_classyear")(?=[^>]*checked="")[^>]*>/, 'with the plan from the pricing page chosen');
+  assert.ok(teacherPage.includes('Up to 1 space<') && !teacherPage.includes('1 spaces'), 'one space is said properly');
+  response = await tess.post('/api/account/billing/checkout', { plan: 'price_classyear', source: 'pricing' });
+  assert.equal(response.status, 200, 'a plan can be bought before any space');
+  body = await response.json();
+  const tessSession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.equal(body.url, tessSession.url, 'straight to Checkout');
+  assert.deepEqual([tessSession.mode, tessSession.price, tessSession.quantity], ['subscription', 'price_classyear', 1]);
+  assert.equal(tessSession.success_url, `${base}/account?checkout={CHECKOUT_SESSION_ID}`);
+  assert.equal(tessSession.cancel_url, `${base}/account/plan?plan=price_classyear`);
+  stripeFake.state.pay(tessSession.id);
+  teacherPage = (await (await tess.get(`/account?checkout=${tessSession.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(teacherPage.includes('Your plan is active'), 'back from Checkout, the plan is active');
+  teacherPage = (await (await tess.get('/pricing')).text()).replaceAll('<!-- -->', '').replaceAll('&#x27;', "'");
+  assert.ok(teacherPage.includes("You're on Classroom at $79 a year") && teacherPage.includes('Your plan'), 'the pricing page knows the plan');
+  assert.ok(teacherPage.includes('/account/plan?plan=price_school'), 'and other plans lead to switching');
+  assert.equal((await tess.post('/api/account/billing/checkout', { plan: 'price_school' })).status, 409, 'a second subscription is never started');
 
   // ---- Plans: chosen before paying, full plans, and changing plans ----
   const grace = new Browser();

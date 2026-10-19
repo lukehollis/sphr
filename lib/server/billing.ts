@@ -8,6 +8,7 @@ import { saveEvent } from "./analytics-store";
 import { contactEmail, siteBrand, siteOrigin } from "./brand";
 import { cancellationScheduledEmail, hostingStoppedEmail, paymentFailedEmail, type HostingStop } from "./emails";
 import { sendNotice, type MailContent } from "./mail";
+import { formatPlanPrice } from "../price";
 
 let client: Stripe | undefined;
 const env = (name: string) => process.env[name]?.trim() || undefined;
@@ -33,9 +34,11 @@ const planPriceIds = () => (env("SPHR_STRIPE_PLAN_PRICES") ?? "").split(",").map
 
 /**
  * A way to pay for hosting, identified by its Stripe price. Pay as you go bills each space
- * (`spaces` is null); a plan covers up to `spaces` spaces for one amount.
+ * (`spaces` is null); a plan covers up to `spaces` spaces for one amount. `product` groups a
+ * plan's monthly and yearly prices, and `key` is the price's `sphr_plan` metadata when it has one.
  */
-export type Plan = { id: string; name: string; amount: number; currency: string; interval: string; intervalCount: number; spaces: number | null };
+export type Plan = { id: string; name: string; amount: number; currency: string; interval: string; intervalCount: number; spaces: number | null;
+  product: string; key: string | null };
 const payAsYouGoName = "Pay as you go";
 
 /** Plan prices record how many spaces they cover in their metadata. Any other price bills per space. */
@@ -57,7 +60,8 @@ function toPlan(price: Stripe.Price): Plan | undefined {
   }
   const product = typeof price.product === "object" && !price.product.deleted ? price.product : undefined;
   return { id: price.id, name: spaces === null ? payAsYouGoName : product?.name || price.nickname || `Up to ${spaces} spaces`,
-    amount: price.unit_amount, currency: price.currency, interval: price.recurring.interval, intervalCount: price.recurring.interval_count, spaces };
+    amount: price.unit_amount, currency: price.currency, interval: price.recurring.interval, intervalCount: price.recurring.interval_count, spaces,
+    product: typeof price.product === "string" ? price.product : price.product.id, key: price.metadata?.sphr_plan?.trim().toLowerCase() || null };
 }
 
 let plansCache: { value: Plan[]; expires: number } | undefined;
@@ -81,10 +85,18 @@ export async function readPlans(): Promise<Plan[]> {
   return value;
 }
 
+/** The plan picked on the pricing page that sign-in or sign-up leads on to (`/account/plan?plan=<price>`), to name it there. */
+export async function pickedPlan(returnPath: string) {
+  const id = /^\/account\/plan\?plan=(price_[A-Za-z0-9]{1,100})$/.exec(returnPath)?.[1];
+  const plan = id ? (await readPlans()).find(item => item.id === id) : undefined;
+  return plan ? { name: plan.name, price: formatPlanPrice(plan) } : null;
+}
+
 /** The plan a customer chose, or pay as you go when none is named. */
 async function resolvePlan(id: unknown): Promise<Plan> {
   if (id === undefined || id === null || id === "" || id === priceId()) {
-    return (await readPlans())[0] ?? { id: priceId(), name: payAsYouGoName, amount: 0, currency: "usd", interval: "month", intervalCount: 1, spaces: null };
+    return (await readPlans())[0] ?? { id: priceId(), name: payAsYouGoName, amount: 0, currency: "usd", interval: "month", intervalCount: 1, spaces: null,
+      product: "", key: null };
   }
   const plan = typeof id === "string" ? (await readPlans()).find(item => item.id === id) : undefined;
   if (!plan) throw new AccountError("That plan is not offered any more. Reload the page and choose again.");
@@ -123,24 +135,29 @@ function assertBillingManager(userId: string) {
  * a plan named, an open session keeps its plan while that plan still covers every space.
  * `space` is the space whose page the customer paid from (a free preview they are publishing): Checkout then
  * returns there, unless an agent started it and is waiting on the dashboard message.
+ * A plan that covers a set number of spaces can also be bought before any space, from the pricing
+ * page (a teacher taking a plan for class results); pay as you go still needs a space or the builder.
  */
 export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string, space?: string): Promise<CheckoutStart> {
   assertBillingManager(user.id);
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
     const count = payableSpaceCount(current.id);
-    if (!count && !build) throw new AccountError("Add a space before paying.");
+    const upfront = !count && !build ? await resolvePlan(planId) : undefined;
+    if (upfront && upfront.spaces === null) throw new AccountError("Add a space before paying.");
     const customer = await ensureCustomer(current);
-    // Someone choosing a plan to build tours, before any space of their own. Pay as you go
-    // costs nothing yet, so Checkout only saves a card; a plan starts its subscription now.
+    // Someone choosing a plan to build tours, to see class results, or from the pricing page, before any
+    // space of their own. Pay as you go costs nothing yet, so Checkout only saves a card; a plan starts its subscription now.
     const back = build && `${origin}${build}${build.includes("?") ? "&" : "?"}checkout={CHECKOUT_SESSION_ID}`;
-    if (!count && build) {
-      const plan = await resolvePlan(planId);
+    if (!count) {
+      const plan = upfront ?? await resolvePlan(planId);
+      const success = back || `${origin}/account?checkout={CHECKOUT_SESSION_ID}`;
+      const cancel = build ? `${origin}${planPath(build)}` : `${origin}/account/plan?plan=${plan.id}`;
       if (plan.spaces === null) {
         const session = await stripe().checkout.sessions.create({
           mode: "setup", customer, client_reference_id: user.id, currency: plan.currency,
           setup_intent_data: { metadata: { sphr_user: user.id } },
-          success_url: back!, cancel_url: `${origin}${planPath(build)}`
+          success_url: success, cancel_url: cancel
         });
         return { url: session.url!, plan: plan.id };
       }
@@ -151,7 +168,7 @@ export async function startCheckout(user: User, origin: string, planId?: unknown
         mode: "subscription", customer, client_reference_id: user.id,
         line_items: [{ price: plan.id, quantity: 1 }],
         subscription_data: { metadata: { sphr_user: user.id } },
-        success_url: back!, cancel_url: `${origin}${planPath(build)}`,
+        success_url: success, cancel_url: cancel,
         ...(env("SPHR_STRIPE_AUTOMATIC_TAX") === "1" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" as const } } : {})
       });
       return { url: session.url!, plan: plan.id };

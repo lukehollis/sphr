@@ -40,8 +40,9 @@ function ProviderIcon({ id }: { id: string }) {
 const inAppBrowsers: [RegExp, string][] = [[/Instagram/, "Instagram"], [/FBAN|FBAV|FB_IAB/, "Facebook"], [/LinkedInApp/, "LinkedIn"],
   [/\bLine\//, "LINE"], [/musical_ly|BytedanceWebview|TikTok/i, "TikTok"], [/Snapchat/, "Snapchat"], [/Pinterest/, "Pinterest"], [/; wv\)/, ""]];
 
-export default function AccountAuth({ mode: initialMode, providers: allProviders, passwordEnabled, returnPath, error: errorCode, brand, buildPreview }:
-  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string; buildPreview?: AuthBuildPreview | null }) {
+export default function AccountAuth({ mode: initialMode, providers: allProviders, passwordEnabled, returnPath, error: errorCode, brand, buildPreview, plan }:
+  { mode: "login" | "signup"; providers: Provider[]; passwordEnabled: boolean; returnPath: string; error?: string; brand: string; buildPreview?: AuthBuildPreview | null;
+    /** The plan picked on the pricing page, paid for after this step. */ plan?: { name: string; price: string } | null }) {
   const [mode, setMode] = useState<"login" | "signup" | "forgot">(initialMode);
   const [error, setError] = useState(errorCode ? errors[errorCode] ?? errors.failed : "");
   const [message, setMessage] = useState("");
@@ -73,12 +74,20 @@ export default function AccountAuth({ mode: initialMode, providers: allProviders
   const next = returnPath === "/account" ? "" : `?next=${encodeURIComponent(returnPath)}`;
   const heading = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Sign in";
   const building = returnPath.startsWith("/account/tours/new");
-  const lede = mode === "signup" ? building ? "Then build a guided tour or a scavenger hunt from a few words, or with your own agent." : "Add a space, upload your capture, and we host it." : mode === "forgot" ? "We will email you a link to choose a new password." : building ? "Sign in to open the 3D builder for this space." : "Welcome back.";
+  const lede = mode === "signup" ? plan ? `Then pay for ${plan.name} on a secure checkout page and start building.` : building ? "Then build a guided tour or a scavenger hunt from a few words, or with your own agent." : "Add a space, upload your capture, and we host it."
+    : mode === "forgot" ? "We will email you a link to choose a new password." : plan ? `Sign in to continue to ${plan.name}.` : building ? "Sign in to open the 3D builder for this space." : "Welcome back.";
   const plateHeadline = buildPreview
     ? `Make a ${buildPreview.kind === "hunt" ? "scavenger hunt" : "guided tour"} in ${buildPreview.title}.`
-    : building ? "Build guided tours & 3D scavenger hunts." : "Host 3D captures as virtual spaces.";
-  return <AuthShell brand={brand} headline={plateHeadline} facts={building ? builderFacts : customerFacts}>
+    : building || plan ? "Build guided tours & 3D scavenger hunts." : "Host 3D captures as virtual spaces.";
+  return <AuthShell brand={brand} headline={plateHeadline} facts={building || plan ? builderFacts : customerFacts}>
     <div className="site-auth-form">
+      {plan && mode !== "forgot" && <div className="site-auth-preview site-auth-plan">
+        <div className="site-auth-preview-body">
+          <span className="site-auth-preview-tag">Your plan</span>
+          <strong>{plan.name}, {plan.price}</strong>
+          <span>You pay on a secure checkout page after this step, and can cancel any time.</span>
+        </div>
+      </div>}
       {buildPreview && mode !== "forgot" && <div className="site-auth-preview">
         <img src={buildPreview.thumbnail} alt="" width={160} height={106} />
         <div className="site-auth-preview-body">

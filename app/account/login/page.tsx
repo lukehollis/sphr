@@ -4,6 +4,7 @@ import { accountsEnabled, currentUser, safeReturnPath } from "@/lib/server/accou
 import { mailConfigured } from "@/lib/server/mail";
 import { enabledProviders } from "@/lib/server/oauth";
 import { siteBrand } from "@/lib/server/brand";
+import { pickedPlan } from "@/lib/server/billing";
 import { buildScenePreview } from "@/lib/server/user-tours";
 
 export const dynamic = "force-dynamic";
@@ -16,5 +17,5 @@ export default async function AccountLoginPage({ searchParams }: { searchParams:
   if (await currentUser()) redirect(returnPath);
   const buildPreview = await buildScenePreview(returnPath);
   return <AccountAuth brand={siteBrand()} mode="login" providers={enabledProviders()} passwordEnabled={mailConfigured()} returnPath={returnPath}
-    error={typeof params.error === "string" ? params.error : undefined} buildPreview={buildPreview} />;
+    error={typeof params.error === "string" ? params.error : undefined} buildPreview={buildPreview} plan={await pickedPlan(returnPath)} />;
 }

@@ -300,6 +300,8 @@ a.site-card:hover h3, .site-card-link:hover h3 { text-decoration: underline; tex
 .site-auth-preview-tag { color: var(--accent); font-size: 11px; font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.04em; }
 .site-auth-preview-body strong { color: var(--text-heading); font-size: 15px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .site-auth-preview-body span:last-child { color: var(--site-muted); font-size: 12px; }
+/* The plan picked on the pricing page: no thumbnail, so the text takes the whole card. */
+.site-auth-plan { grid-template-columns: minmax(0, 1fr); padding: 12px 14px; }
 .site-auth-heading { margin-bottom: var(--space-4); }
 .site-auth-heading h2 { margin: 6px 0 8px; color: var(--text-heading); font-size: 32px; line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
 .site-auth-heading p { margin: 0; color: var(--site-muted); line-height: var(--leading-body); }

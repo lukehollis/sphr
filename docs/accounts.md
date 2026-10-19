@@ -177,6 +177,19 @@ for names (`tour_results_off`) and delete a tour's results. The operator hears o
 tour's players start. A yearly plan covering one space (for example "Classroom", `sphr_spaces=1`)
 suits teachers.
 
+The public pricing page (`/pricing`) shows every plan as a card with its own button, read from
+Stripe like the plan page. Prices of the same Stripe product (a plan's monthly and yearly prices)
+share a card, with the yearly price first and the saving shown. Plans whose `sphr_plan` metadata
+(or product name) is `classroom` or `school` are listed for teachers and schools, after a free card,
+and the smallest of them carries the page's one red button; every other plan is listed under hosting.
+Visitors who are signed out go to sign-up and then to `/account/plan?plan=<price>`, which opens with
+that plan chosen. Signed-in customers who manage billing go straight to Checkout
+(`checkout_started` records `from: "pricing"`), subscribers see their plan and links to switch, and team
+members and paused accounts are sent to the plan page. A plan that covers a set number of spaces can be
+bought before any space, from the pricing page or the plan page: Checkout returns to `/account` and its
+cancel leads back to the plan page. Pay as you go still waits for a space (or the builder, where it only
+saves a card).
+
 The builder is the same as the operator's (`components/TourBuilder.tsx`), with a title and sharing
 controls. On the tour's link the customer's stops replace any stops the space was published with,
 and the spaces and narration a longer published tour continues into are left out

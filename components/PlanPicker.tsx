@@ -55,12 +55,12 @@ export default function PlanPicker({ plans, selected, onSelect, needed, current,
         const chosen = selected === plan.id;
         return <label key={plan.id} className={`plan-option${chosen ? " plan-option-selected" : ""}${fits ? "" : " plan-option-small"}`}>
           <input type="radio" name={name} value={plan.id} checked={chosen} disabled={!fits} onChange={() => onSelect(plan.id)}
-            aria-label={`${plan.name}, ${formatMoney(plan.amount, plan.currency)} ${formatPeriod(plan.interval, plan.intervalCount)}${plan.spaces === null ? " for each space" : ` for up to ${plan.spaces} spaces`}`} />
+            aria-label={`${plan.name}, ${formatMoney(plan.amount, plan.currency)} ${formatPeriod(plan.interval, plan.intervalCount)}${plan.spaces === null ? " for each space" : ` for up to ${plan.spaces} ${plan.spaces === 1 ? "space" : "spaces"}`}`} />
           <span className="plan-option-name"><i aria-hidden="true" /><span>{plan.name}</span>
             {current === plan.id ? <em>Your plan</em> : !fits && <em>Too small</em>}</span>
           <span className="plan-option-price"><b>{formatMoney(plan.amount, plan.currency)}</b>
             <span>{formatPeriod(plan.interval, plan.intervalCount)}{plan.spaces === null ? " for each space" : ""}</span></span>
-          <span className="plan-option-detail">{plan.spaces === null ? "Charged for each space you host" : `Up to ${plan.spaces} spaces`}</span>
+          <span className="plan-option-detail">{plan.spaces === null ? "Charged for each space you host" : `Up to ${plan.spaces} ${plan.spaces === 1 ? "space" : "spaces"}`}</span>
         </label>;
       })}
     </div>

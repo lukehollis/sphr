@@ -21,14 +21,19 @@ export async function POST(request: Request) {
   const tour = typeof body?.results === "string" ? readUserTour(body.results) : undefined;
   const results = tour && sameTeam(tour.userId, user.id) ? `/account/tours/${body.results}/results` : undefined;
   const build = results ?? (body?.build === undefined ? undefined : buildReturnPath(body.build));
-  if (!build && !payableSpaceCount(user.id)) return accountResponse({ error: "Add a space first." }, 400);
   // Publishing a space that is a free preview: payment returns to that space's page.
   const published = typeof body?.space === "string" ? readCustomerSpace(body.space) : undefined;
   const space = published && published.status !== "deleted" && sameTeam(published.userId, user.id) ? published : undefined;
+  // Without a space or the builder, only a plan covering a set number of spaces can be bought (startCheckout checks),
+  // and only when it is asked for on its own: someone else's tour or space leads nowhere.
+  const upfront = !build && !payableSpaceCount(user.id);
+  if (upfront && (body?.plan === undefined || body.plan === null || body.results !== undefined || body.space !== undefined)) {
+    return accountResponse({ error: "Add a space first." }, 400);
+  }
   try {
     const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent, build, build ? undefined : space?.id);
-    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web",
-      ...build ? { for: results ? "results" : "tours" } : space ? { for: readSpacePreview(space.id) ? "preview" : "space" } : {} } });
+    if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : body?.source === "pricing" ? "pricing" : "web",
+      ...build ? { for: results ? "results" : "tours" } : space ? { for: readSpacePreview(space.id) ? "preview" : "space" } : upfront ? { for: "plan" } : {} } });
     return accountResponse({ ok: true, ..."url" in next ? { url: next.url, plan: next.plan } : "portal" in next ? { url: next.portal } : { paid: true } });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);
