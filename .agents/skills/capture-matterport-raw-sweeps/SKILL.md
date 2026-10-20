@@ -1,21 +1,41 @@
 ---
 name: capture-matterport-raw-sweeps
-description: Raw Matterport Capture app export ZIP (metafile.json plus a folder of .swl/.dam/.mmp/.pb files and per-sweep skybox/cube-face JPEGs) with no E57; recognize it and turn the cube faces into panoramas for a tour.
-learned: 2026-10-20 from processing job 6260c91a701e7509, reviewed (runner after review)
+description: Matterport Capture app job folder (metafile.json beside a folder whose SweepProcessorData/ holds manifest.mfst, <sweep>_512_00N.jpg cube faces, *_sweep_cloud.pb and *.dam), usually zipped from the iPad or iPhone, with no E57. Import it as a measured space, every aligned sweep at its position with a fused mesh and navigation, the way a Matterport E57 import comes out.
 ---
 
-# Raw Matterport capture export
+# Matterport Capture app job folder
 
 ## Recognize
-ZIP with `metafile.json` (platform, app_version) and one UUID folder containing `*.swl`, a `SweepProcessorData/` folder of `.dam`, `.mmp`, `*_sweep_cloud.pb`, `*_sweep_features.pb`, and JPEGs named `<sweepid>_{128,256,512}_00{0-5}.jpg` (cube faces) and sometimes `<id>_skybox{0-5}.jpg`. inspect-inputs shows only photos and unknowns. No E57, so sphr-matterport does not apply; the poses are in proprietary files that cannot be read.
+A ZIP or folder with `metafile.json` (`platform`, `app_version`) and one UUID-named job folder holding
+`<UUID>.swl` files, `Floor1-thumb.png` and `SweepProcessorData/`: `manifest.mfst`, `<sweep>_512_00{0-5}.jpg`
+(also `_256_`, `_128_` and `_skybox{0-5}`), `<sweep-uuid>_sweep_cloud.pb`, `<sweep-uuid>_sweep_features.pb`,
+`<sweep>.dam` and `.mmp` files. There is no E57, so sphr-matterport does not apply, but the same measured data
+is here: `manifest.mfst` holds every sweep's alignment pose, the clouds are the depth camera's points, and the
+DAM texture coordinates calibrate the cube faces.
 
-## Steps
-1. Faces: the `_512_000..005` set per sweep is a 512 px cube. Order seen: 0 = up, 1..4 = the four sides left to right (continuous seams), 5 = down. Up/down have a large unscanned grey disc (about 0.6 of the face half-width).
-2. `/opt/venv/bin/python -I .agents/skills/capture-matterport-raw-sweeps/scripts/cube2equi.py <SweepProcessorData dir> <outdir> 1024` writes one 2:1 equirectangular JPEG per sweep and fills the grey caps.
-3. Package with `build-panoramas.mjs` (sphr-panorama-package) from `<outdir>`.
+## Build
+Unzip into `work/`, then from the repository root (`/opt/sphr` in the worker sandbox):
+
+```sh
+node scripts/matterport/import-capture.mjs --job "$SPHR_JOB_DIR/work/<unzipped folder>" \
+  --slug "$SPHR_SCENE_SLUG" --title "<title from job.json>" --public-root "$SPHR_JOB_DIR/output/public"
+```
+
+It places each aligned sweep at its measured pose with its six faces, fuses the point clouds into a textured
+50k-triangle mesh, finds the floor under each camera, links sweeps that see each other, and writes the package,
+`validation.json` and `preview.jpg`. Forty sweeps take a few minutes; run it in the background and poll, since
+commands stop after 10 minutes. Sweeps the app could not align (`EOS:Failed to align`) have no position: the
+importer leaves them out and lists them under `unalignedSweeps` in `manifest.json`. This is the tour for both
+`"tour"` and `"auto"`.
 
 ## Check
-View a panorama: upright, straight verticals, continuous seams at the 4 side joins. Check preview.jpg.
+Read the printed summary: sweeps placed and left out, links and connected areas, floors measured. Look at
+`preview.jpg` and validate as sphr-intake section 3 says. More than one connected area means visitors cannot
+walk between those parts; mention it when more than a stray sweep is cut off.
 
 ## Limits
-Only 512 px faces exist, so output is low resolution. Stop order is by file name, not capture order, and positions are unknown, so no floor-plan layout. A tour is possible; a splat is not (no poses).
+The app keeps only 512 px faces (Matterport renders full resolution in its cloud), so the panoramas are soft;
+say so plainly. These previews are too soft for a splat: for `"splat"`, build the tour and explain why. If the
+importer finds no aligned sweep, fall back to a tour without positions:
+`/opt/venv/bin/python -I .agents/skills/capture-matterport-raw-sweeps/scripts/cube2equi.py <SweepProcessorData> <outdir> 1024`
+then package `<outdir>` with sphr-panorama-package.

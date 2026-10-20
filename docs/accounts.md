@@ -272,6 +272,7 @@ uploads (`scripts/packages/inspect-inputs.mjs`) and routes each kind of capture:
 | Capture | Skill | Result |
 |---|---|---|
 | Matterport or other E57 with registered panoramas | `sphr-matterport` | Calibrated panoramas, mesh and dollhouse |
+| Matterport Capture app job folder (the iPad/iPhone app's `SweepProcessorData/`, no E57) | `capture-matterport-raw-sweeps` | Every aligned sweep at its measured pose with its 512 px faces, a mesh fused from the depth clouds, floors and navigation (`import-capture.mjs`) |
 | Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG; old GaussianSplats3D `.splat` is converted) | `sphr-splat-package` | Splat space orbiting its subject (`build-splat.mjs`) |
 | 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package`, or `sphr-video` for 3DGS | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`), or 3DGS from the frames cut into views (`pano_views.py`) |
 | Ordinary video or photo sets | `sphr-video` | COLMAP poses and a Brush-trained splat on GPU workers, opening from a capture camera (`build-splat.mjs --cameras`); held for an operator without a GPU |
