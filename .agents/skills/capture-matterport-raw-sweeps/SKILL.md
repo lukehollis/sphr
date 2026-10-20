@@ -35,7 +35,8 @@ walk between those parts; mention it when more than a stray sweep is cut off.
 
 ## Limits
 The app keeps only 512 px faces (Matterport renders full resolution in its cloud), so the panoramas are soft;
-say so plainly. These previews are too soft for a splat: for `"splat"`, build the tour and explain why. If the
-importer finds no aligned sweep, fall back to a tour without positions:
+say so plainly. These previews are too soft for a splat: for `"splat"`, build the tour and explain why. Sweeps
+without depth points are placed but add no surface. If the importer finds no aligned sweep, or no depth points at
+all (it says to build a panorama tour), fall back to a tour without positions:
 `/opt/venv/bin/python -I .agents/skills/capture-matterport-raw-sweeps/scripts/cube2equi.py <SweepProcessorData> <outdir> 1024`
 then package `<outdir>` with sphr-panorama-package.

@@ -12,12 +12,12 @@ import { fileURLToPath } from 'node:url';
 
 const runner = fileURLToPath(new URL('./worker/agent-runner.mjs', import.meta.url));
 
-/** One queued job with a five-byte upload; counts downloads and records every action the runner posts. */
+/** One queued job with a five-byte upload; counts downloads and records every action and health check the runner posts. */
 async function fakeApp({ defer = true } = {}) {
   const job = { id: '0123456789abcdef', status: 'queued', sceneId: 'abcdef123456', slug: 'customer-abc123def456', preview: false,
     space: { id: 'abc123def456', title: 'Test space', notes: null, output: 'auto', reprocessing: false },
     uploads: [{ id: 'u1', name: 'capture.zip', size: 5, type: 'application/zip', source: { url: '/api/worker/uploads/u1' } }] };
-  const app = { actions: [], downloads: 0 };
+  const app = { actions: [], downloads: 0, health: [] };
   const server = createServer(async (request, response) => {
     const send = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); };
     if (request.url.startsWith('/api/worker/uploads/')) { app.downloads++; response.writeHead(200); return response.end('hello'); }
@@ -25,6 +25,7 @@ async function fakeApp({ defer = true } = {}) {
     let text = '';
     for await (const chunk of request) text += chunk;
     const body = JSON.parse(text);
+    if (request.url === '/api/worker/health') { app.health.push(body); return send(200, { ok: true }); }
     if (body.action !== 'progress') app.actions.push(body);
     if (body.action === 'claim') { job.status = 'running'; return send(200, { job }); }
     if (body.action === 'defer' && !defer) return send(400, { error: 'Unknown action.' });
@@ -37,14 +38,14 @@ async function fakeApp({ defer = true } = {}) {
   return app;
 }
 
-/** Runs one pass of the runner with `command` as the agent command. */
-async function runOnce(command, options) {
+/** Runs one pass of the runner with `command` as the agent command; `options.env` adds to its environment. */
+async function runOnce(command, options = {}) {
   const app = await fakeApp(options);
   const dir = mkdtempSync(path.join(tmpdir(), 'sphr-runner-test-'));
   try {
     const child = spawn(process.execPath, [runner, 'run', '--once'], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH,
       SPHR_WORKER_URL: app.origin, SPHR_WORKER_TOKEN: 'x'.repeat(40), SPHR_WORKER_NAME: 'test-worker', SPHR_WORKER_DIR: dir,
-      SPHR_AGENT_ISOLATION: 'container', SPHR_AGENT_COMMAND: JSON.stringify(command) } });
+      SPHR_AGENT_ISOLATION: 'container', SPHR_AGENT_COMMAND: JSON.stringify(command), SPHR_WORKER_DISK_RESERVE_GB: '0', ...options.env } });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
@@ -86,4 +87,19 @@ test('a capture the agent rejects is still reported to the customer', async () =
 test('an agent that started work and stopped without a result is still held for an operator', async () => {
   const run = await runOnce(['sh', '-c', 'echo "Found 3 photos" >> output/progress.log; exit 1']);
   assert.deepEqual(actions(run), ['claim', 'hold'], run.output);
+});
+
+test('a job too big for the free disk waits instead of failing halfway, before anything is downloaded', async () => {
+  const run = await runOnce(['sh', '-c', 'exit 0'], { env: { SPHR_WORKER_DISK_RESERVE_GB: '1000000' } });
+  assert.deepEqual(actions(run), ['claim', 'defer'], run.output);
+  assert.match(run.actions[1].message, /test-worker is short of disk space: only [\d.]+ GB is free on this worker and this job needs about/);
+  assert.equal(run.downloads, 0);
+});
+
+test('the worker tells the application whether it can start agents', async () => {
+  const healthy = await runOnce(['sh', '-c', 'exit 125']);
+  assert.deepEqual(healthy.health, [{ worker: 'test-worker', problem: null }], healthy.output);
+  const broken = await runOnce(['docker', 'run', '--rm', 'sphr-runner-test-no-such-image', 'true']);
+  assert.equal(broken.health.length, 1, broken.output);
+  assert.match(broken.health[0].problem, /the agent image sphr-runner-test-no-such-image is missing/);
 });

@@ -16,7 +16,7 @@
 //   node scripts/worker/agent-runner.mjs check                say whether agents can start on this worker
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync, mkdirSync, rmSync, renameSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync, mkdirSync, rmSync, renameSync, statSync, statfsSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -407,6 +407,32 @@ function pauseClaims(problem) {
   console.error(`[${new Date().toISOString()}] agents cannot start: ${problem}; taking no jobs until ${new Date(pause.until).toISOString()}`);
 }
 
+/**
+ * Why this worker lacks room for a job of `bytes` uploaded bytes, or nothing. A job takes about three times its
+ * uploads (the files, what is unpacked from them and what the agent builds), and the disk keeps a reserve for
+ * everything else, so a full disk holds the job back instead of failing it halfway.
+ */
+function diskProblem(bytes = 0) {
+  mkdirSync(workRoot, { recursive: true });
+  const { bavail, bsize } = statfsSync(workRoot);
+  const free = bavail * bsize, needed = 3 * bytes + Number(env('SPHR_WORKER_DISK_RESERVE_GB') ?? 5) * 1e9;
+  if (free >= needed) return undefined;
+  const size = value => `${(value / 1e9).toFixed(1)} GB`;
+  return `only ${size(free)} is free on this worker${bytes ? ` and this job needs about ${size(needed)}` : ''}`;
+}
+
+// The application hears this worker's own check every five minutes, so a worker that cannot start agents is
+// noticed before a customer waits on it. Applications from before /api/worker/health answer 404, which is fine.
+let healthChecked = 0;
+async function reportHealth() {
+  if (Date.now() - healthChecked < 5 * 60000) return;
+  healthChecked = Date.now();
+  const problem = agentProblem() ?? diskProblem() ?? null;
+  await api('/api/worker/health', { worker, problem }).catch(error => {
+    if (error.status !== 404) console.error(`[${new Date().toISOString()}] could not report this worker's health: ${error.message}`);
+  });
+}
+
 /** Whether the agent left nothing in output/ since `since`: it never reached the files. */
 function wroteNothing(job, since) {
   const output = path.join(jobDir(job), 'output');
@@ -469,6 +495,11 @@ async function processJob(queued) {
     return defer(job, `${worker} cannot start agents: ${problem}.`);
   }
   pause.times = 0;
+  const short = diskProblem(job.uploads.reduce((total, upload) => total + upload.size, 0));
+  if (short) {
+    coolDown(job);
+    return defer(job, `${worker} is short of disk space: ${short}.`);
+  }
   try {
     const files = await download(job);
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
@@ -513,6 +544,7 @@ if (command === 'list') {
   for (;;) {
     try {
       if (active.size >= concurrency) { await Promise.race(active); continue; }
+      await reportHealth();
       if (Date.now() < pause.until) { await sleep(Math.min(pause.until - Date.now(), 60000)); continue; }
       // Long-poll: the application answers as soon as a customer submits a space.
       const { jobs } = await api(`/api/worker/jobs?status=queued${once ? '' : '&wait=45'}`);
@@ -546,10 +578,11 @@ if (command === 'list') {
   await api(`/api/worker/jobs/${rest[0]}`, { action: 'release' });
   console.log(`Returned ${rest[0]} to the queue.`);
 } else if (command === 'check') {
-  const problem = agentProblem();
+  const problem = agentProblem() ?? diskProblem();
   if (problem) fail(`Agents cannot start: ${problem}.`);
   const { image, network } = dockerNeeds();
-  console.log(image ? `Agents can start: found the image ${image}${network ? ` and the network ${network}` : ''}.` : 'The agent command is not docker run; nothing to check.');
+  console.log(image ? `Agents can start: found the image ${image}${network ? ` and the network ${network}` : ''}, with disk space to spare.`
+    : 'The agent command is not docker run; the disk has space to spare.');
 } else {
   fail('Usage: agent-runner.mjs list | run [--once] | check | publish <job> [message] | fail <job> <message> | release <job>');
 }

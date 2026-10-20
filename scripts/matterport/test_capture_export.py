@@ -7,7 +7,8 @@ import uuid
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from capture_export import MATTERPORT_FACES, add_alignment_links, find_job, node_pose, read_manifest, source_file, sphr_face, steady_floors
+from capture_export import (MATTERPORT_FACES, add_alignment_links, face_file, find_job, fused_points, node_pose, read_manifest, source_file,
+                            sphr_face, steady_floors)
 from geometry import C, CENTERS, RIGHTS, UPS
 from web_archive import graph_components
 
@@ -35,6 +36,13 @@ def sweep(sweep_id, pose=None, status="success"):
         body += message(3, b"".join(key(1, 5) + struct.pack("<f", value) for value in pose))
     body += key(4, 1) + struct.pack("<d", 1792435087.0) + message(14, status.encode()) + message(20, b"CAMERA_MODEL_GAMMA_PSI")
     return message(1 if pose is not None else 7, body)
+
+
+def cloud(count):
+    """A sweep cloud: a ring of points three meters out, normals facing the camera."""
+    angles = np.linspace(0, 2 * np.pi, count, endpoint=False)
+    return b"".join(message(7, message(5, struct.pack("<9f", 3 * np.cos(a), 3 * np.sin(a), 0, -np.cos(a), -np.sin(a), 0, 0, 0, 0)))
+                    for a in angles)
 
 
 class CaptureExportTests(unittest.TestCase):
@@ -126,6 +134,35 @@ class CaptureExportTests(unittest.TestCase):
         self.assertAlmostEqual(nodes[0]["floorPosition"]["y"], 0.025, places=6)
         self.assertEqual(nodes[0]["floorEstimate"]["method"], "job-camera-height")
         self.assertEqual([node["floorPosition"]["y"] for node in nodes[1:]], [0.025] * 5)
+
+    def test_sweeps_without_depth_are_placed_and_a_job_without_any_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            job = Path(folder) / "JOB"
+            data = job / "SweepProcessorData"
+            data.mkdir(parents=True)
+            first, second = uuid.uuid4(), uuid.uuid4()
+            (data / f"{first}_sweep_cloud.pb").write_bytes(cloud(25000))
+            sweeps = [{"uuid": first.hex, "rotation": [0, 0, 0, 1], "translation": [0, 0, 0]},
+                      {"uuid": second.hex, "rotation": [0, 0, 0, 1], "translation": [2, 0, 0]}]
+            points, normals, missing = fused_points(job, sweeps)
+            self.assertEqual((len(points), missing), (25000, [second.hex]))
+            np.testing.assert_allclose(np.sum(normals * -points, axis=1) > 0, True, err_msg="normals face their camera")
+            (data / f"{first}_sweep_cloud.pb").unlink()
+            with self.assertRaisesRegex(ValueError, "build a panorama tour instead"):
+                fused_points(job, sweeps)
+
+    def test_skybox_copies_stand_in_for_missing_512_faces(self):
+        with tempfile.TemporaryDirectory() as folder:
+            job = Path(folder) / "JOB"
+            data = job / "SweepProcessorData"
+            data.mkdir(parents=True)
+            sweep = {"uuid": uuid.uuid4().hex}
+            (data / f"{sweep['uuid']}_512_000.jpg").write_bytes(b"x")
+            (data / f"{sweep['uuid']}_skybox1.jpg").write_bytes(b"x")
+            self.assertEqual(face_file(job, sweep, 0).name, f"{sweep['uuid']}_512_000.jpg")
+            self.assertEqual(face_file(job, sweep, 1).name, f"{sweep['uuid']}_skybox1.jpg")
+            with self.assertRaisesRegex(FileNotFoundError, "no cube face 2"):
+                face_file(job, sweep, 2)
 
 if __name__ == "__main__":
     unittest.main()

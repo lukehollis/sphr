@@ -152,11 +152,21 @@ def layout_error(dam_path):
     return max(errors)
 
 
+def face_file(job, sweep, face):
+    """A sweep's Matterport face: the 512 px set, or the app's skybox copy of the same image."""
+    for name in (f"{sweep['uuid']}_512_00{face}.jpg", f"{sweep['uuid']}_skybox{face}.jpg"):
+        try:
+            return source_file(job, name)
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError(f"Sweep {sweep['uuid']} has no cube face {face}")
+
+
 def load_faces(job, sweep):
     """The sweep's six Matterport faces as RGB arrays, with their source files."""
     images, paths = [], []
     for face in range(6):
-        path = source_file(job, f"{sweep['uuid']}_512_00{face}.jpg")
+        path = face_file(job, sweep, face)
         with Image.open(path) as image:
             image.verify()
         with Image.open(path) as image:
@@ -192,10 +202,15 @@ def node_pose(sweep):
 
 
 def fused_points(job, sweeps):
-    """Every sweep's depth points and normals in the viewer's frame, normals turned toward their camera."""
-    points, normals = [], []
+    """Every sweep's depth points and normals in the viewer's frame, normals turned toward their camera, and the
+    sweeps without usable depth (they are still placed and only add no surface)."""
+    points, normals, missing = [], [], []
     for sweep in sweeps:
-        local, local_normals = read_cloud(source_file(job, f"{uuid.UUID(hex=sweep['uuid'])}_sweep_cloud.pb"))
+        try:
+            local, local_normals = read_cloud(source_file(job, f"{uuid.UUID(hex=sweep['uuid'])}_sweep_cloud.pb"))
+        except (FileNotFoundError, ValueError):
+            missing.append(sweep["uuid"])
+            continue
         rotation = Rotation.from_quat(sweep["rotation"]).as_matrix()
         world = (local @ rotation.T + sweep["translation"]) @ C.T
         turned = local_normals @ rotation.T @ C.T
@@ -203,7 +218,9 @@ def fused_points(job, sweeps):
         turned[np.sum(turned * (camera - world), axis=1) < 0] *= -1
         points.append(world)
         normals.append(turned)
-    return np.concatenate(points), np.concatenate(normals)
+    if sum(len(part) for part in points) < 20000:
+        raise ValueError("The job has no usable depth point clouds to measure a surface from; build a panorama tour instead")
+    return np.concatenate(points), np.concatenate(normals), missing
 
 
 def fuse_surface(points, normals, depth):
@@ -252,10 +269,15 @@ def vertex_colors(mesh, nodes, stage):
 def build_nodes(job, sweeps, stage, dataset_url):
     nodes, groups, layout = [], {}, []
     for index, sweep in enumerate(sweeps):
-        error = layout_error(source_file(job, f"{sweep['uuid']}.dam"))
-        if error > MAX_LAYOUT_ERROR:
+        # Each sweep with a DAM checks the cube layout against its own texture coordinates.
+        try:
+            error = layout_error(source_file(job, f"{sweep['uuid']}.dam"))
+        except FileNotFoundError:
+            error = None
+        if error is not None and error > MAX_LAYOUT_ERROR:
             raise ValueError(f"Sweep {sweep['uuid']} does not use the known cube layout (error {error:.3f})")
-        layout.append(error)
+        if error is not None:
+            layout.append(error)
         images, paths = load_faces(job, sweep)
         name = f"scan-{index:03d}"
         folder = stage / "faces" / name
@@ -281,6 +303,8 @@ def build_nodes(job, sweeps, stage, dataset_url):
                                      "sourceTranslation": list(sweep["translation"]), "sourceRotationXyzw": list(sweep["rotation"])}})
         groups[name] = {"associatedData3DGuid": sweep_uuid, "sourceFaces": records, "layoutError": error,
                         "sourceSeamErrors": measure_seams(photos)}
+    if not layout:
+        raise ValueError("No sweep has a DAM mesh to check the cube layout against")
     return nodes, groups, layout
 
 
@@ -363,9 +387,10 @@ def convert(job_root, slug, title, public_root, poisson_depth=10, target_triangl
     nodes, groups, layout = build_nodes(job, sweeps, stage, dataset_url)
     print(f"capture: {len(nodes)} aligned sweeps placed, {len(unaligned)} unaligned left out; worst cube layout error {max(layout):.4f}", flush=True)
 
-    points, normals = fused_points(job, sweeps)
+    points, normals, without_depth = fused_points(job, sweeps)
     full_mesh = fuse_surface(points, normals, poisson_depth)
-    print(f"capture: fused {len(points):,} depth points into {len(full_mesh.triangles):,} triangles", flush=True)
+    print(f"capture: fused {len(points):,} depth points into {len(full_mesh.triangles):,} triangles"
+          f"{f'; {len(without_depth)} sweeps had no depth' if without_depth else ''}", flush=True)
     scene = o3d.t.geometry.RaycastingScene()
     scene.add_triangles(o3d.t.geometry.TriangleMesh.from_legacy(full_mesh))
     floor_reports, steadied = place_floors(nodes, points, normals, full_mesh, scene)
@@ -426,8 +451,12 @@ def convert(job_root, slug, title, public_root, poisson_depth=10, target_triangl
 
     sources = [manifest_path] + [Path(job / "SweepProcessorData" / face["sourceName"])
                                  for group in groups.values() for face in group["sourceFaces"]]
-    sources += [source_file(job, f"{uuid.UUID(hex=s['uuid'])}_sweep_cloud.pb") for s in sweeps]
-    sources += [source_file(job, f"{s['uuid']}.dam") for s in sweeps]
+    for name in ([f"{uuid.UUID(hex=s['uuid'])}_sweep_cloud.pb" for s in sweeps if s["uuid"] not in without_depth]
+                 + [f"{s['uuid']}.dam" for s in sweeps]):
+        try:
+            sources.append(source_file(job, name))
+        except FileNotFoundError:
+            pass  # a sweep without a DAM is placed all the same
     source_records = [{"path": str(p.relative_to(job)), "bytes": p.stat().st_size, "sha256": digest(p)} for p in sorted(set(sources))]
     metafile = next((p for p in [job.parent / "metafile.json", job / "metafile.json"] if p.is_file() and not p.is_symlink()), None)
     app = {key: value for key, value in json.loads(metafile.read_text()).items() if key in ("platform", "app_version")} if metafile else {}
@@ -436,6 +465,7 @@ def convert(job_root, slug, title, public_root, poisson_depth=10, target_triangl
                 "sourceSha256": hashlib.sha256(json.dumps(source_records, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
                 "sourceAssets": source_records, "scanCount": len(nodes), "nodeCount": len(nodes),
                 "unalignedSweeps": [{"sweepUuid": str(uuid.UUID(hex=s["uuid"])), "status": s["status"]} for s in unaligned],
+                "sweepsWithoutDepth": [str(uuid.UUID(hex=h)) for h in without_depth],
                 "datasetUrl": dataset_url, "bootstrapUrl": f"{dataset_url}/bootstrap.json",
                 "coordinateConversion": "meters; three = C @ Capture job frame (z up); quaternion maps canonical cube directions to world",
                 "imageManifest": {"images2D": 6 * len(nodes), "orientationMethod": "matterport-capture-cube-v1",
@@ -445,7 +475,8 @@ def convert(job_root, slug, title, public_root, poisson_depth=10, target_triangl
                            "reFoundAtJobCameraHeight": steadied},
                 "limitations": ["The Capture app keeps 512 px cube faces; Matterport makes full-resolution panoramas in its cloud",
                                 "The surface is fused from the depth camera's subsampled per-sweep point clouds",
-                                *([f"{len(unaligned)} sweeps the app could not align have no position and are left out"] if unaligned else [])],
+                                *([f"{len(unaligned)} sweeps the app could not align have no position and are left out"] if unaligned else []),
+                                *([f"{len(without_depth)} sweeps had no depth points; they are placed but add nothing to the surface"] if without_depth else [])],
                 "createdAt": datetime.now(timezone.utc).isoformat()}
     old = json.loads((final / "manifest.json").read_text()) if (final / "manifest.json").exists() else None
     if old and old.get("schema") not in (None, SCHEMA):
