@@ -41,6 +41,9 @@ export type Plan = { id: string; name: string; amount: number; currency: string;
   product: string; key: string | null };
 const payAsYouGoName = "Pay as you go";
 
+/** "1 space", "up to 6 spaces" */
+const coverage = (spaces: number) => spaces === 1 ? "1 space" : `up to ${spaces} spaces`;
+
 /** Plan prices record how many spaces they cover in their metadata. Any other price bills per space. */
 function coveredSpaces(price: Stripe.Price) {
   if (price.id === priceId()) return null;
@@ -184,7 +187,7 @@ export async function startCheckout(user: User, origin: string, planId?: unknown
     const chosen = planId ?? openLine?.price?.id;
     let plan = await resolvePlan(chosen).catch(error => { if (planId === undefined) return resolvePlan(undefined); throw error; });
     if (plan.spaces !== null && count > plan.spaces) {
-      if (planId !== undefined) throw new AccountError(`${plan.name} covers up to ${plan.spaces} spaces. Choose a larger plan or pay as you go.`);
+      if (planId !== undefined) throw new AccountError(`${plan.name} covers ${coverage(plan.spaces)} and you have ${count}. Choose a larger plan or pay as you go.`);
       plan = await resolvePlan(undefined);
     }
     const quantity = plan.spaces === null ? count : 1;
@@ -401,7 +404,7 @@ export async function changePlan(user: User, planId: unknown) {
     if (subscription.plan?.price === plan.id) return undefined;
     const count = payableSpaceCount(targetId);
     if (plan.spaces !== null && count > plan.spaces) {
-      throw new AccountError(`${plan.name} covers up to ${plan.spaces} spaces and you have ${count}. Delete spaces or choose a larger plan.`);
+      throw new AccountError(`${plan.name} covers ${coverage(plan.spaces)} and you have ${count}. Delete spaces or choose a larger plan.`);
     }
     await stripe().subscriptions.update(subscription.id, {
       items: [{ id: subscription.item, price: plan.id, quantity: plan.spaces === null ? billableSpaceCount(targetId) : 1 }],

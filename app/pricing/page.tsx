@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import SiteHeader from "@/components/site/SiteHeader";
 import { SiteFooter } from "@/components/site/Chrome";
 import PricingAction, { type PricingActionProps } from "@/components/site/PricingAction";
+import SpaceUsage from "@/components/site/SpaceUsage";
 import { accountsEnabled, currentUser } from "@/lib/server/accounts";
 import { readUser } from "@/lib/server/accounts-store";
 import { salesEmail, siteBrand } from "@/lib/server/brand";
@@ -50,12 +51,12 @@ function yearlySaving(offer: Offer) {
   return saving >= 5 ? `${saving}%` : undefined;
 }
 
-function Card({ name, flag, audience, plan, alternative, features, actions, note, featured = false }: {
-  name: string; flag?: string; audience: string; plan: { amount: string; period: string }; alternative?: ReactNode;
+function Card({ name, flag, flagMuted = false, audience, plan, alternative, features, actions, note, featured = false }: {
+  name: string; flag?: string; flagMuted?: boolean; audience: string; plan: { amount: string; period: string }; alternative?: ReactNode;
   features: string[]; actions: ReactNode; note?: ReactNode; featured?: boolean }) {
   return <article className={`pricing-card${featured ? " pricing-card-featured" : ""}`} aria-label={name}>
     <header className="pricing-card-head">
-      {flag && <p className="pricing-flag">{flag}</p>}
+      {flag && <p className={`pricing-flag${flagMuted ? " pricing-flag-small" : ""}`}>{flag}</p>}
       <h3>{name}</h3>
       <p className="pricing-for">{audience}</p>
     </header>
@@ -87,9 +88,16 @@ export default async function PricingPage() {
   const paused = Boolean(subscription && !live && ["unpaid", "incomplete", "paused"].includes(subscription.status));
   const managesBilling = Boolean(account && (!account.team || account.team.role === "owner") && !account.team?.invoiced);
   const current = live ? plans.find(plan => plan.id === subscription?.plan?.price) : undefined;
+  const spaces = account?.spaceCount ?? 0;
+  // What the account's plan covers, shown against its spaces before any plan is picked.
+  const limit = live ? subscription?.plan?.spaces ?? null : null;
+  const planName = live ? current?.name ?? account?.team?.planName ?? null : null;
 
   /** The button for one price, by who is looking. */
   function action(plan: Plan, label: string, variant: PricingActionProps["variant"]): PricingActionProps {
+    if (account && plan.spaces !== null && plan.spaces < spaces) {
+      return { label: `Covers ${spacesText(plan.spaces)}, you have ${spaces}`, variant, disabled: true };
+    }
     // Pay as you go bills spaces, so it starts with adding one.
     if (!account) return { label, variant, href: `/account/signup?next=${encodeURIComponent(plan.spaces === null ? "/account" : `/account/plan?plan=${plan.id}`)}` };
     if (!managesBilling || paused) return { label, variant, href: "/account/plan" };
@@ -112,6 +120,7 @@ export default async function PricingPage() {
     const others = offer.prices.filter(plan => plan !== main);
     const saving = yearlySaving(offer);
     const isFeatured = offer === featured;
+    const tooSmall = Boolean(account && offer.spaces !== null && offer.spaces < spaces);
     const teacher = teacherOffers.includes(offer);
     const team = offer.key === "school";
     const audience = offer.spaces === null ? "Pay only for the spaces you host"
@@ -132,8 +141,8 @@ export default async function PricingPage() {
     // Teachers' cards name the price on the button; hosting cards, four to a row, keep it short.
     const label = (plan: Plan) => offer.spaces === null ? (account?.spaceCount ? "Pay as you go" : account ? "Add a space" : "Try it free")
       : teacher ? `Subscribe for ${price(plan)}` : `Choose ${offer.name}`;
-    return <Card key={offer.product} name={offer.name} audience={audience} featured={isFeatured}
-      flag={isFeatured ? "Recommended for teachers" : undefined}
+    return <Card key={offer.product} name={offer.name} audience={audience} featured={isFeatured && !tooSmall}
+      flag={tooSmall ? `Too small for your ${spaces} spaces` : isFeatured ? "Recommended for teachers" : undefined} flagMuted={tooSmall}
       plan={{ amount: amount(main), period: offer.spaces === null ? `${formatPeriod(main.interval, main.intervalCount)} for each space` : formatPeriod(main.interval, main.intervalCount) }}
       alternative={others.length ? <>or {others.map(price).join(", or ")}{saving && main === year && month ? <> <span className="pricing-save">Save {saving} yearly</span></> : null}</> : undefined}
       features={features}
@@ -156,7 +165,9 @@ export default async function PricingPage() {
         <h1>Pricing</h1>
         <p>Build tours and scavenger hunts for free. Pay when you want every student in your class results, or to host 3D spaces of your own.</p>
       </div>
-      {subscription && live && current && <p className="site-note pricing-current" role="status">You&apos;re on {current.name} at {price(current)}. <a href="/account/plan">Manage your plan</a></p>}
+      {account && (live || spaces > 0) && <SpaceUsage used={spaces} limit={limit} plan={planName} />}
+      {live && current && <p className="site-note pricing-current" role="status">You&apos;re on {current.name} at {price(current)}. <a href="/account/plan">Manage your plan</a></p>}
+      {live && !current && <p className="site-note pricing-current" role="status">Your plan is not listed here any more. You can keep it, or switch on the <a href="/account/plan">plan page</a>.</p>}
 
       <section className="pricing-group" aria-labelledby="teachers-title" id="teachers">
         <div className="pricing-group-head">

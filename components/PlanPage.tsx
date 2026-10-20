@@ -5,6 +5,7 @@ import { accountRequest } from "./AccountAuth";
 import { accountNav, legalLinks, openPortal } from "./AccountDashboard";
 import PlanPicker, { currentPlan, EnterpriseNote, hostingActive, OpenSourceNote, periodTotal } from "./PlanPicker";
 import SiteHeader from "./site/SiteHeader";
+import SpaceUsage from "./site/SpaceUsage";
 import { SiteFooter } from "./site/Chrome";
 import type { Plan } from "@/lib/server/billing";
 import type { AccountView } from "@/lib/server/customer-spaces";
@@ -42,9 +43,12 @@ export default function PlanPage({ account: initial, plans, brand, build, result
   const forResults = Boolean(results) && !active;
   const paused = Boolean(subscription && !active && ["unpaid", "incomplete", "paused"].includes(subscription.status));
   const current = active ? currentPlan(plans, subscription) : undefined;
-  const [choice, setChoice] = useState<string | null>(picked ?? null);
-  const selected = plans.find(plan => plan.id === choice) ?? current ?? plans[0];
   const spaces = account.spaceCount;
+  // A plan has to cover every space the account has; the picker shows smaller ones as too small.
+  const fits = (plan: Plan) => plan.spaces === null || plan.spaces >= Math.max(spaces, 1);
+  const pickedPlan = plans.find(plan => plan.id === picked);
+  const [choice, setChoice] = useState<string | null>(pickedPlan && fits(pickedPlan) ? pickedPlan.id : null);
+  const selected = plans.find(plan => plan.id === choice) ?? current ?? plans.find(fits) ?? plans[0];
   // Before any space, a plan covering a set number of spaces is paid for now; pay as you go waits for a space.
   const upfront = spaces === 0 && Boolean(selected && selected.spaces !== null);
 
@@ -103,7 +107,12 @@ export default function PlanPage({ account: initial, plans, brand, build, result
           : spaces === 0 ? "Choose a plan" : "Start hosting"}</h1></div>
         {active && subscription?.periodEnd ? <p>{subscription.cancelAtPeriodEnd ? "Hosting ends" : "Renews"} {formatDate(subscription.periodEnd)}</p> : null}
       </div>
+      {canManageBilling && (spaces > 0 || active) && <div className="plan-usage">
+        <SpaceUsage used={spaces} limit={active ? subscription?.plan?.spaces ?? null : null} plan={active ? current?.name ?? null : null} />
+      </div>}
       <p className="plan-lead">{lead}</p>
+      {pickedPlan && !fits(pickedPlan) && <p className="site-note" role="status">
+        {pickedPlan.name} covers {pickedPlan.spaces === 1 ? "1 space" : `up to ${pickedPlan.spaces} spaces`} and you have {spaces}, so it can&apos;t be chosen. Plans that fit are below.</p>}
       <div className="site-feedback" aria-live="polite">
         {message && <p className="site-note" role="status">{message}</p>}
         {error && <p className="site-alert" role="alert">{error}</p>}
@@ -118,10 +127,10 @@ export default function PlanPage({ account: initial, plans, brand, build, result
           name="plan" label="Plans" disabled={busy} />
         <div className="plan-actions">
           {active ? <>
-            <button type="button" className="site-button" disabled={busy || !selected || selected.id === current?.id} onClick={change}>
+            <button type="button" className="site-button" disabled={busy || !selected || selected.id === current?.id || !fits(selected)} onClick={change}>
               {busy ? "Changing plans…" : selected && selected.id !== current?.id ? `Switch to ${planLabel(selected)}` : "Choose another plan"}</button>
             <button type="button" className="site-link" disabled={busy} onClick={portal}>Billing and invoices</button>
-          </> : spaces > 0 || building || upfront ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected} onClick={pay}>
+          </> : spaces > 0 || building || upfront ? <button type="button" className="site-button site-button-accent" disabled={busy || !selected || !fits(selected)} onClick={pay}>
             {busy ? "Opening payment…" : saveCard ? "Add a card" : "Continue to payment"}<span aria-hidden="true">→</span></button>
           : <a className="site-button" href="/account">Add a space<span aria-hidden="true">→</span></a>}
         </div>

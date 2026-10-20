@@ -7,7 +7,22 @@
   padding-bottom: var(--space-4); border-bottom: var(--rule-section); }
 .pricing-hero h1 { margin: 0; color: var(--text-heading); font-size: var(--size-hero); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
 .pricing-hero p { margin: 0; color: var(--text-muted); font-size: 17px; line-height: var(--leading-body); }
+/* Spaces in use against the plan, on the pricing and plan pages: "24 / 30" in display type. */
+.space-usage { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-1) var(--space-3);
+  margin: var(--space-3) 0 0; padding: var(--space-2) var(--space-3); border: var(--rule-hair); border-left: 3px solid var(--ink); background: var(--paper-tint); }
+.space-usage-full { border-left-color: var(--accent); }
+.space-usage-count { margin: 0; color: var(--text-heading); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.space-usage-count b { font-size: 64px; line-height: 1; letter-spacing: var(--tracking-tight); }
+.space-usage-count span { margin-left: 6px; color: var(--text-muted); font-size: 32px; font-weight: var(--weight-bold); }
+.space-usage-text { display: grid; gap: 4px; min-width: 0; }
+.space-usage-text strong { color: var(--text-heading); font-size: 17px; line-height: var(--leading-heading); }
+.space-usage-text > span { color: var(--text-muted); font-size: 14px; line-height: var(--leading-body); }
+.space-usage-text i { display: block; height: 8px; margin-top: 6px; max-width: 420px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--hairline); }
+.space-usage-text em { display: block; height: 100%; background: var(--ink); }
+.space-usage-full .space-usage-text em { background: var(--accent); }
+.plan-usage { margin: 0 0 var(--space-3); }
 .pricing-current { margin: var(--space-3) 0 0; }
+.pricing-flag.pricing-flag-small { color: var(--text-muted); }
 .pricing-current a { color: inherit; text-underline-offset: 4px; }
 
 .pricing-group { margin-top: var(--space-6); }
@@ -64,5 +79,8 @@
   .pricing-card-featured { order: -1; }
   .pricing-card { padding: var(--space-2); gap: var(--space-2); }
   .pricing-price b { font-size: 44px; }
+  .space-usage { grid-template-columns: minmax(0, 1fr); padding: var(--space-2); }
+  .space-usage-count b { font-size: 52px; }
+  .space-usage-count span { font-size: 26px; }
   .pricing-faq { grid-template-columns: minmax(0, 1fr); margin-top: var(--space-6); }
 }

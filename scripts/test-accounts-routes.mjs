@@ -894,6 +894,7 @@ try {
   assert.ok(teacherPage.includes('Your plan is active'), 'back from Checkout, the plan is active');
   teacherPage = (await (await tess.get('/pricing')).text()).replaceAll('<!-- -->', '').replaceAll('&#x27;', "'");
   assert.ok(teacherPage.includes("You're on Classroom at $79 a year") && teacherPage.includes('Your plan'), 'the pricing page knows the plan');
+  assert.match(teacherPage, /<b>0<\/b><span>\/ 1<\/span>[^]*?space in use on Classroom[^]*?Room for 1 more/, 'and shows the spaces it covers');
   assert.ok(teacherPage.includes('/account/plan?plan=price_school'), 'and other plans lead to switching');
   assert.equal((await tess.post('/api/account/billing/checkout', { plan: 'price_school' })).status, 409, 'a second subscription is never started');
 
@@ -922,6 +923,15 @@ try {
   assert.equal(graceSubscription.items.data[0].quantity, 1, 'spaces within a plan leave its price alone');
   page = (await (await grace.get('/account')).text()).replaceAll('<!-- -->', '');
   assert.ok(page.includes('Starter') && page.includes('6 of 6 spaces') && page.includes('Change plan'), 'the plan and its room are shown');
+  // Before picking a plan, the pricing and plan pages show the spaces in use, and plans too small can't be picked.
+  page = (await (await grace.get('/pricing')).text()).replaceAll('<!-- -->', '').replaceAll('&#x27;', "'");
+  assert.match(page, /class="space-usage space-usage-full"[^]*?<b>6<\/b><span>\/ 6<\/span>[^]*?spaces in use on Starter[^]*?Your plan is full/, 'the pricing page shows 6 / 6 in large type');
+  assert.ok(page.includes('Too small for your 6 spaces') && page.includes('Covers one space, you have 6') && page.includes('Covers up to 5 spaces, you have 6'), 'plans too small say so');
+  assert.ok(!page.includes('/account/plan?plan=price_classyear') && !page.includes('/account/plan?plan=price_school'), 'and lead nowhere');
+  assert.ok(page.includes('/account/plan?plan=price_pro'), 'larger plans lead to switching');
+  page = (await (await grace.get('/account/plan?plan=price_classyear')).text()).replaceAll('<!-- -->', '').replaceAll('&#x27;', "'");
+  assert.doesNotMatch(page, /<input(?=[^>]*value="price_classyear")(?=[^>]*checked="")[^>]*>/, 'a plan too small is never chosen for the customer');
+  assert.ok(page.includes("Classroom covers 1 space and you have 6, so it can't be chosen") && page.includes('space-usage'), 'and the plan page says why, under the spaces in use');
   response = await grace.post('/api/account/spaces', { title: 'Grace 7' });
   assert.equal(response.status, 402);
   assert.equal((await response.json()).planFull, true, 'a full plan asks for a larger one');
