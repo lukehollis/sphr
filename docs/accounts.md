@@ -365,6 +365,14 @@ node scripts/worker/agent-runner.mjs fail <job> "What to upload instead"
 node scripts/worker/agent-runner.mjs release <job>          # back to the queue
 ```
 
+Before it downloads a job's files, the runner checks that the image and network named in a `docker run`
+agent command exist (`node scripts/worker/agent-runner.mjs check` does the same by hand). A worker that
+cannot start agents, or an agent that exits without writing anything to `output/`, is a problem on our side,
+so the runner gives the job back with `defer`: it returns to the queue without using an attempt, the
+customer's space keeps waiting instead of failing, and the team channel hears *Processing paused*. The
+runner then takes no job for 5 minutes (doubling up to an hour) and waits 10 minutes (doubling up to an
+hour) before it takes a job it gave back again.
+
 A failed job shows its message to the customer, who can add or replace files and submit
 again (at most 5 submissions per space and 20 per account each day, since each one runs an
 agent). Deleting a space, even mid-processing, cancels its job and takes it offline
@@ -437,7 +445,8 @@ All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
   under `/api/worker/uploads/<id>` for local storage).
 - `GET /api/worker/jobs?status=queued&wait=45` waits up to 45 seconds for a job to be queued.
 - `POST /api/worker/jobs/<id>` with `{"action":"claim","worker":"name"}`,
-  `{"action":"release"}`, `{"action":"progress","message":"…"}` (shown to the customer),
+  `{"action":"release"}`, `{"action":"defer","message":"…"}` (the worker could not start the agent: back
+  to the queue without using an attempt, and the team is told), `{"action":"progress","message":"…"}` (shown to the customer),
   `{"action":"hold","message":"…"}` (for an operator),
   `{"action":"complete","message":"…","scene":{…}}` (the published catalog entry from
   `publish.py --entries-out`, checked against the reserved scene ID, slug and asset host)
