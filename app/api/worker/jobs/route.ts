@@ -2,12 +2,14 @@ import { listJobs, type JobStatus } from "@/lib/server/accounts-store";
 import { accountsEnabled, publicOrigin } from "@/lib/server/accounts";
 import { jobDetails, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { waitForJob } from "@/lib/server/job-signal";
+import { workerSeen } from "@/lib/server/worker-watch";
 
 export const dynamic = "force-dynamic";
 const statuses: JobStatus[] = ["queued", "running", "held", "done", "failed", "canceled"];
 
 export async function GET(request: Request) {
   if (!accountsEnabled() || !workerAuthorized(request)) return workerResponse({ error: "Unauthorized." }, 401);
+  workerSeen();
   const requested = (new URL(request.url).searchParams.get("status") ?? "queued").split(",");
   if (!requested.every(status => statuses.includes(status as JobStatus))) return workerResponse({ error: "Unknown status." }, 400);
   releaseStaleJobs(publicOrigin(request));

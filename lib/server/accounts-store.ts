@@ -1034,10 +1034,15 @@ type JobRow = { id: string; space_id: string; scene_id: string; status: JobStatu
 const toJob = (row: JobRow): Job => ({ id: row.id, spaceId: row.space_id, sceneId: row.scene_id, status: row.status, attempts: row.attempts,
   worker: row.worker, message: row.message, progress: row.progress, created: row.created, started: row.started, finished: row.finished, preview: row.preview === 1 });
 export const maxJobAttempts = 3;
-/** Shown on a space whose job the agent held for an operator, so the customer sees a reason rather than endless processing. */
+/**
+ * Shown on a space whose job waits for an operator, so the customer sees a reason rather than endless processing.
+ * A person looks at every held job and the cause is often on our side, so the customer is not sent to change files
+ * that may be fine. Files that cannot become a space are reported with the agent's own message instead (`fail`).
+ */
 export function heldSpaceMessage() {
   const contact = contactEmail();
-  return `We couldn't finish building this space. Check that your files are a capture and try again, or ${contact ? `write to ${contact}` : "contact support"} if it keeps happening.`;
+  return "We couldn't finish building this space automatically, so a person will look at it. Your files are still here and you don't need "
+    + `to do anything yet. We'll email you once it's sorted${contact ? `, or write to ${contact} with any questions` : ""}.`;
 }
 
 /** Shown on a space whose worker stopped answering on every attempt: our failure, not the customer's files. */

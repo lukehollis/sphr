@@ -746,6 +746,19 @@ try {
     Cookie: [...aliceLaptop.cookies].map(([name, value]) => `${name}=${value}`).join('; ') } })).status, 200);
   assert.equal((await aliceLaptop.post(`/api/account/uploads/${small.upload.id}/complete`)).status, 200);
   await aliceLaptop.post(`/api/account/spaces/${odd.id}/submit`, { notes: 'This one needs a person.' });
+  // A worker that cannot start its agent gives the job back: the space keeps waiting, the attempt is returned and the team is told.
+  const oddJob = (await (await worker('/api/worker/jobs?status=queued')).json()).jobs.find(job => job.space.id === odd.id);
+  assert.equal((await worker(`/api/worker/jobs/${oddJob.id}`, { action: 'claim', worker: 'gpu-1' })).status, 200);
+  assert.equal((await worker(`/api/worker/jobs/${oddJob.id}`, { action: 'defer', message: 'gpu-1 cannot start agents: the agent image is missing.' })).status, 200);
+  body = await (await aliceLaptop.get(`/api/account/spaces/${odd.id}`)).json();
+  assert.equal(body.space.status, 'queued', 'a space whose worker could not start keeps waiting instead of failing');
+  assert.equal(database().prepare('SELECT attempts FROM jobs WHERE id=?').get(oddJob.id).attempts, 0, 'and its attempt is given back');
+  assert.equal((await worker(`/api/worker/jobs/${oddJob.id}`, { action: 'defer' })).status, 409, 'only a running job is deferred');
+  // The worker's own check: the team hears once when it cannot start agents (not at every check), and once when it can again.
+  for (const problem of ['the agent image sphr-agent-gpu is missing', 'the agent image sphr-agent-gpu is missing', null, null]) {
+    assert.equal((await worker('/api/worker/health', { worker: 'gpu-2', problem })).status, 200);
+  }
+  assert.equal((await fetch(base + '/api/worker/health', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401, 'only workers report');
   const held = spawn(process.execPath, [path.join(root, 'scripts/worker/agent-runner.mjs'), 'run', '--once', '--allow-unisolated'], { cwd: root, env: { ...process.env,
     SPHR_WORKER_URL: base, SPHR_WORKER_TOKEN: workerToken, SPHR_WORKER_DIR: path.join(state, 'jobs'), SPHR_WORKER_PUBLISH: 'local', SPHR_WORKER_LOCAL_DATASETS: datasets,
     SPHR_AGENT_COMMAND: JSON.stringify([process.execPath, path.join(root, 'scripts/test-support/fake-agent.mjs'), '{job}']) }, stdio: 'ignore' });
@@ -764,7 +777,9 @@ try {
   assert.equal(body.space.status, 'failed');
   assert.equal(body.space.message, 'Please upload the E57 export instead of the raw capture.');
   const heldMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention'));
-  assert.ok(heldMail.includes('or write to help@example.com if it keeps happening'), 'the held space names the contact address, not just "support"');
+  assert.ok(heldMail.includes('or write to help@example.com with any questions'), 'the held space names the contact address, not just "support"');
+  assert.ok(heldMail.includes('a person will look at it') && !heldMail.includes('Add or replace files') && !heldMail.includes('Check that your files'),
+    'a held space waits for a person and is not sent to change files that may be fine');
   assert.equal(heldMail.split('Content-Type: text/html')[0].split('help@example.com').length - 1, 2, 'once in the body (and once as Reply-To)');
   const failedMail = await mail.waitFor(message => message.includes('To: alice@example.com') && message.includes('Subject: Odd capture needs attention')
     && message.includes('Please upload the E57 export instead'));
@@ -1151,6 +1166,9 @@ try {
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));
   assert.equal(about('Space held for review', 'Title', 'Stalled capture').length, 1, 'a stalled job is announced once');
   assert.equal(about('Space held for review', 'Title', 'Stalled capture')[0].description, 'Stopped after 3 attempts without a result.');
+  assert.equal(about('Processing paused', 'Title', 'Odd capture').length, 1, 'the team hears when a worker gives a job back');
+  assert.equal(about('Processing paused', 'Worker', 'gpu-2').length, 1, 'a worker that cannot start agents is told once, not at every check');
+  assert.equal(about('Processing resumed', 'Worker', 'gpu-2').length, 1, 'and once when it can again');
   assert.ok(about('New subscription', 'Account', 'alice@example.com').length >= 1);
   assert.equal(about('New subscription', 'Account', 'grace@example.com').length, 1, 'a subscription is announced once however often Stripe reports it');
   assert.equal(about('Hosting stopped', 'Account', 'alice@example.com').length, 1);

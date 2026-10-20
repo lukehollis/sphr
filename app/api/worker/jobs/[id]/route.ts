@@ -63,7 +63,8 @@ export async function POST(request: Request, { params }: Params) {
         void notifyTeam({ title: "Space held for review", tone: "warn", description: message ?? undefined,
           fields: [["Title", held.space.title], ["Account", readUser(held.space.userId)?.email]] });
         // Not awaited, like every owner email here: the worker never waits on the mail server, and notifyOwner logs its own failures.
-        void notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "", { support: contactEmail() }));
+        void notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "",
+          { support: contactEmail(), held: true }));
       }
       return workerResponse({ job: jobDetails(readJob(job.id)!) });
     }

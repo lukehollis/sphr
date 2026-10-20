@@ -228,20 +228,23 @@ export function spaceReadyEmail(brand: string, origin: string, space: SpaceRef, 
 
 /**
  * `stalled` is processing that stopped on our side (the worker went quiet on every attempt), so the
- * email asks for another try rather than other files. A note that already names the contact
- * address is not followed by it again.
+ * email asks for another try rather than other files. `held` waits for a person, whose note already
+ * says the customer need not do anything, so no next step follows it. A note that already names the
+ * contact address is not followed by it again.
  */
-export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string, { support, stalled = false }: { support?: string; stalled?: boolean } = {}) {
+export function spaceFailedEmail(brand: string, origin: string, space: SpaceRef, message: string,
+  { support, stalled = false, held = false }: { support?: string; stalled?: boolean; held?: boolean } = {}) {
   return render({
-    brand, origin, subject: `${space.title} needs attention`, preheader: "Processing stopped before the space was finished.",
+    brand, origin, subject: `${space.title} needs attention`,
+    preheader: held ? "A person will look at this space." : "Processing stopped before the space was finished.",
     eyebrow: space.title, heading: "We could not finish this space",
     blocks: [
       { kind: "text", text: "Processing stopped with this note." },
       { kind: "quote", text: message },
-      { kind: "text", text: stalled ? "Your files are still there. Choose Start processing on the space page to try again."
-        : "Add or replace files on the space page and processing starts again." },
+      ...(held ? [] : [{ kind: "text" as const, text: stalled ? "Your files are still there. Choose Start processing on the space page to try again."
+        : "Add or replace files on the space page and processing starts again." }]),
       ...(support && message.includes(support) ? [{ kind: "text" as const, text: "You can also reply to this email." }]
-        : help(support, stalled ? "Questions?" : "Stuck, or not sure what to change?"))
+        : help(support, stalled || held ? "Questions?" : "Stuck, or not sure what to change?"))
     ],
     action: { label: "Open the space page", url: spacePage(origin, space) }
   });

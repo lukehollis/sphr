@@ -229,11 +229,34 @@ test('spaces, uploads and the processing queue', async () => {
   assert.deepEqual(store.expireJobLeases(-1), [], 'later sweeps report nothing again');
   // The messages on the space name the contact address, once, when the deployment has one.
   process.env.SPHR_CONTACT_EMAIL = 'help@example.com';
-  assert.match(store.heldSpaceMessage(), /or write to help@example\.com if it keeps happening\.$/);
+  assert.match(store.heldSpaceMessage(), /once it's sorted, or write to help@example\.com with any questions\.$/);
   assert.match(store.stalledSpaceMessage(), /start processing again from the space page, or write to help@example\.com\.$/);
   delete process.env.SPHR_CONTACT_EMAIL;
-  assert.match(store.heldSpaceMessage(), /or contact support if it keeps happening\.$/);
+  assert.match(store.heldSpaceMessage(), /We'll email you once it's sorted\.$/);
   assert.match(store.stalledSpaceMessage(), /start processing again from the space page\.$/);
+  // A held job waits for a person and is often ours to fix: the customer is not sent to change files that may be fine.
+  assert.match(store.heldSpaceMessage(), /a person will look at it/);
+  assert.doesNotMatch(store.heldSpaceMessage(), /Check that your files/, 'a held space is not blamed on the files');
+});
+
+test('the team hears when a worker cannot start agents, when it can again, and when no worker takes jobs', async () => {
+  const watch = await import('../lib/server/worker-watch.ts');
+  const minute = 60000, hour = 60 * minute;
+  assert.equal(watch.healthNotice(undefined, null, 0), null, 'a healthy worker says nothing');
+  assert.equal(watch.healthNotice(undefined, 'the agent image is missing', 0), 'paused');
+  const standing = { key: 'the agent image is missing', announced: 0 };
+  assert.equal(watch.healthNotice(standing, standing.key, hour), null, 'a standing problem is not repeated at every check');
+  assert.equal(watch.healthNotice(standing, standing.key, 6 * hour), 'paused', 'but is repeated after six hours');
+  assert.equal(watch.healthNotice(standing, 'only # GB is free', hour), 'paused', 'a different problem is told at once');
+  assert.equal(watch.healthNotice(standing, null, hour), 'resumed');
+  const created = new Date(0).toISOString();
+  const quiet = { started: 0, seen: 0, idleAnnounced: -Infinity };
+  assert.equal(watch.idleNotice(20 * minute, quiet, created), true, 'a job waiting 20 minutes with no worker asking is announced');
+  assert.equal(watch.idleNotice(20 * minute, { ...quiet, seen: 15 * minute }, created), false, 'not while a worker asks for jobs');
+  assert.equal(watch.idleNotice(20 * minute, quiet, undefined), false, 'not with nothing waiting');
+  assert.equal(watch.idleNotice(12 * minute, quiet, new Date(5 * minute).toISOString()), false, 'not for a job that just arrived');
+  assert.equal(watch.idleNotice(5 * minute, quiet, created), false, 'not right after the application starts');
+  assert.equal(watch.idleNotice(20 * minute, { ...quiet, idleAnnounced: 0 }, created), false, 'at most once an hour');
 });
 
 test('ID tokens: signature, issuer, audience, lifetime, nonce and key rotation', async () => {
