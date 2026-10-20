@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build libxerces-c-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/matterport/requirements.txt /tmp/requirements.txt
+# Slow links drop reads now and then; pip's 15 s default timeout failed a whole build (2026-10-20).
+ARG PIP_DEFAULT_TIMEOUT=120
+ARG PIP_RETRIES=10
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt "laspy[lazrs]" telemetry-parser pillow-heif "opencv-python-headless<4.11" \
     && rm /tmp/requirements.txt
