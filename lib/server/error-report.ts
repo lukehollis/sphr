@@ -49,5 +49,7 @@ export function reportClientError(props: Record<string, string | number | boolea
   if (!message || source === "reloaded the page" || isBrowserNoise(message) || isBrowserNoise(source)) return;
   if (props.kind === "webgl" && softwareGpu.test(source)) return;
   noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
-    fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null]] });
+    fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null],
+      // What the network answered for a part it keeps refusing (lib/missing-part.ts).
+      ["Network said", props.detail ? String(props.detail) : null]] });
 }

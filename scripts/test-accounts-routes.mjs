@@ -176,6 +176,9 @@ try {
     body: JSON.stringify({ events: [{ name: 'page_view', path: '127.0.0.1/account/verify' }] }) })).status, 204, 'the browser vouches for its own page');
   // A JavaScript error in a visitor's browser reaches the operator once, however often it repeats.
   for (let index = 0; index < 3; index++) await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'error', message: 'TypeError: x is undefined', source: '/_next/a.js:1' } }]);
+  // A part the visitor's network keeps refusing comes with what the network answered (lib/missing-part.ts).
+  await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/s/x', props: { kind: 'load', message: 'ChunkLoadError: Failed to load /_next/static/chunks/refused.js',
+    source: 'still failing after a reload', detail: 'HTTP 403 text/html, not from Cloudflare, server Zscaler/6.2: Website blocked' } }]);
   // A wallet's or in-app browser's injected script failing is recorded, but it isn't this site's error.
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'error', message: "TypeError: undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')", source: '/account:1' } }]);
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'promise', message: "TypeError: undefined is not an object (evaluating 'top.webkit.messageHandlers.foregroundToBackground.postMessage')" } }]);
@@ -1151,6 +1154,8 @@ try {
   for (const email of ['alice@example.com', 'bob@example.com', 'carol@example.com', 'grace@example.com']) assert.equal(about('New account', 'Email', email).length, 1, `one sign-up notice for ${email}`);
   assert.equal(about('New account', 'Signed up with', 'Google').length >= 2, true);
   assert.equal(about("Error in a visitor's browser").filter(item => item.description === 'TypeError: x is undefined').length, 1, 'a repeated browser error is reported once');
+  assert.equal(about("Error in a visitor's browser").find(item => item.description.includes('refused.js'))?.fields['Network said'],
+    'HTTP 403 text/html, not from Cloudflare, server Zscaler/6.2: Website blocked', 'a refused part says what the network answered');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('window.ethereum')), 'injected scripts are not reported');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('messageHandlers')), 'Safari extension channels are not reported');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('play method')), 'autoplay refusals are not reported');
