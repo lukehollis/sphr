@@ -374,6 +374,13 @@ customer's space keeps waiting instead of failing, and the team channel hears *P
 runner then takes no job for 5 minutes (doubling up to an hour) and waits 10 minutes (doubling up to an
 hour) before it takes a job it gave back again.
 
+The runner also checks for room before it downloads a job (three times its uploads plus a 5 GB reserve,
+`SPHR_WORKER_DISK_RESERVE_GB`) and defers a job that does not fit, so a full disk holds the job instead of
+failing it halfway. Every five minutes it posts its own check (agent image, sandbox network, disk) to
+`/api/worker/health`: the team channel hears *Processing paused* once when a worker cannot start agents
+(again after six hours if it stands) and *Processing resumed* when it can. The application also announces
+*No worker is taking jobs* when a job waits 15 minutes while no worker polls, at most once an hour.
+
 A failed job shows its message to the customer, who can add or replace files and submit
 again (at most 5 submissions per space and 20 per account each day, since each one runs an
 agent). Deleting a space, even mid-processing, cancels its job and takes it offline
@@ -445,6 +452,7 @@ All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
   storage `slug`, title, customer notes and uploads (`gs://` URIs, or a download URL
   under `/api/worker/uploads/<id>` for local storage).
 - `GET /api/worker/jobs?status=queued&wait=45` waits up to 45 seconds for a job to be queued.
+- `POST /api/worker/health` with `{"worker":"name","problem":"…" or null}`: the worker's own check, every five minutes.
 - `POST /api/worker/jobs/<id>` with `{"action":"claim","worker":"name"}`,
   `{"action":"release"}`, `{"action":"defer","message":"…"}` (the worker could not start the agent: back
   to the queue without using an attempt, and the team is told), `{"action":"progress","message":"…"}` (shown to the customer),
