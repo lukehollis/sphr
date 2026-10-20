@@ -150,6 +150,17 @@ function startConnector(clientName = 'claude-ai') {
   return { child, rpc, call, notify: (method, params) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`), clientName };
 }
 
+// Directories list a tool only with a title and hints that say whether it reads, adds or destroys.
+function hinted(tools, reads, destroys) {
+  for (const tool of tools) {
+    assert.match(tool.title, /^[A-Z][A-Za-z0-9 ]+$/, `${tool.name} has a plain title`);
+    assert.equal(tool.annotations.title, tool.title);
+    for (const hint of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint']) assert.equal(typeof tool.annotations[hint], 'boolean', `${tool.name} ${hint}`);
+    assert.equal(tool.annotations.readOnlyHint, reads.includes(tool.name), `${tool.name} readOnlyHint`);
+    assert.equal(tool.annotations.destructiveHint, destroys.includes(tool.name), `${tool.name} destructiveHint`);
+  }
+}
+
 async function until(check, label, timeout = 60000) {
   const deadline = Date.now() + timeout;
   for (;;) {
@@ -173,8 +184,12 @@ try {
   const init = await connector.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '1.0' } });
   assert.equal(init.result.protocolVersion, '2025-06-18');
   assert.match(init.result.instructions, /Example Spaces hosts 3D captures/);
+  assert.deepEqual(init.result.serverInfo, { name: 'sphr', title: 'Example Spaces', version: JSON.parse(readFileSync(path.join(root, 'connector/package.json'), 'utf8')).version });
   connector.notify('notifications/initialized');
-  const listed = (await connector.rpc('tools/list', {})).result.tools.map(tool => tool.name);
+  const localTools = (await connector.rpc('tools/list', {})).result.tools;
+  const listed = localTools.map(tool => tool.name);
+  hinted(localTools, ['check_files', 'list_plans', 'wait_for_payment', 'space_status', 'find_tour_spaces', 'list_tours', 'wait_for_tour', 'get_tour', 'search_models'],
+    ['unlink_account', 'draft_tour', 'save_tour']);
   assert.deepEqual(listed, ['link_account', 'check_files', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'space_status', 'set_visibility', 'unlink_account',
     'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'upload_model', 'upload_sky', 'share_tour']);
   assert.equal((await connector.rpc('nonsense/method', {})).error.code, -32601);
@@ -479,7 +494,10 @@ try {
   assert.match(reply.body.result.instructions, /cannot read files on the person's computer/);
   const museSession = { 'Mcp-Session-Id': sessionId };
   assert.equal((await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' }, museSession)).response.status, 202);
+  assert.deepEqual(reply.body.result.serverInfo, { name: 'sphr', title: 'SPHR', version: '1.0.0' });
   reply = await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, museSession);
+  hinted(reply.body.result.tools, ['list_plans', 'wait_for_payment', 'space_status', 'find_tour_spaces', 'list_tours', 'wait_for_tour', 'get_tour', 'search_models'],
+    ['unlink_account', 'draft_tour', 'save_tour']);
   assert.deepEqual(reply.body.result.tools.map(item => item.name), ['link_account', 'list_plans', 'create_space', 'wait_for_payment', 'upload_files', 'finish_upload', 'space_status', 'set_visibility', 'unlink_account',
     'find_tour_spaces', 'list_tours', 'create_tour', 'draft_tour', 'wait_for_tour', 'get_tour', 'save_tour', 'search_models', 'share_tour']);
   assert.equal((await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { 'Mcp-Session-Id': 'x'.repeat(32) })).response.status, 404, 'unknown sessions re-initialize');

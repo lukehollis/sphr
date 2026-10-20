@@ -23,7 +23,8 @@ import type { experienceCatalog } from "@/lib/experience/catalog";
 // limits, billing and validation are the browser's own.
 
 export type McpContext = { request: Request; client: string; token?: string; sessionId?: string; secret: McpSecret };
-type Tool = { name: string; description: string; inputSchema: object; run: (args: Record<string, unknown>, context: McpContext) => Promise<string> };
+type Hints = { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean };
+type Tool = { name: string; title: string; annotations: Hints; description: string; inputSchema: object; run: (args: Record<string, unknown>, context: McpContext) => Promise<string> };
 
 class Problem extends Error {
   constructor(message: string, public status?: number, public data?: Record<string, unknown>) { super(message); }
@@ -362,51 +363,58 @@ async function unlinkAccount(_args: Record<string, unknown>, context: McpContext
   return user ? `Unlinked from ${user.email}.` : "This agent was not linked.";
 }
 
+// Hints for clients and directories about what each tool may change. Every tool works only with the
+// person's own account on this site, so none reaches an open world.
+const readOnly: Hints = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const additive: Hints = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const setting: Hints = { ...additive, idempotentHint: true };
+const destructive: Hints = { ...setting, destructiveHint: true };
+
 export const hostedTools: Tool[] = [
-  { name: "link_account", run: linkAccount,
+  { name: "link_account", title: "Link account", annotations: additive, run: linkAccount,
     description: "Links this agent to the person's account. Returns a link where the person signs in and approves a short code; call again once they have. Never ask for a password.",
     inputSchema: { type: "object", properties: { link_code: { type: "string", description: "Only for connections without a session, the link_code from the previous call." } } } },
-  { name: "list_plans", run: listPlans, description: "The ways to pay for hosting, with prices, and the account's current plan. The first space is a free private preview, so show them when the person wants to publish it or keep it.",
+  { name: "list_plans", title: "List hosting plans", annotations: readOnly, run: listPlans, description: "The ways to pay for hosting, with prices, and the account's current plan. The first space is a free private preview, so show them when the person wants to publish it or keep it.",
     inputSchema: { type: "object", properties: {} } },
-  { name: "create_space", run: createSpace,
+  { name: "create_space", title: "Create space", annotations: additive, run: createSpace,
     description: "Creates a space for one capture. An account that does not pay for hosting yet gets its first space as a free private preview: upload and process it with no payment. After that, it returns a Stripe Checkout link for the plan the person chose (pay as you go when none is given) for them to pay; then call wait_for_payment. Never ask for card details.",
     inputSchema: { type: "object", properties: { title: { type: "string", description: "Title of the space, 1 to 200 characters." },
       plan: { type: "string", description: "Optional plan name or ID from list_plans." } }, required: ["title"] } },
-  { name: "wait_for_payment", run: waitForPayment, description: "Waits up to 25 seconds for the person to finish paying in Stripe Checkout, whether for a space's first payment or to publish a free preview. Call it again to keep waiting.",
+  { name: "wait_for_payment", title: "Wait for payment", annotations: readOnly, run: waitForPayment, description: "Waits up to 25 seconds for the person to finish paying in Stripe Checkout, whether for a space's first payment or to publish a free preview. Call it again to keep waiting.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema }, required: ["space_id"] } },
-  { name: "upload_files", run: uploadFiles,
+  { name: "upload_files", title: "Upload files", annotations: additive, run: uploadFiles,
     description: "Starts resumable uploads for capture files you hold (for example photos or video the person shared with you) and returns where to PUT each file's bytes. For files on the person's own device, give them the space's page to drop the files instead.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema, files: { type: "array", items: { type: "object", properties: {
       name: { type: "string" }, size: { type: "integer", description: "Size in bytes." }, type: { type: "string", description: "Optional MIME type." } }, required: ["name", "size"] } } },
     required: ["space_id", "files"] } },
-  { name: "finish_upload", run: finishUpload, description: "Checks that every uploaded file is complete and submits the space for processing. The account is emailed when the space is ready.",
+  { name: "finish_upload", title: "Finish upload", annotations: additive, run: finishUpload, description: "Checks that every uploaded file is complete and submits the space for processing. The account is emailed when the space is ready.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema, notes: { type: "string", description: "Optional notes for processing, such as what the capture is or how the tour should go." },
       output: { type: "string", enum: ["splat", "tour", "auto"], description: "What to build: \"splat\", a 3DGS (3D Gaussian splat) visitors move through freely (the default for photos, video and 360 captures); \"tour\", a guided tour of 360 panoramas (the default for E57 scans); or \"auto\" to use those defaults. Set it only when the person asks for one." },
       submit: { type: "boolean", description: "Defaults to true." } }, required: ["space_id"] } },
-  { name: "space_status", run: spaceStatus, description: "Status of one space, or every space on the account with its link when ready.",
+  { name: "space_status", title: "Space status", annotations: readOnly, run: spaceStatus, description: "Status of one space, or every space on the account with its link when ready.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema } } },
-  { name: "set_visibility", run: setVisibility, description: "Makes a ready space public (anyone with the link) or private (only the owner). Ask the person first. A free preview cannot be public until hosting starts, so it returns a Stripe Checkout link for the person to pay.",
+  { name: "set_visibility", title: "Set space visibility", annotations: setting, run: setVisibility, description: "Makes a ready space public (anyone with the link) or private (only the owner). Ask the person first. A free preview cannot be public until hosting starts, so it returns a Stripe Checkout link for the person to pay.",
     inputSchema: { type: "object", properties: { space_id: spaceIdSchema, public: { type: "boolean" } }, required: ["space_id", "public"] } },
-  { name: "unlink_account", run: unlinkAccount, description: "Unlinks this agent from the account.", inputSchema: { type: "object", properties: {} } },
-  { name: "find_tour_spaces", run: findTourSpaces,
+  { name: "unlink_account", title: "Unlink account", annotations: destructive, run: unlinkAccount, description: "Unlinks this agent from the account.", inputSchema: { type: "object", properties: {} } },
+  { name: "find_tour_spaces", title: "Find spaces for tours", annotations: readOnly, run: findTourSpaces,
     description: "Spaces a guided tour or scavenger hunt can be built on: the person's own finished spaces and the site's public spaces (museums, temples, tombs, gardens). Search by words in the title.",
     inputSchema: { type: "object", properties: { query: { type: "string" } } } },
-  { name: "list_tours", run: listTours, description: "The tours and scavenger hunts on the account, with their links.", inputSchema: { type: "object", properties: {} } },
-  { name: "create_tour", run: createTour, description: "Starts a private guided tour or scavenger hunt on a space from find_tour_spaces; fill it with draft_tour or save_tour.",
+  { name: "list_tours", title: "List tours", annotations: readOnly, run: listTours, description: "The tours and scavenger hunts on the account, with their links.", inputSchema: { type: "object", properties: {} } },
+  { name: "create_tour", title: "Create tour", annotations: additive, run: createTour, description: "Starts a private guided tour or scavenger hunt on a space from find_tour_spaces; fill it with draft_tour or save_tour.",
     inputSchema: { type: "object", properties: { scene_id: { type: "string", description: "The sceneId from find_tour_spaces." }, kind: { type: "string", enum: ["tour", "hunt"] },
       title: { type: "string" } }, required: ["scene_id"] } },
-  { name: "draft_tour", run: draftTour,
+  { name: "draft_tour", title: "Draft tour", annotations: { ...destructive, idempotentHint: false }, run: draftTour,
     description: "Asks the site's tour agent, which sees the space's photographs, to write or rework the tour from a plain request: stops and text, hidden objects and clues, library models, effects, sound, music, looks with transitions and skies (day, sunset, storm, night, stars). It places everything and saves. Returns at once; then call wait_for_tour.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema, request: { type: "string" } }, required: ["tour_id", "request"] } },
-  { name: "wait_for_tour", run: waitForTour, description: "Waits up to 25 seconds for a draft to finish, then summarizes the tour. Call it again to keep waiting.",
+  { name: "wait_for_tour", title: "Wait for tour draft", annotations: readOnly, run: waitForTour, description: "Waits up to 25 seconds for a draft to finish, then summarizes the tour. Call it again to keep waiting.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema }, required: ["tour_id"] } },
-  { name: "get_tour", run: getTour, description: "The tour as JSON (stops, objects, effects, looks, skies) with its revision, for editing with save_tour.",
+  { name: "get_tour", title: "Get tour", annotations: readOnly, run: getTour, description: "The tour as JSON (stops, objects, effects, looks, skies) with its revision, for editing with save_tour.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema }, required: ["tour_id"] } },
-  { name: "save_tour", run: saveTour, description: "Saves a tour edited by hand: the experience JSON from get_tour with changes. Models use a url from search_models, or any https address of a .glb.",
+  { name: "save_tour", title: "Save tour", annotations: destructive, run: saveTour, description: "Saves a tour edited by hand: the experience JSON from get_tour with changes. Models use a url from search_models, or any https address of a .glb.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema, experience: { type: "object" }, title: { type: "string" } }, required: ["tour_id", "experience"] } },
-  { name: "search_models", run: searchModels, description: "Searches the library of ready-made 3D models (statues, amphorae, temples, furniture, animals, props from many periods). Returns each model's size and url.",
+  { name: "search_models", title: "Search 3D models", annotations: readOnly, run: searchModels, description: "Searches the library of ready-made 3D models (statues, amphorae, temples, furniture, animals, props from many periods). Returns each model's size and url.",
     inputSchema: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] } },
-  { name: "share_tour", run: shareTour, description: "Makes a tour public (anyone with its link, never listed) or private, and optionally renames it. Ask the person first.",
+  { name: "share_tour", title: "Share tour", annotations: setting, run: shareTour, description: "Makes a tour public (anyone with its link, never listed) or private, and optionally renames it. Ask the person first.",
     inputSchema: { type: "object", properties: { tour_id: tourIdSchema, public: { type: "boolean" }, title: { type: "string" } }, required: ["tour_id"] } }
 ];
 

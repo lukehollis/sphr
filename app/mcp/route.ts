@@ -14,6 +14,9 @@ const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosnif
 const known: Record<string, string> = { "claude-ai": "Claude", claude: "Claude", openai: "ChatGPT", chatgpt: "ChatGPT", "openai-mcp": "ChatGPT",
   grok: "Grok", xai: "Grok", muse: "Meta Muse", "meta-muse": "Meta Muse", meta: "Meta Muse" };
 
+// Directories and clients list the server under this name, the site's own in lowercase ("spacery" for Spacery).
+const serverName = () => siteBrand().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "sphr";
+
 type Message = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 
 function clientName(info: unknown) {
@@ -28,9 +31,10 @@ async function answer(message: Message, context: McpContext) {
   switch (method) {
     case "initialize":
       return result({ protocolVersion: supportedVersions.includes(String(params?.protocolVersion)) ? params!.protocolVersion : supportedVersions[0],
-        capabilities: { tools: {} }, serverInfo: { name: "sphr", title: siteBrand(), version: "1.0.0" }, instructions: hostedInstructions() });
+        capabilities: { tools: {} }, serverInfo: { name: serverName(), title: siteBrand(), version: "1.0.0" }, instructions: hostedInstructions() });
     case "ping": return result({});
-    case "tools/list": return result({ tools: hostedTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+    case "tools/list": return result({ tools: hostedTools.map(({ name, title, annotations, description, inputSchema }) =>
+      ({ name, title, annotations: { title, ...annotations }, description, inputSchema })) });
     case "tools/call": {
       const outcome = await runHostedTool(String(params?.name ?? ""), (params?.arguments ?? {}) as Record<string, unknown>, context);
       if ("error" in outcome) return error(-32602, outcome.error!);

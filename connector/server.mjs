@@ -414,27 +414,41 @@ async function runUploader(space) {
 
 const spaceId = { type: 'string', description: 'The space ID (12 hexadecimal characters) from create_space or space_status.' };
 const tourId = { type: 'string', description: 'The tour ID (12 hexadecimal characters) from create_tour or list_tours.' };
+// Hints for clients and directories about what each tool may change. Every tool works only with files on
+// this computer and the person's own account, so none reaches an open world.
+const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const additive = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const setting = { ...additive, idempotentHint: true };
+const destructive = { ...setting, destructiveHint: true };
 const tools = [
   {
     name: 'link_account',
+    title: 'Link account',
+    annotations: additive,
     description: `Links this agent to the person's ${brand.name} account. Opens a page in their browser where they sign in (or sign up) and approve a short code; waits up to 50 seconds. Call it again to keep waiting. Never ask the person for a password.`,
     inputSchema: { type: 'object', properties: { relink: { type: 'boolean', description: 'Link again even if already linked, for example to use another account.' } } },
     run: linkAccount
   },
   {
     name: 'check_files',
+    title: 'Check capture files',
+    annotations: readOnly,
     description: 'Looks at capture files or folders on this computer without uploading anything: what kind of capture each file is (laser scan, E57, point cloud, Gaussian splat, 360 photo or video, mesh, photo set, archive), how many there are and their total size, with a suggested title.',
     inputSchema: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' }, description: 'Absolute paths to files or folders.' } }, required: ['paths'] },
     run: checkFiles
   },
   {
     name: 'list_plans',
+    title: 'List hosting plans',
+    annotations: readOnly,
     description: `The ways to pay for ${brand.name} hosting, with prices, and the account's current plan. The first space is a free private preview, so show these when the person wants to publish it or keep it.`,
     inputSchema: { type: 'object', properties: {} },
     run: listPlans
   },
   {
     name: 'create_space',
+    title: 'Create space',
+    annotations: additive,
     description: 'Creates a space to upload files into. An account that is not paying for hosting yet gets its first space as a free private preview: upload and process it with no payment. After that, it opens Stripe Checkout in the browser for the plan the person chose (pay as you go when none is given); the person pays there, then call wait_for_payment. Never ask for card details.',
     inputSchema: { type: 'object', properties: {
       title: { type: 'string', description: 'Title of the space, 1 to 200 characters.' },
@@ -444,12 +458,16 @@ const tools = [
   },
   {
     name: 'wait_for_payment',
+    title: 'Wait for payment',
+    annotations: readOnly,
     description: 'Waits up to 50 seconds for the person to finish paying in Stripe Checkout, whether for a space\'s first payment or to publish a free preview. Call it again to keep waiting.',
     inputSchema: { type: 'object', properties: { space_id: spaceId }, required: ['space_id'] },
     run: waitForPayment
   },
   {
     name: 'upload_files',
+    title: 'Upload files',
+    annotations: additive,
     description: 'Uploads files or folders from this computer into a space and submits it for processing. The upload runs in the background, keeps going if this conversation ends, resumes after network interruptions and returns at once; follow it with space_status. Upload every file of one capture in one call.',
     inputSchema: { type: 'object', properties: {
       space_id: spaceId,
@@ -462,36 +480,48 @@ const tools = [
   },
   {
     name: 'space_status',
+    title: 'Space status',
+    annotations: readOnly,
     description: 'Upload progress and processing status for one space, or every space on the account with its link when ready.',
     inputSchema: { type: 'object', properties: { space_id: spaceId } },
     run: spaceStatus
   },
   {
     name: 'set_visibility',
+    title: 'Set space visibility',
+    annotations: setting,
     description: 'Makes a ready space public (anyone with the link can open it) or private (only the owner). Ask the person first. A free preview cannot be public until hosting starts, so it opens Stripe Checkout in the browser for the person to pay.',
     inputSchema: { type: 'object', properties: { space_id: spaceId, public: { type: 'boolean' } }, required: ['space_id', 'public'] },
     run: setVisibility
   },
   {
     name: 'unlink_account',
+    title: 'Unlink account',
+    annotations: destructive,
     description: `Unlinks this agent from the ${brand.name} account and forgets its token on this computer.`,
     inputSchema: { type: 'object', properties: {} },
     run: unlinkAccount
   },
   {
     name: 'find_tour_spaces',
+    title: 'Find spaces for tours',
+    annotations: readOnly,
     description: `Spaces a guided tour or scavenger hunt can be built on: the person's own finished spaces and ${brand.name}'s public spaces (museums, temples, tombs, gardens). Search by words in the title.`,
     inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Words from the title, for example "pyramid" or "delphi". Empty lists the first spaces.' } } },
     run: findTourSpaces
   },
   {
     name: 'list_tours',
+    title: 'List tours',
+    annotations: readOnly,
     description: 'The tours and scavenger hunts on the account, with their links and how many stops each has.',
     inputSchema: { type: 'object', properties: {} },
     run: listTours
   },
   {
     name: 'create_tour',
+    title: 'Create tour',
+    annotations: additive,
     description: 'Starts a guided tour or a scavenger hunt on a space from find_tour_spaces. It starts private and empty; fill it with draft_tour or save_tour.',
     inputSchema: { type: 'object', properties: {
       scene_id: { type: 'string', description: 'The sceneId from find_tour_spaces.' },
@@ -502,24 +532,32 @@ const tools = [
   },
   {
     name: 'draft_tour',
+    title: 'Draft tour',
+    annotations: { ...destructive, idempotentHint: false },
     description: `Asks ${brand.name}'s tour agent, which can see the space's photographs, to write or rework the tour from a request in plain words: stops and their text, hidden objects and clues, library models, effects, sound, music, looks (line drawing, blueprint, film noir and more, with transitions) and skies (a sunset, a storm, the Milky Way behind the space). It places everything and saves. Takes one to five minutes; it returns at once, then call wait_for_tour.`,
     inputSchema: { type: 'object', properties: { tour_id: tourId, request: { type: 'string', description: 'What to make or change, up to 6000 characters.' } }, required: ['tour_id', 'request'] },
     run: draftTour
   },
   {
     name: 'wait_for_tour',
+    title: 'Wait for tour draft',
+    annotations: readOnly,
     description: 'Waits up to 50 seconds for a draft from draft_tour to finish, then summarizes the tour. Call it again to keep waiting.',
     inputSchema: { type: 'object', properties: { tour_id: tourId }, required: ['tour_id'] },
     run: waitForTour
   },
   {
     name: 'get_tour',
+    title: 'Get tour',
+    annotations: readOnly,
     description: 'The tour as JSON (stops, objects, effects, looks, skies) with its revision, for editing with save_tour.',
     inputSchema: { type: 'object', properties: { tour_id: tourId }, required: ['tour_id'] },
     run: getTour
   },
   {
     name: 'save_tour',
+    title: 'Save tour',
+    annotations: destructive,
     description: 'Saves a tour edited by hand: the experience JSON from get_tour with your changes. Objects, effects and stops keep the shapes get_tour shows; models use a url from search_models or upload_model.',
     inputSchema: { type: 'object', properties: { tour_id: tourId, experience: { type: 'object', description: 'The whole experience: version, kind, stops, objects, effects, optional look and finale.' },
       title: { type: 'string' } }, required: ['tour_id', 'experience'] },
@@ -527,24 +565,32 @@ const tools = [
   },
   {
     name: 'search_models',
+    title: 'Search 3D models',
+    annotations: readOnly,
     description: `Searches ${brand.name}'s library of ready-made 3D models (statues, amphorae, furniture, animals, buildings and props from many periods). Returns each model's id, size and url; use the url as an object's source url in save_tour, or name the models in a draft_tour request.`,
     inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] },
     run: searchModels
   },
   {
     name: 'upload_model',
+    title: 'Upload 3D model',
+    annotations: additive,
     description: 'Uploads a 3D model from this computer to a tour, for example one you built in Blender (export glTF Binary .glb, meters, Y up, everything embedded, under 25 MB). Returns the url to use as an object\'s source url in save_tour.',
     inputSchema: { type: 'object', properties: { tour_id: tourId, path: { type: 'string', description: 'Absolute path to the .glb file.' } }, required: ['tour_id', 'path'] },
     run: uploadModel
   },
   {
     name: 'upload_sky',
+    title: 'Upload sky',
+    annotations: additive,
     description: 'Uploads a sky from this computer to a tour: a 360 panorama twice as wide as it is tall (equirectangular JPEG, PNG or WebP, 1024 to 8192 pixels wide, under 20 MB). Returns the sky to set as the tour\'s or a stop\'s "sky" in save_tour.',
     inputSchema: { type: 'object', properties: { tour_id: tourId, path: { type: 'string', description: 'Absolute path to the image.' } }, required: ['tour_id', 'path'] },
     run: uploadSky
   },
   {
     name: 'share_tour',
+    title: 'Share tour',
+    annotations: setting,
     description: 'Makes a tour public (anyone with its link can open it, never listed or indexed) or private, and optionally renames it. Ask the person first.',
     inputSchema: { type: 'object', properties: { tour_id: tourId, public: { type: 'boolean' }, title: { type: 'string' } }, required: ['tour_id'] },
     run: shareTour
@@ -965,7 +1011,7 @@ async function handle(message) {
       return reply({ protocolVersion: supportedVersions.includes(params?.protocolVersion) ? params.protocolVersion : supportedVersions[0],
         capabilities: { tools: {}, prompts: {} }, serverInfo: { name: brand.slug, title: brand.name, version }, instructions });
     case 'ping': return reply({});
-    case 'tools/list': return reply({ tools: tools.map(({ run, ...tool }) => tool) });
+    case 'tools/list': return reply({ tools: tools.map(({ run, ...tool }) => ({ ...tool, annotations: { title: tool.title, ...tool.annotations } })) });
     case 'tools/call': {
       const tool = tools.find(item => item.name === params?.name);
       if (!tool) return fail(-32602, `Unknown tool ${params?.name}`);
