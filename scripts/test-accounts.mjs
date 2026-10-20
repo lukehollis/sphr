@@ -142,6 +142,14 @@ test('spaces, uploads and the processing queue', async () => {
   assert.equal(store.readCustomerSpace(space.id).status, 'processing');
   assert.equal(store.releaseJob(job.id), true);
   assert.equal(store.readCustomerSpace(space.id).status, 'queued');
+  // A worker that cannot start its agent gives the job back without using an attempt or failing the space.
+  store.claimJob(job.id, 'worker-a');
+  assert.equal(store.readJob(job.id).attempts, 2);
+  assert.equal(store.deferJob(job.id), true);
+  assert.equal(store.readJob(job.id).status, 'queued');
+  assert.equal(store.readJob(job.id).attempts, 1, 'a deferred claim gives its attempt back');
+  assert.equal(store.readCustomerSpace(space.id).status, 'queued');
+  assert.equal(store.deferJob(job.id), false, 'only a running job is deferred');
   store.claimJob(job.id, 'worker-a');
   const listing = { sceneId: job.sceneId, slug: `customer-${space.id}` };
   const done = store.finishJob(job.id, { ok: true, message: 'Built 12 scan positions.', listing });

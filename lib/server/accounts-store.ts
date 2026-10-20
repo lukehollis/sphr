@@ -1123,6 +1123,20 @@ export function releaseJob(id: string) {
   });
 }
 
+/**
+ * Returns a running job whose worker could not start its agent (a missing image, a broken sandbox) to the
+ * queue. The problem is ours, so the attempt is given back and the customer's space keeps waiting.
+ */
+export function deferJob(id: string) {
+  return transaction(() => {
+    const job = readJob(id);
+    if (!job || job.status !== "running") return false;
+    store().prepare("UPDATE jobs SET status='queued', worker=NULL, started=NULL, progress=NULL, attempts=MAX(attempts-1, 0) WHERE id=?").run(id);
+    store().prepare("UPDATE customer_spaces SET status='queued', updated=? WHERE id=? AND status='processing'").run(now(), job.spaceId);
+    return true;
+  });
+}
+
 /** The latest step the processing agent reported, shown to the customer while it works. */
 export function setJobProgress(id: string, progress: string) {
   return store().prepare("UPDATE jobs SET progress=? WHERE id=? AND status='running'").run(progress, id).changes > 0;

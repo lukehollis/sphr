@@ -1,5 +1,5 @@
 import { isScenePublic, setScenePublic } from "@/lib/server/admin-store";
-import { AccountError, claimJob, cleanText, finishJob, holdJob, readJob, readUser, releaseJob, setJobProgress } from "@/lib/server/accounts-store";
+import { AccountError, claimJob, cleanText, deferJob, finishJob, holdJob, readCustomerSpace, readJob, readUser, releaseJob, setJobProgress } from "@/lib/server/accounts-store";
 import { accountsEnabled, notifyOwner, publicOrigin } from "@/lib/server/accounts";
 import { jobDetails, jobListing, releaseStaleJobs, workerAuthorized, workerResponse } from "@/lib/server/worker";
 import { listingRevision, removePublishedScene } from "@/lib/server/published-assets";
@@ -24,7 +24,7 @@ export async function GET(request: Request, { params }: Params) {
   return job ? workerResponse({ job: jobDetails(job) }) : workerResponse({ error: "Job not found." }, 404);
 }
 
-/** Actions: claim, release, progress, hold (for an operator), complete (with the published listing), fail. */
+/** Actions: claim, release, defer (the worker could not start), progress, hold (for an operator), complete (with the published listing), fail. */
 export async function POST(request: Request, { params }: Params) {
   if (!accountsEnabled() || !workerAuthorized(request)) return workerResponse({ error: "Unauthorized." }, 401);
   let body;
@@ -41,6 +41,14 @@ export async function POST(request: Request, { params }: Params) {
     }
     if (body?.action === "release") {
       return releaseJob(job.id) ? workerResponse({ ok: true }) : workerResponse({ error: "This job is not running." }, 409);
+    }
+    if (body?.action === "defer") {
+      // The worker could not start its agent, which is ours to fix: the customer's space keeps waiting and the team is told.
+      if (!deferJob(job.id)) return workerResponse({ error: "This job is not running." }, 409);
+      const space = readCustomerSpace(job.spaceId);
+      void notifyTeam({ title: "Processing paused", tone: "bad", description: message ?? "The worker could not start the processing agent.",
+        fields: [["Title", space?.title], ["Account", space ? readUser(space.userId)?.email : undefined], ["Worker", job.worker]] });
+      return workerResponse({ ok: true });
     }
     if (body?.action === "progress") {
       if (!message) return workerResponse({ error: "Describe the step." }, 400);
