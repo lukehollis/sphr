@@ -30,8 +30,10 @@ still name them as neighbors. Those links are dropped and recorded; nothing is i
 a minute for a hundred photos. It copies the faces without re-encoding, keeps every triangle and texture of the
 mesh, converts poses and tags (`three = [x, z, -y]`), and validates its own package against the download.
 
-Then check and validate as sphr-intake section 3 says. The printed summary gives the photos, triangles, tags,
-connected areas and dropped links. Open `preview.jpg` (the space's cover picture on Matterport).
+Then check and validate as sphr-intake section 3 says. The printed summary gives the photos (`nodes`),
+triangles, tags, connected areas (`graphComponents`) and `hiddenSweeps`: how many photos the owner hid on Matterport,
+whose links from the others were dropped (`photosWithHiddenNeighbors` counts the photos that lost one, not hidden
+photos). Open `preview.jpg` (the space's cover picture on Matterport).
 
 ## Limits and the message
 

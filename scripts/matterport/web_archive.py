@@ -550,7 +550,9 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
     write_matterport_index(directory)
     return {"dataset": str(final), "scenePath": manifest["scenePath"], "nodes": len(nodes),
             "faces": len(nodes) * 6, "triangles": mesh["triangles"], "tags": len(tags), "graphComponents": len(report["graphComponents"]),
-            "unavailableNeighbors": len(manifest.get("unavailableNeighbors", [])), "sourceSha256": source_binding}
+            # Photos the owner hid on Matterport, which other photos still list as neighbors, and how many photos lost such a link.
+            "hiddenSweeps": len({hidden for item in manifest.get("unavailableNeighbors", []) for hidden in item["unavailableIds"]}),
+            "photosWithHiddenNeighbors": len(manifest.get("unavailableNeighbors", [])), "sourceSha256": source_binding}
 
 
 if __name__ == "__main__":
