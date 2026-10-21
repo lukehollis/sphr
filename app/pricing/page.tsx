@@ -17,14 +17,18 @@ import { formatMoney, formatPeriod } from "@/lib/price";
 export const dynamic = "force-dynamic";
 export const metadata = {
   title: "Pricing",
-  description: "Building tours and scavenger hunts is free. A plan shows every student in your class results, and hosts 3D spaces of your own."
+  description: "Building tours and scavenger hunts is free. A hosting plan puts 3D spaces of your own online and shows every player in your results."
 };
 
 /** One plan as a card: its prices (monthly and yearly of the same Stripe product) and what it gives. */
 type Offer = { product: string; name: string; key: string; spaces: number | null; prices: Plan[] };
 
-/** Plans listed for teachers, by their `sphr_plan` key or product name. Every other plan is listed under hosting. */
-const forTeachers = new Set(["classroom", "school"]);
+/**
+ * Schools and districts don't buy Spacery plans of their own. Mused for Schools covers Mused's tours and simulations
+ * for every student, with help on school networks and copies that run offline, and a school that hosts captures of
+ * its own on Spacery takes an Enterprise account.
+ */
+const schoolsUrl = "https://mused.com/edu/pricing/";
 
 function groupOffers(plans: Plan[]) {
   const offers: Offer[] = [];
@@ -107,10 +111,7 @@ export default async function PricingPage() {
     return { label, variant, checkout: plan.id };
   }
 
-  const offers = groupOffers(plans);
-  const teacherOffers = offers.filter(offer => offer.spaces !== null && forTeachers.has(offer.key));
-  const hostingOffers = offers.filter(offer => !teacherOffers.includes(offer));
-  const featured = teacherOffers[0];
+  const hostingOffers = groupOffers(plans);
   const build = account ? "/account/tours/new" : `/account/signup?next=${encodeURIComponent("/account/tours/new")}`;
   const mail = (subject: string) => sales && <a href={`mailto:${sales}?subject=${encodeURIComponent(subject)}`}>{sales}</a>;
 
@@ -119,38 +120,30 @@ export default async function PricingPage() {
     const main = year ?? offer.prices[0];
     const others = offer.prices.filter(plan => plan !== main);
     const saving = yearlySaving(offer);
-    const isFeatured = offer === featured;
     const tooSmall = Boolean(account && offer.spaces !== null && offer.spaces < spaces);
-    const teacher = teacherOffers.includes(offer);
-    const team = offer.key === "school";
-    const audience = offer.spaces === null ? "Pay only for the spaces you host"
-      : team ? "For every teacher at one school" : teacher && offer.spaces === 1 ? "For one teacher" : `For ${spacesText(offer.spaces)}`;
+    const audience = offer.spaces === null ? "Pay only for the spaces you host" : `For ${spacesText(offer.spaces)}`;
     const features = offer.spaces === null ? [
       `${amount(main)} ${formatPeriod(main.interval, main.intervalCount)} for each space you host`,
       "A public link and an embed for every space",
       "Add or delete spaces any time, prorated on your next invoice",
       "Every player in your class results while you host"
     ] : [
-      ...team ? ["One plan for every teacher who joins your school's team"] : [],
-      ...team ? ["Every student in every class's results, with spreadsheets"]
-        : teacher ? ["Every student in your class results, with how far each one got", "Download your class results as a spreadsheet"]
-        : ["Every player in your tours' results, with spreadsheets"],
+      "Every player in your tours' results, with spreadsheets",
       "The agent drafts tours and hunts as often as you like",
       `Host ${spacesText(offer.spaces)} of your own, with a public link and embed`
     ];
-    // Teachers' cards name the price on the button; hosting cards, four to a row, keep it short.
+    // Hosting cards, four to a row, keep the button short.
     const label = (plan: Plan) => offer.spaces === null ? (account?.spaceCount ? "Pay as you go" : account ? "Add a space" : "Try it free")
-      : teacher ? `Subscribe for ${price(plan)}` : `Choose ${offer.name}`;
-    return <Card key={offer.product} name={offer.name} audience={audience} featured={isFeatured && !tooSmall}
-      flag={tooSmall ? `Too small for your ${spaces} spaces` : isFeatured ? "Recommended for teachers" : undefined} flagMuted={tooSmall}
+      : `Choose ${offer.name}`;
+    return <Card key={offer.product} name={offer.name} audience={audience}
+      flag={tooSmall ? `Too small for your ${spaces} spaces` : undefined} flagMuted={tooSmall}
       plan={{ amount: amount(main), period: offer.spaces === null ? `${formatPeriod(main.interval, main.intervalCount)} for each space` : formatPeriod(main.interval, main.intervalCount) }}
       alternative={others.length ? <>or {others.map(price).join(", or ")}{saving && main === year && month ? <> <span className="pricing-save">Save {saving} yearly</span></> : null}</> : undefined}
       features={features}
       actions={<>
-        <PricingAction {...action(main, label(main), isFeatured ? "accent" : "ink")} />
+        <PricingAction {...action(main, label(main), "ink")} />
         {others.map(plan => <PricingAction key={plan.id} {...action(plan, `Or pay ${price(plan)}`, "outline")} />)}
-      </>}
-      note={team && sales ? <>Paying by invoice or purchase order? Email {mail("School plan")}.</> : undefined} />;
+      </>} />;
   }
 
   const currency = plans[0]?.currency.toUpperCase();
@@ -163,7 +156,7 @@ export default async function PricingPage() {
     <main className="site-main pricing">
       <div className="pricing-hero">
         <h1>Pricing</h1>
-        <p>Build tours and scavenger hunts for free. Pay when you want every student in your class results, or to host 3D spaces of your own.</p>
+        <p>Build tours and scavenger hunts for free. Pay when you host 3D spaces of your own, and every player shows in your results.</p>
       </div>
       {account && (live || spaces > 0) && <SpaceUsage used={spaces} limit={limit} plan={planName} />}
       {live && current && <p className="site-note pricing-current" role="status">You&apos;re on {current.name} at {price(current)}. <a href="/account/plan">Manage your plan</a></p>}
@@ -172,9 +165,9 @@ export default async function PricingPage() {
       <section className="pricing-group" aria-labelledby="teachers-title" id="teachers">
         <div className="pricing-group-head">
           <h2 id="teachers-title">Teachers and schools</h2>
-          <p>Students play from a link and don&apos;t need accounts. A plan shows every one of them in your class results.</p>
+          <p>Students play from a link and don&apos;t need accounts. Your first {FREE_PLAYERS} players show in your class results, and a hosting plan shows them all.</p>
         </div>
-        <div className="pricing-cards" style={{ "--cards": 1 + teacherOffers.length } as CSSProperties}>
+        <div className="pricing-cards" style={{ "--cards": 2 } as CSSProperties}>
           <Card name="Free" audience="For trying it with a class" plan={{ amount: formatMoney(0, plans[0]?.currency ?? "usd"), period: "forever" }}
             features={[
               `Build tours and scavenger hunts on ${brand}'s public spaces`,
@@ -183,7 +176,15 @@ export default async function PricingPage() {
               ...billing ? [`The agent drafts ${FREE_AGENT_DRAFTS} tours a month`, `Your first 3D capture as a free private preview for ${previewDays()} days`] : []
             ]}
             actions={<PricingAction label="Start building free" variant="outline" href={build} />} />
-          {teacherOffers.map(offerCard)}
+          <Card name="Schools and districts" audience="For every student at a school" plan={{ amount: "Quoted", period: "by the year" }}
+            features={[
+              "Mused's tours, trivia and simulations for every student, with school sign-in",
+              "Help from the Mused team when a school network blocks the tours",
+              "Copies of the tours that run without the internet",
+              `${brand} for captures of your own, as an Enterprise account`
+            ]}
+            actions={<PricingAction label="See Mused for Schools" variant="outline" href={schoolsUrl} />}
+            note={sales ? <>Hosting your school&apos;s own captures? Email {mail("Enterprise for a school")}.</> : undefined} />
         </div>
       </section>
 
@@ -212,10 +213,10 @@ export default async function PricingPage() {
           <h3>How do I pay, and can I cancel?</h3>
           <p>You pay on Stripe&apos;s secure checkout page. You can cancel any time from your account, and your plan keeps working until the end of the period you paid for.</p>
         </div>
-        {teacherOffers.some(offer => offer.key === "school") && <div>
-          <h3>Can one plan cover my whole school?</h3>
-          <p>Yes. Whoever subscribes to School invites the other teachers to the school&apos;s team with its join link, and everyone on the team shares the plan.</p>
-        </div>}
+        <div>
+          <h3>Is there a plan for my school?</h3>
+          <p>Schools and districts get their plans through <a href={schoolsUrl}>Mused for Schools</a>, which covers Mused&apos;s tours and simulations for every student, with help when the school network gets in the way. A school that hosts captures of its own on {brand} takes an Enterprise account.{sales ? <> Email {mail("Enterprise for a school")} to set one up.</> : null}</p>
+        </div>
         {sales && <div>
           <h3>Can we pay by invoice or purchase order?</h3>
           <p>Yes. Email {mail("Invoice")} with your school or organization&apos;s name, and we will set you up with an invoice.</p>

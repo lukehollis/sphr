@@ -212,10 +212,14 @@ try {
   const pricing = await anonymous.get('/pricing');
   assert.equal(pricing.status, 200, 'the pricing page is public');
   const pricingText = (await pricing.text()).replace(/<!-- -->/g, '').replaceAll('&#x27;', "'");
-  for (const text of ['Teachers and schools', 'Recommended for teachers', 'Classroom', '$79', 'or $9 a month', 'Save 27% yearly', 'School', '$499',
-    'Hosting your own spaces', 'Pay as you go', '$1', 'a month for each space', 'Starter', '$8', 'Enterprise', '$249', 'up to 200 spaces'])
+  for (const text of ['Teachers and schools', 'Hosting your own spaces', 'Pay as you go', '$1', 'a month for each space', 'Starter', '$8',
+    'Enterprise', '$249', 'up to 200 spaces', '$79', 'or $9 a month', 'Save 27% yearly'])
     assert.ok(pricingText.includes(text), `the pricing page shows "${text}" as Stripe has it`);
-  assert.ok(pricingText.indexOf('Classroom') < pricingText.indexOf('Hosting your own spaces'), 'teachers come first');
+  // Schools buy through Mused for Schools (or an Enterprise account), so no plan is sold to teachers here.
+  assert.ok(!pricingText.includes('Recommended for teachers') && !pricingText.includes('For one teacher'), 'no plan is sold to teachers');
+  assert.ok(pricingText.includes('Schools and districts') && pricingText.includes('href="https://mused.com/edu/pricing/"'), 'schools are sent to Mused for Schools');
+  assert.ok(pricingText.includes('mailto:hello@example.com?subject=Enterprise%20for%20a%20school'), 'or to an Enterprise account for their own captures');
+  assert.ok(pricingText.indexOf('Schools and districts') < pricingText.indexOf('Hosting your own spaces'), 'the school card sits beside the free one');
   for (const price of ['price_classyear', 'price_classroom', 'price_school', 'price_starter', 'price_enterprise'])
     assert.ok(pricingText.includes(`/account/signup?next=${encodeURIComponent(`/account/plan?plan=${price}`)}`), `${price} signs a visitor up, then opens the plan page with it chosen`);
   assert.ok(pricingText.includes(`/account/signup?next=${encodeURIComponent('/account/tours/new')}`), 'the free plan starts with building');
