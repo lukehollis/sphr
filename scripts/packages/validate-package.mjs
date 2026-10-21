@@ -76,7 +76,7 @@ export function validatePackage(folder, expect = {}) {
     for (const required of ['bootstrap.json', 'preview.jpg']) if (!listed.has(required)) fail(`${required} must be listed.`);
     checks.files = listed.size;
     checks.bytes = total;
-  } else if (!['sphr-matterport-e57-v1', 'sphr-matterport-e57-v2', 'sphr-matterport-web-v1'].includes(manifest.schema)) {
+  } else if (!['sphr-matterport-e57-v1', 'sphr-matterport-e57-v2', 'sphr-matterport-web-v1', 'sphr-matterport-capture-v1'].includes(manifest.schema)) {
     fail(`Unknown package schema: ${manifest.schema}`);
   }
 

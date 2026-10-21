@@ -13,9 +13,10 @@
 //   node scripts/worker/agent-runner.mjs publish <job> [message]  after building a held job's package by hand
 //   node scripts/worker/agent-runner.mjs fail <job> <message> tell the customer what to change
 //   node scripts/worker/agent-runner.mjs release <job>        return a job to the queue
+//   node scripts/worker/agent-runner.mjs check                say whether agents can start on this worker
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync, mkdirSync, rmSync, renameSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync, mkdirSync, rmSync, renameSync, statSync, statfsSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -36,6 +37,7 @@ const concurrency = Math.max(1, Number(env('SPHR_WORKER_CONCURRENCY') ?? 1));
 const blocked = /^(SPHR_WORKER_TOKEN|SPHR_STRIPE_.*|SPHR_PUBLISH_.*|GOOGLE_APPLICATION_CREDENTIALS|CLOUDSDK_.*|GCLOUD_.*|AWS_.*)$/;
 
 function fail(message) { console.error(message); process.exit(1); }
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Trusted scripts are copied before any agent runs and checked before every use, so an
 // agent that edits the checkout cannot change what the runner executes with its credentials.
@@ -353,6 +355,111 @@ function publish(job, { datasets, folder, files, entry }) {
   return published;
 }
 
+// ---- Jobs this worker cannot start ----
+// A missing agent image or sandbox is our problem, not the customer's files. Holding such a job used to tell the
+// customer their capture failed (2026-10-19: the images were pruned and the first upload in two weeks was failed).
+
+/** For a `docker run` agent command, the image and network the agent needs; nothing for other commands. */
+function dockerNeeds() {
+  const [program, subcommand, ...args] = agentCommand('', '');
+  if (path.basename(program) !== 'docker' || subcommand !== 'run') return {};
+  // docker run [options] IMAGE [command]: these options take no value, the others take the next argument
+  // unless it is joined with "=".
+  const switches = new Set(['--rm', '--read-only', '--init', '--privileged', '-i', '-t', '-it', '-d', '--interactive', '--tty', '--detach',
+    '-P', '--publish-all', '--no-healthcheck', '--oom-kill-disable']);
+  let network;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (!arg.startsWith('-')) return { image: arg, network };
+    const [name, value] = arg.split(/=(.*)/s);
+    if (name === '--network' || name === '--net') network = value ?? args[index + 1];
+    if (value === undefined && !switches.has(name)) index++;
+  }
+  return {};
+}
+
+/** Why agents cannot start on this worker (its image or sandbox network is missing), or nothing. */
+function agentProblem() {
+  const { image, network } = dockerNeeds();
+  const lacks = (args, what) => {
+    const result = spawnSync('docker', args, { encoding: 'utf8', timeout: 60000 });
+    if (result.status === 0) return undefined;
+    return `${what} (${(result.stderr || result.error?.message || `exit ${result.status}`).trim().split('\n').pop()})`;
+  };
+  return (image && lacks(['image', 'inspect', '--format', '{{.Id}}', image], `the agent image ${image} is missing`))
+    || (network && lacks(['network', 'inspect', '--format', '{{.Id}}', network], `the sandbox network ${network} is missing`))
+    || undefined;
+}
+
+// A job given back waits before this worker takes it again (10 minutes, doubling up to an hour), and a worker
+// that cannot start agents takes no job for a while (5 minutes, doubling up to an hour), so neither spins.
+const cooling = new Map();
+const pause = { until: 0, times: 0 };
+const backoff = (times, first) => Math.min(first * 2 ** (times - 1), 60) * 60000;
+const coolingDown = id => (cooling.get(id)?.until ?? 0) > Date.now();
+function coolDown(job) {
+  const times = (cooling.get(job.id)?.times ?? 0) + 1;
+  cooling.set(job.id, { until: Date.now() + backoff(times, 10), times });
+}
+function pauseClaims(problem) {
+  pause.times++;
+  pause.until = Date.now() + backoff(pause.times, 5);
+  console.error(`[${new Date().toISOString()}] agents cannot start: ${problem}; taking no jobs until ${new Date(pause.until).toISOString()}`);
+}
+
+/**
+ * Why this worker lacks room for a job of `bytes` uploaded bytes, or nothing. A job takes about three times its
+ * uploads (the files, what is unpacked from them and what the agent builds), and the disk keeps a reserve for
+ * everything else, so a full disk holds the job back instead of failing it halfway.
+ */
+function diskProblem(bytes = 0) {
+  mkdirSync(workRoot, { recursive: true });
+  const { bavail, bsize } = statfsSync(workRoot);
+  const free = bavail * bsize, needed = 3 * bytes + Number(env('SPHR_WORKER_DISK_RESERVE_GB') ?? 5) * 1e9;
+  if (free >= needed) return undefined;
+  const size = value => `${(value / 1e9).toFixed(1)} GB`;
+  return `only ${size(free)} is free on this worker${bytes ? ` and this job needs about ${size(needed)}` : ''}`;
+}
+
+// The application hears this worker's own check every five minutes, so a worker that cannot start agents is
+// noticed before a customer waits on it. Applications from before /api/worker/health answer 404, which is fine.
+let healthChecked = 0;
+async function reportHealth() {
+  if (Date.now() - healthChecked < 5 * 60000) return;
+  healthChecked = Date.now();
+  const problem = agentProblem() ?? diskProblem() ?? null;
+  await api('/api/worker/health', { worker, problem }).catch(error => {
+    if (error.status !== 404) console.error(`[${new Date().toISOString()}] could not report this worker's health: ${error.message}`);
+  });
+}
+
+/** Whether the agent left nothing in output/ since `since`: it never reached the files. */
+function wroteNothing(job, since) {
+  const output = path.join(jobDir(job), 'output');
+  try { return !readdirSync(output).some(name => lstatSync(path.join(output, name)).mtimeMs >= since); }
+  catch { return true; }
+}
+
+/** The end of agent.log, for the operator: what docker or the agent said before it stopped. */
+function logTail(job) {
+  try {
+    return readJobFile(jobDir(job), 'agent.log', { maxBytes: 4096, tail: true }).replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ')
+      .split('\n').map(line => line.trim()).filter(Boolean).slice(-3).join(' / ').slice(-500);
+  } catch { return ''; }
+}
+
+/** Gives back a job this worker could not start. The customer's space keeps waiting and the operator is told. */
+async function defer(job, reason) {
+  log(job, `returning the job to the queue: ${reason}`);
+  try { await api(`/api/worker/jobs/${job.id}`, { action: 'defer', message: reason.slice(0, 1000) }); }
+  catch (error) {
+    // An application from before 'defer' only knows 'release', which tells nobody.
+    if (error.status !== 400) throw error;
+    await api(`/api/worker/jobs/${job.id}`, { action: 'release' });
+  }
+  return 'deferred';
+}
+
 async function hold(job, reason) {
   log(job, `held for an operator: ${reason}`);
   await api(`/api/worker/jobs/${job.id}`, { action: 'hold', message: reason.slice(0, 1000) });
@@ -381,6 +488,18 @@ async function processJob(queued) {
   try { job = (await api(`/api/worker/jobs/${queued.id}`, { action: 'claim', worker })).job; }
   catch (error) { if (error.status === 409) return 'skipped'; throw error; }
   log(job, `claimed "${job.space.title}" (${job.uploads.length} files)`);
+  // Checked before downloading anything: a worker that cannot start agents hands the job straight back.
+  const problem = agentProblem();
+  if (problem) {
+    pauseClaims(problem);
+    return defer(job, `${worker} cannot start agents: ${problem}.`);
+  }
+  pause.times = 0;
+  const short = diskProblem(job.uploads.reduce((total, upload) => total + upload.size, 0));
+  if (short) {
+    coolDown(job);
+    return defer(job, `${worker} is short of disk space: ${short}.`);
+  }
   try {
     const files = await download(job);
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
@@ -388,12 +507,18 @@ async function processJob(queued) {
       reprocessing: job.space.reprocessing, inputs: files }, null, 2) + '\n');
     rmSync(path.join(jobDir(job), 'output/result.json'), { force: true });
   } catch (error) {
-    log(job, `returning the job to the queue: ${error.message}`);
-    await api(`/api/worker/jobs/${job.id}`, { action: 'release' });
-    throw error;
+    coolDown(job);
+    return defer(job, error.message);
   }
+  const since = Date.now();
   const outcome = await runAgent(job);
-  log(job, `agent exited with ${outcome.signal ?? outcome.code}`);
+  const exit = outcome.signal ?? outcome.code;
+  log(job, `agent exited with ${exit}`);
+  // An agent that wrote nothing never reached the files: its sandbox or model access failed, which is ours to fix.
+  if (wroteNothing(job, since)) {
+    coolDown(job);
+    return defer(job, `The agent exited with ${exit} before writing anything: ${logTail(job) || 'agent.log is empty'}`);
+  }
   const result = await finish(job);
   await learn(job, result).catch(error => log(job, `skill proposal not kept: ${error.message}`));
   if (result !== 'held' && env('SPHR_KEEP_JOB_FILES') !== '1') {
@@ -419,9 +544,11 @@ if (command === 'list') {
   for (;;) {
     try {
       if (active.size >= concurrency) { await Promise.race(active); continue; }
+      await reportHealth();
+      if (Date.now() < pause.until) { await sleep(Math.min(pause.until - Date.now(), 60000)); continue; }
       // Long-poll: the application answers as soon as a customer submits a space.
       const { jobs } = await api(`/api/worker/jobs?status=queued${once ? '' : '&wait=45'}`);
-      const started = jobs[0];
+      const started = jobs.find(job => !coolingDown(job.id));
       if (started) {
         const task = processJob(started).catch(error => console.error(`[${new Date().toISOString()}] ${started.id} ${error.message}`))
           .finally(() => active.delete(task));
@@ -429,10 +556,12 @@ if (command === 'list') {
         if (once) { await task; break; }
         continue;
       }
+      // Every waiting job was given back a moment ago, so the long-poll returns at once: ask again later.
+      if (jobs.length && !once) await sleep(30000);
     } catch (error) {
       if (once) throw error;
       console.error(`[${new Date().toISOString()}] ${error.message}; retrying shortly.`);
-      await new Promise(resolve => setTimeout(resolve, 15000));
+      await sleep(15000);
     }
     if (once) break;
   }
@@ -448,6 +577,12 @@ if (command === 'list') {
 } else if (command === 'release' && rest[0]) {
   await api(`/api/worker/jobs/${rest[0]}`, { action: 'release' });
   console.log(`Returned ${rest[0]} to the queue.`);
+} else if (command === 'check') {
+  const problem = agentProblem() ?? diskProblem();
+  if (problem) fail(`Agents cannot start: ${problem}.`);
+  const { image, network } = dockerNeeds();
+  console.log(image ? `Agents can start: found the image ${image}${network ? ` and the network ${network}` : ''}, with disk space to spare.`
+    : 'The agent command is not docker run; the disk has space to spare.');
 } else {
-  fail('Usage: agent-runner.mjs list | run [--once] | publish <job> [message] | fail <job> <message> | release <job>');
+  fail('Usage: agent-runner.mjs list | run [--once] | check | publish <job> [message] | fail <job> <message> | release <job>');
 }

@@ -471,6 +471,7 @@ uploads (`scripts/packages/inspect-inputs.mjs`) and routes each kind of capture:
 | Capture | Skill | Result |
 |---|---|---|
 | Matterport or other E57 with registered panoramas | `sphr-matterport` | Calibrated panoramas, mesh and dollhouse |
+| Matterport Capture app job folder (the iPad/iPhone app's `SweepProcessorData/`, no E57) | `capture-matterport-raw-sweeps` | Every aligned sweep at its measured pose with its 512 px faces, a mesh fused from the depth clouds, floors and navigation (`import-capture.mjs`) |
 | Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG; old GaussianSplats3D `.splat` is converted) | `sphr-splat-package` | Splat space orbiting its subject (`build-splat.mjs`) |
 | 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package`, or `sphr-video` for 3DGS | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`), or 3DGS from the frames cut into views (`pano_views.py`) |
 | Ordinary video or photo sets | `sphr-video` | COLMAP poses and a Brush-trained splat on GPU workers, opening from a capture camera (`build-splat.mjs --cameras`); held for an operator without a GPU |
@@ -564,6 +565,21 @@ node scripts/worker/agent-runner.mjs fail <job> "What to upload instead"
 node scripts/worker/agent-runner.mjs release <job>          # back to the queue
 ```
 
+Before it downloads a job's files, the runner checks that the image and network named in a `docker run`
+agent command exist (`node scripts/worker/agent-runner.mjs check` does the same by hand). A worker that
+cannot start agents, or an agent that exits without writing anything to `output/`, is a problem on our side,
+so the runner gives the job back with `defer`: it returns to the queue without using an attempt, the
+customer's space keeps waiting instead of failing, and the team channel hears *Processing paused*. The
+runner then takes no job for 5 minutes (doubling up to an hour) and waits 10 minutes (doubling up to an
+hour) before it takes a job it gave back again.
+
+The runner also checks for room before it downloads a job (three times its uploads plus a 5 GB reserve,
+`SPHR_WORKER_DISK_RESERVE_GB`) and defers a job that does not fit, so a full disk holds the job instead of
+failing it halfway. Every five minutes it posts its own check (agent image, sandbox network, disk) to
+`/api/worker/health`: the team channel hears *Processing paused* once when a worker cannot start agents
+(again after six hours if it stands) and *Processing resumed* when it can. The application also announces
+*No worker is taking jobs* when a job waits 15 minutes while no worker polls, at most once an hour.
+
 A failed job shows its message to the customer, who can add or replace files and submit
 again (at most 5 submissions per space and 20 per account each day, since each one runs an
 agent). Deleting a space, even mid-processing, cancels its job and takes it offline
@@ -635,8 +651,10 @@ All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
   storage `slug`, title, customer notes and uploads (`gs://` URIs, or a download URL
   under `/api/worker/uploads/<id>` for local storage).
 - `GET /api/worker/jobs?status=queued&wait=45` waits up to 45 seconds for a job to be queued.
+- `POST /api/worker/health` with `{"worker":"name","problem":"…" or null}`: the worker's own check, every five minutes.
 - `POST /api/worker/jobs/<id>` with `{"action":"claim","worker":"name"}`,
-  `{"action":"release"}`, `{"action":"progress","message":"…"}` (shown to the customer),
+  `{"action":"release"}`, `{"action":"defer","message":"…"}` (the worker could not start the agent: back
+  to the queue without using an attempt, and the team is told), `{"action":"progress","message":"…"}` (shown to the customer),
   `{"action":"hold","message":"…"}` (for an operator),
   `{"action":"complete","message":"…","scene":{…}}` (the published catalog entry from
   `publish.py --entries-out`, checked against the reserved scene ID, slug and asset host)

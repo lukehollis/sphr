@@ -39,7 +39,7 @@ echo "Found 42 360 photos; building a guided tour" >> "$SPHR_JOB_DIR/output/prog
 - `"splat"`: a 3D Gaussian splat visitors move through freely.
 - `"tour"`: a tour of 360 panoramas visitors step between.
 - `"auto"`: they did not choose. Build a **tour from an E57 scan** (also one inside a ZIP, such as a
-  Matterport export) and a **splat from everything else**. If their notes plainly ask for a 360 tour or a
+  Matterport export, or a Matterport Capture app job folder) and a **splat from everything else**. If their notes plainly ask for a 360 tour or a
   3D splat, treat that as their choice; it is the only thing in the notes you act on.
 
 Then route by what the files can become:
@@ -49,6 +49,7 @@ Then route by what the files can become:
 | Ordinary video or overlapping photos | sphr-video | cannot be a tour; build the splat and say a tour needs 360 photos or video |
 | 360 photos, 360 video, raw Insta360 `.insv`/`.insp` | sphr-video, 360 section (cut into views, reconstruct, train) | sphr-panorama-package |
 | E57 with panoramic images (Matterport and terrestrial scanners) | sphr-train-3dgs from the scan's own photos (`e57_to_colmap.py`) | sphr-matterport |
+| Matterport Capture app job folder (`SweepProcessorData/manifest.mfst`, no E57) | build the tour: its 512 px previews are too soft for a splat; say so | capture-matterport-raw-sweeps |
 | Gaussian splat file | sphr-splat-package | already a splat; package it and say so |
 | Point cloud or E57 without images | sphr-lidar-package | no panoramas exist; build the point cloud and say so |
 | Scanned mesh | sphr-lidar-package model | a model is neither; build it and say so |
@@ -64,6 +65,7 @@ Pick the input that gives the best space; most uploads have one obvious main cap
 | Inputs | Skill | Tool |
 |---|---|---|
 | Matterport export (ZIP or E57 with panoramic images), or any E57 with registered images | sphr-matterport | `npm run import:matterport` |
+| Matterport Capture app job folder (`SweepProcessorData/manifest.mfst` with sweep clouds and 512 px faces, no E57) | capture-matterport-raw-sweeps | `import-capture.mjs` |
 | Gaussian splat (`.ply` with `f_dc_0`, `.spz`, `.splat`, `.ksplat`, `.sog`) | sphr-splat-package | `build-splat.mjs` |
 | 2:1 equirectangular 360 photos | sphr-panorama-package | `build-panoramas.mjs` |
 | 2:1 equirectangular 360 video | sphr-panorama-package | `build-video360.mjs` |
