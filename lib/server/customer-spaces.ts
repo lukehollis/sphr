@@ -17,6 +17,8 @@ export async function describeSpace(space: CustomerSpace) {
   return {
     id: space.id, title: listing?.title ?? space.title, status: space.status, notes: space.notes, output: space.output, message: space.message,
     created: space.created, updated: space.updated, hosted: spaceHosted(space),
+    /** A space made from a Matterport link instead of uploaded files. */
+    source: space.source ? { kind: space.source.kind, url: space.source.url } : null,
     /** Set while the space is the account's free preview: private to its owner, for a few days after its first result. */
     preview: spacePreview(space),
     /** The space began as the account's free preview, whether or not hosting has started since. */

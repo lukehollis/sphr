@@ -1,21 +1,24 @@
 import { allowAttempt } from "@/lib/server/admin-store";
 import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCustomerSpaces, PlanLimitError, PreviewUsedError, readCustomerSpace, readSubscription,
-  readUser, removeCustomerSpaceRecord } from "@/lib/server/accounts-store";
+  readUser, removeCustomerSpaceRecord, type SpaceSource } from "@/lib/server/accounts-store";
 import { accountRequest, accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrigin, requestUser } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { previewAddressLimit, previewRefusal, previewWindow, refusalText, type PreviewRefusal } from "@/lib/server/previews";
 import { notifyTeam } from "@/lib/server/team-notify";
+import { readMatterportRequest } from "@/lib/server/matterport";
 import { recordEvent } from "@/lib/server/analytics";
 import { reportProblem } from "@/lib/server/error-report";
 
 type Start = "unpaid" | "draft" | "preview";
 
-function announceSpace(user: { id: string; email: string }, title: string, start: Start, agent: boolean) {
-  void recordEvent("space_created", { userId: user.id, props: { from: agent ? "agent" : "web", first: start !== "draft", ...(start === "preview" ? { preview: true } : {}) } });
+function announceSpace(user: { id: string; email: string }, title: string, start: Start, agent: boolean, source: SpaceSource | null) {
+  void recordEvent("space_created", { userId: user.id, props: { from: agent ? "agent" : "web", first: start !== "draft", ...(start === "preview" ? { preview: true } : {}),
+    ...(source ? { source: source.kind } : {}) } });
+  const ready = source ? "ready to bring over" : "ready for files";
   void notifyTeam({ title: "Space created", fields: [["Title", title], ["Account", user.email],
-    ["Status", start === "unpaid" ? "Waiting for first payment" : start === "preview" ? "Free preview, ready for files" : "Ready for files"],
-    ["From", agent ? "Their agent" : "The website"]] });
+    ["Status", start === "unpaid" ? "Waiting for first payment" : start === "preview" ? `Free preview, ${ready}` : ready[0].toUpperCase() + ready.slice(1)],
+    ...(source ? [["Matterport", source.url] as [string, string]] : []), ["From", agent ? "Their agent" : "The website"]] });
 }
 
 /** What the page says it is about to upload, when it knows: the preview is only offered for a capture that fits. */
@@ -44,23 +47,30 @@ export async function POST(request: Request) {
   if (!user.emailVerified) return accountResponse({ error: "Confirm your email address before adding a space." }, 403);
   const title = cleanText(body?.title, 200);
   if (!title) return accountResponse({ error: "Enter a title of 1–200 characters." }, 400);
+  // A Matterport space is brought over from its link instead of uploaded files, once its owner's permission is confirmed.
+  let source: SpaceSource | null = null;
+  if (body?.matterport !== undefined) {
+    const read = readMatterportRequest(body);
+    if ("error" in read) return accountResponse({ error: read.error }, 400);
+    source = read.source;
+  }
   if (!allowAttempt([[attemptKey("space", user.id), 30]], 60 * 60 * 1000)) return accountResponse({ error: "Too many new spaces. Try again later." }, 429);
   try {
     const subscription = readSubscription(user.id);
     if (!billingEnabled()) {
-      const space = createCustomerSpace(user.id, title, "draft");
-      announceSpace(user, title, "draft", agent);
+      const space = createCustomerSpace(user.id, title, "draft", null, false, source);
+      announceSpace(user, title, "draft", agent, source);
       return accountResponse({ ok: true, space: await describeSpace(space) });
     }
     if (subscription && hostingStatuses.has(subscription.status)) {
-      const space = createCustomerSpace(user.id, title, "draft", subscription.plan?.spaces ?? null);
+      const space = createCustomerSpace(user.id, title, "draft", subscription.plan?.spaces ?? null, false, source);
       try { await syncQuantity(user.id); }
       catch (failure) {
         removeCustomerSpaceRecord(space.id);
         console.error("Unable to update the subscription quantity:", failure instanceof Error ? failure.message : failure);
         return accountResponse({ error: "Billing could not be updated. Try again." }, 502);
       }
-      announceSpace(user, title, "draft", agent);
+      announceSpace(user, title, "draft", agent, source);
       return accountResponse({ ok: true, space: await describeSpace(space) });
     }
     // Nothing is paid for yet. The free preview comes first: the address limit is only spent when it is actually given.
@@ -68,8 +78,8 @@ export async function POST(request: Request) {
     if (!declined && !allowAttempt([[attemptKey("preview-address", clientAddress(request)), previewAddressLimit()]], previewWindow)) declined = "busy";
     if (!declined) {
       try {
-        const space = createCustomerSpace(user.id, title, "draft", null, true);
-        announceSpace(user, title, "preview", agent);
+        const space = createCustomerSpace(user.id, title, "draft", null, true, source);
+        announceSpace(user, title, "preview", agent, source);
         await recordEvent("preview_started", { userId: user.id, props: { from: agent ? "agent" : "web" } });
         return accountResponse({ ok: true, space: await describeSpace(space), preview: true });
       } catch (failure) {
@@ -79,8 +89,8 @@ export async function POST(request: Request) {
     }
     // A second space after the preview is the ordinary case; only a capture that did not fit, or a day's budget gone, is worth counting.
     if (declined !== "used") await recordEvent("preview_declined", { userId: user.id, props: { reason: declined, from: agent ? "agent" : "web" } });
-    const space = createCustomerSpace(user.id, title, "unpaid");
-    announceSpace(user, title, "unpaid", agent);
+    const space = createCustomerSpace(user.id, title, "unpaid", null, false, source);
+    announceSpace(user, title, "unpaid", agent, source);
     const why = { previewDeclined: declined, previewNote: refusalText[declined] };
     try {
       const next = await startCheckout(user, publicOrigin(request), undefined, agent);

@@ -22,6 +22,16 @@ const describe: Record<string, string> = {
   failed: "Processing could not finish. Add or replace files, then submit again."
 };
 
+/** The same, for a space made from a Matterport link. */
+const describeLink: Record<string, string> = {
+  ...describe,
+  unpaid: "Complete payment to bring over your Matterport space.",
+  draft: "Ready to bring over your Matterport space. Start processing below.",
+  queued: "Submitted. An agent will start bringing over your Matterport space shortly, and this page updates as it works.",
+  processing: "An agent is bringing over your Matterport space. This page updates as it works, and we will email you when the space is ready.",
+  failed: "Processing could not finish. Check that the Matterport space is public or unlisted, then submit again."
+};
+
 /** A date without a time zone surprise: the preview's last day, as the server sees it. */
 export const previewDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" }) : "";
 const days = (count: number) => `${count} ${count === 1 ? "day" : "days"}`;
@@ -101,10 +111,10 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
   }, [waiting, refresh]);
 
   const openUploads = useCallback(() => {
-    if (!editable) return;
+    if (!editable || space.source) return;
     setBatchKey(key => uploads.batches.some(item => item.key === key && batchActive(item)) ? key : null);
     setModal(true);
-  }, [editable, uploads.batches]);
+  }, [editable, space.source, uploads.batches]);
 
   // Files dragged anywhere over the page open the sheet to receive them.
   useEffect(() => {
@@ -148,14 +158,18 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
   }
 
   // A space that started as the free preview has no payment step before its files; payment comes after the preview.
-  const steps = [...(account.billing && !space.previewed ? ["Payment"] : []), "Upload", "Processing", ...(space.previewed ? ["Preview"] : []), "Hosted"];
-  const reached = space.status === "unpaid" ? "Payment" : ["draft", "failed"].includes(space.status) ? "Upload"
+  const link = space.source;
+  const added = link ? "Link" : "Upload";
+  const steps = [...(account.billing && !space.previewed ? ["Payment"] : []), added, "Processing", ...(space.previewed ? ["Preview"] : []), "Hosted"];
+  const reached = space.status === "unpaid" ? "Payment" : ["draft", "failed"].includes(space.status) ? added
     : ["queued", "processing"].includes(space.status) ? "Processing" : space.previewed && !space.hosted ? "Preview" : "Hosted";
   const current = steps.indexOf(reached);
   const detail = previewing && space.status === "ready" ? `Your free preview is private. Only you can open it, until ${previewDate(preview!.until)}.`
-    : previewing && space.status === "draft" ? "This is your free preview. Add your capture files and processing starts on its own once they are uploaded. The result stays private to you."
+    : previewing && space.status === "draft" ? link ? "This is your free preview. Start processing below to bring over your Matterport space. The result stays private to you."
+      : "This is your free preview. Add your capture files and processing starts on its own once they are uploaded. The result stays private to you."
     : lapsed ? `Your free preview ended${preview!.until ? ` on ${previewDate(preview!.until)}` : ""}, so this space is offline. Start hosting to bring it back.`
-    : space.hosted || space.status === "unpaid" ? describe[space.status] : "This space is offline because billing ended.";
+    // A preview being processed is not offline: it reads like any space at that step.
+    : space.hosted || space.status === "unpaid" || previewing ? (link ? describeLink : describe)[space.status] : "This space is offline because billing ended.";
   const status = spaceStatus(space);
   const gate = previewing && space.status === "ready" && space.scene ? <PublishGate space={space} plans={plans} /> : null;
   async function startPreview() {
@@ -174,7 +188,7 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
       <a className="site-back" href="/account">← Your spaces</a>
       <div className="site-title">
         <div><h1>{space.title}</h1></div>
-        <StatusMark status={status} label={status === "offline" ? "Offline" : previewing && status === "private" ? "Private preview" : undefined} />
+        <StatusMark status={status} label={status === "offline" ? "Offline" : previewing && status === "private" ? "Private preview" : link && status === "draft" ? "Ready to process" : undefined} />
       </div>
       <ol className="site-steps" aria-label="Progress">{steps.map((step, index) => <li key={step}
         className={index < current || (index === current && space.status === "ready") ? "done" : index === current ? "current" : ""}
@@ -200,7 +214,17 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
             </a>
           </section>}
 
-          <section className="site-block" aria-labelledby="files-heading">
+          {link ? <section className="site-block" aria-labelledby="files-heading">
+            <SectionHeader title={<span id="files-heading">Matterport space</span>} />
+            <p className="space-link"><a href={link.url} target="_blank" rel="noreferrer">{link.url}<span aria-hidden="true">↗</span></a></p>
+            {editable && <form className="site-form site-submit" onSubmit={submit}>
+              <div className="site-field"><label htmlFor="notes">Notes for processing <span className="site-optional">Optional</span></label>
+                <textarea className="site-input" ref={notes} id="notes" name="notes" maxLength={2000} rows={3} defaultValue={space.notes ?? ""} placeholder="Anything we should know about the space" /></div>
+              <div><button type="submit" className="site-button" disabled={busy}>{space.status === "ready" ? "Bring it over again" : "Start processing"}<span aria-hidden="true">→</span></button></div>
+              {previewing && <p className="site-hint">A free preview can be processed {preview!.runsLeft} more {preview!.runsLeft === 1 ? "time" : "times"}. Hosting lifts that.</p>}
+            </form>}
+          </section>
+          : <section className="site-block" aria-labelledby="files-heading">
             <SectionHeader title={<span id="files-heading">Files</span>}>{space.uploads.length > 0 && <span className="site-count">{space.uploads.length}</span>}</SectionHeader>
             {editable && <div className="space-files-add">
               <button type="button" className="site-button" onClick={openUploads}>{uploading ? "Show the upload" : "Add files"}<span aria-hidden="true">+</span></button>
@@ -218,7 +242,7 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
               <div><button type="submit" className="site-button" disabled={busy}>{space.status === "ready" ? "Reprocess with these files" : "Start processing"}<span aria-hidden="true">→</span></button></div>
               {previewing && <p className="site-hint">A free preview can be processed {preview!.runsLeft} more {preview!.runsLeft === 1 ? "time" : "times"}. Hosting lifts that.</p>}
             </form>}
-          </section>
+          </section>}
         </div>
 
         <aside className="site-space-aside" aria-label="Details">

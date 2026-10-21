@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { accountRequest } from "./AccountAuth";
 import { reportError, track } from "./Analytics";
 import { ConstructionDrawing } from "./site/Chrome";
@@ -20,7 +20,9 @@ import type { SpaceView } from "@/lib/server/customer-spaces";
  * gone), the sheet shows the plans with pay as you go chosen and payment opens in a new
  * tab. When the customer's plan is full, the files wait while they change plans. The
  * files upload while this page stays open, even after the sheet is closed, and
- * processing starts on its own shortly after the upload.
+ * processing starts on its own shortly after the upload. A Matterport space comes from its
+ * link instead of files: the link is checked, the space is made with it, and processing
+ * starts as soon as the space is paid for or is the free preview.
  */
 
 export type BatchPhase = "creating" | "payment" | "full" | "uploading" | "countdown" | "held" | "submitting" | "processing" | "error";
@@ -47,7 +49,11 @@ export type Batch = {
   preview?: boolean;
   /** Why the free preview was not given, when payment comes first for this capture. */
   note?: string;
+  /** A Matterport space brought over from its link, with the number of 360 photos when Matterport said. */
+  link?: MatterportLink;
 };
+
+export type MatterportLink = { url: string; name: string; sweeps: number | null };
 
 export type Output = "splat" | "tour";
 
@@ -79,6 +85,7 @@ export function useUploadBatches(onChange: () => void) {
   const running = useRef(new Map<string, number>());
   // Kept outside React state: uploads start before the next render has stored the space.
   const spaceOf = useRef(new Map<string, string>());
+  const linkOf = useRef(new Map<string, MatterportLink>());
   const change = useRef(onChange);
   change.current = onChange;
   const latest = useRef(batches);
@@ -135,11 +142,29 @@ export function useUploadBatches(onChange: () => void) {
     }));
   }, []);
 
+  const submit = useCallback(async (key: string) => {
+    const spaceId = spaceOf.current.get(key);
+    if (!spaceId) return;
+    patch(key, { phase: "submitting", countdown: undefined, error: undefined });
+    try {
+      const output = linkOf.current.has(key) ? "tour" : latest.current.find(item => item.key === key)?.output ?? "auto";
+      await accountRequest(`/api/account/spaces/${spaceId}/submit`, { notes: "", output });
+      patch(key, { phase: "processing" });
+      remember(null);
+    } catch (failure) {
+      track("upload_error", { step: "submit", message: (failure as Error).message });
+      patch(key, { phase: "error", error: (failure as Error).message });
+    }
+    change.current();
+  }, [patch]);
+
+  /** Paid for or free: files start uploading, and a Matterport space starts processing. */
   const begin = useCallback((key: string) => {
+    if (linkOf.current.has(key)) { patch(key, { checkoutUrl: undefined }); void submit(key); return; }
     patch(key, { phase: "uploading", checkoutUrl: undefined });
     // State settles before the pump reads the space ID.
     setTimeout(() => pump(key), 0);
-  }, [patch, pump]);
+  }, [patch, pump, submit]);
 
   /**
    * Creates the space, then pays (if needed) and uploads. A full plan holds the files until the plan changes.
@@ -148,7 +173,9 @@ export function useUploadBatches(onChange: () => void) {
   const create = useCallback(async (key: string, title: string, files?: { count: number; bytes: number }) => {
     patch(key, { phase: "creating", error: undefined });
     try {
-      const result = await accountRequest("/api/account/spaces", { title, ...(files ? { files } : {}) });
+      const link = linkOf.current.get(key);
+      // A Matterport space carries its link and the customer's confirmation that they may bring it over.
+      const result = await accountRequest("/api/account/spaces", { title, ...(files ? { files } : {}), ...(link ? { matterport: link.url, permission: true } : {}) });
       spaceOf.current.set(key, result.space.id);
       patch(key, { spaceId: result.space.id });
       change.current();
@@ -168,6 +195,16 @@ export function useUploadBatches(onChange: () => void) {
       patch(key, { phase: data?.planFull ? "full" : "error", error: message });
     }
   }, [begin, patch]);
+
+  /** Starts a space from a checked Matterport link, titled after the Matterport space. */
+  const startLink = useCallback(async (link: MatterportLink) => {
+    const key = `batch-${Date.now()}`;
+    const title = link.name || "Matterport space";
+    linkOf.current.set(key, link);
+    setBatches(items => [...items, { key, title, phase: "creating", transfers: [], autoStart: true, link, output: "tour" }]);
+    await create(key, title);
+    return key;
+  }, [create]);
 
   /** Starts a space titled after the files. */
   const startNew = useCallback(async (files: PickedFile[]) => {
@@ -206,7 +243,7 @@ export function useUploadBatches(onChange: () => void) {
       await accountRequest("/api/account/billing/plan", { plan });
       change.current();
       patch(key, { preparing: false });
-      await create(key, batch.title, { count: batch.transfers.length, bytes: batch.transfers.reduce((total, item) => total + item.size, 0) });
+      await create(key, batch.title, batch.link ? undefined : { count: batch.transfers.length, bytes: batch.transfers.reduce((total, item) => total + item.size, 0) });
     } catch (failure) {
       patch(key, { preparing: false, error: (failure as Error).message });
     }
@@ -228,21 +265,6 @@ export function useUploadBatches(onChange: () => void) {
     enqueue(key, files);
     if (!["creating", "payment", "full"].includes(batch.phase)) setTimeout(() => pump(key), 0);
   }, [enqueue, pump]);
-
-  const submit = useCallback(async (key: string) => {
-    const spaceId = spaceOf.current.get(key);
-    if (!spaceId) return;
-    patch(key, { phase: "submitting", countdown: undefined, error: undefined });
-    try {
-      await accountRequest(`/api/account/spaces/${spaceId}/submit`, { notes: "", output: latest.current.find(item => item.key === key)?.output ?? "auto" });
-      patch(key, { phase: "processing" });
-      remember(null);
-    } catch (failure) {
-      track("upload_error", { step: "submit", message: (failure as Error).message });
-      patch(key, { phase: "error", error: (failure as Error).message });
-    }
-    change.current();
-  }, [patch]);
 
   const hold = useCallback((key: string) => patch(key, { phase: "held", countdown: undefined }), [patch]);
   const chooseOutput = useCallback((key: string, output: Output) => patch(key, { output }), [patch]);
@@ -289,7 +311,8 @@ export function useUploadBatches(onChange: () => void) {
     queues.current.delete(key);
     setBatches(items => items.filter(item => item.key !== key));
     remember(null);
-    if (batch?.spaceId && (batch.phase === "payment" || batch.phase === "error") && !batch.transfers.some(entry => entry.state === "done")) {
+    // A Matterport space that could not start processing keeps its link: its page can start it again.
+    if (batch?.spaceId && (batch.phase === "payment" || (batch.phase === "error" && !batch.link)) && !batch.transfers.some(entry => entry.state === "done")) {
       await accountRequest(`/api/account/spaces/${batch.spaceId}`, undefined, "DELETE").catch(() => undefined);
     }
     change.current();
@@ -368,7 +391,7 @@ export function useUploadBatches(onChange: () => void) {
     return () => channel.close();
   }, []);
 
-  return { batches, startNew, startExisting, addFiles, submit, hold, chooseOutput, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
+  return { batches, startNew, startLink, startExisting, addFiles, submit, hold, chooseOutput, retry, skipFailed, rename, cancel, dismiss, markCheckoutOpened, choosePlan, switchPlan };
 }
 
 export type Uploads = ReturnType<typeof useUploadBatches>;
@@ -411,6 +434,39 @@ function Pickers({ onFiles, compact = false }: { onFiles: (files: PickedFile[]) 
     <input ref={files} type="file" multiple hidden onChange={event => { take(event.target.files); event.target.value = ""; }} />
     <input ref={folder} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={event => { take(event.target.files); event.target.value = ""; }} />
   </div>;
+}
+
+/**
+ * A Matterport space brought over from its link. The link is checked first, so the space is made with the
+ * Matterport space's name, and only once the customer confirms they own it or have the owner's permission.
+ */
+function LinkForm({ onLink }: { onLink: (link: MatterportLink) => Promise<unknown> }) {
+  const [value, setValue] = useState("");
+  const [allowed, setAllowed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function add(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      const result = await accountRequest("/api/account/matterport", { url: value });
+      track("matterport_link", { checked: Boolean(result.checked), sweeps: result.sweeps ?? 0 });
+      await onLink({ url: result.link.url, name: result.name ?? "", sweeps: result.sweeps ?? null });
+    } catch (failure) {
+      track("matterport_link_refused", { message: (failure as Error).message.slice(0, 120) });
+      setError((failure as Error).message);
+    } finally { setBusy(false); }
+  }
+  return <form className="upload-link" onSubmit={add}>
+    <label className="upload-link-label" htmlFor="matterport-link">Or bring over a Matterport space</label>
+    <p className="upload-drop-hint">Paste its link and we copy its 360 photos, where each was taken, the dollhouse and its tags. No E57 needed.</p>
+    <input id="matterport-link" className="site-input" type="text" inputMode="url" autoComplete="off" spellCheck={false} maxLength={2000}
+      placeholder="https://my.matterport.com/show/?m=…" value={value} onChange={event => setValue(event.target.value)} />
+    <label className="site-check"><input type="checkbox" checked={allowed} onChange={event => setAllowed(event.target.checked)} />
+      I own this space or have the owner&apos;s permission</label>
+    {error && <p className="site-alert" role="alert">{error}</p>}
+    <div><button type="submit" className="site-button" disabled={busy || !allowed || !value.trim()}>{busy ? "Checking the link…" : "Bring it over"}</button></div>
+  </form>;
 }
 
 function Meter({ value, label }: { value: number; label: string }) {
@@ -503,7 +559,8 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
   if (!open) return null;
 
   const heading = existing ? `Add files to ${existing.title}` : batch?.phase === "processing" ? "Space added" : "Add a space";
-  const canAdd = !batch || openPhases.includes(batch.phase);
+  // A Matterport space takes no files.
+  const canAdd = !batch || (!batch.link && openPhases.includes(batch.phase));
 
   return <div className={`upload-modal${dragging ? " upload-modal-over" : ""}`} role="dialog" aria-modal="true" aria-labelledby="upload-modal-title"
     ref={dialog} tabIndex={-1}
@@ -513,7 +570,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
     <div className="upload-modal-bar">
       <h2 id="upload-modal-title">{heading}</h2>
       <button type="button" className="upload-modal-close" onClick={close}>
-        {batch && batchActive(batch) && batch.phase !== "payment" && batch.phase !== "full" ? "Close, keep uploading" : "Close"}<span aria-hidden="true">✕</span>
+        {batch && !batch.link && batchActive(batch) && batch.phase !== "payment" && batch.phase !== "full" ? "Close, keep uploading" : "Close"}<span aria-hidden="true">✕</span>
       </button>
     </div>
 
@@ -524,6 +581,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
       <p className="upload-drop-hint">E57 and Matterport exports, Gaussian splats, 360 photos and video, point clouds and meshes, up to {formatBytes(maxBytes)} per space.
         {existing ? "" : " The title comes from your file names."}</p>
       {priceHint && <p className="upload-drop-hint">{priceHint}</p>}
+      {!existing && <LinkForm onLink={async link => onBatch(await uploads.startLink(link))} />}
     </div>
 
     : <div className="upload-batch">
@@ -533,11 +591,18 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
           <input id="upload-title" className="upload-title-input" defaultValue={batch.title} key={batch.key} maxLength={200}
             onBlur={event => { if (event.target.value.trim() && event.target.value.trim() !== batch.title) void uploads.rename(batch.key, event.target.value); }}
             onKeyDown={event => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }} />
-          <p className="site-hint">Taken from your file names. You can change it any time.</p>
+          <p className="site-hint">{batch.link ? "Taken from the Matterport space." : "Taken from your file names."} You can change it any time.</p>
         </div>}
 
         <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={close} existing={Boolean(existing)}
           billing={billing} />
+
+        {batch.link && <ul className="upload-files" aria-label="Matterport space">
+          <li className="upload-file upload-file-done">
+            <span className="upload-file-name">{batch.link.url}</span>
+            <span className="upload-file-meta">{batch.link.sweeps ? `${batch.link.sweeps} scan points` : "Matterport space"}</span>
+          </li>
+        </ul>}
 
         {transfers.length > 0 && <ul className="upload-files" aria-label="Files">
           {transfers.map(item => <li key={item.key} className={`upload-file upload-file-${item.state}`}>
@@ -619,7 +684,10 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
   const files = `${count} ${count === 1 ? "file" : "files"}`;
   // A failure a free preview cannot get past: hosting lifts it.
   const gate = batch.transfers.find(entry => entry.state === "failed" && entry.gate)?.gate;
-  if (batch.phase === "creating") return <div className="upload-status"><h3>Setting up the space</h3><p>{files}, {formatBytes(total)}</p></div>;
+  // What the space is made from, in a few words.
+  const what = batch.link ? `Matterport space${batch.link.sweeps ? `, ${batch.link.sweeps} scan points` : ""}` : `${files}, ${formatBytes(total)}`;
+  const after = batch.link ? "Processing starts here" : "Your files start uploading here";
+  if (batch.phase === "creating") return <div className="upload-status"><h3>Setting up the space</h3><p>{what}</p></div>;
 
   if (batch.phase === "payment") {
     const plans = billing?.plans ?? [];
@@ -642,8 +710,8 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
           : <button type="button" className="site-button site-button-accent" onClick={() => void uploads.choosePlan(batch.key, plan?.id ?? "")}>Try payment again</button>}
         <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Cancel</button>
       </div>
-      <p className="site-hint">{batch.checkoutOpened ? "Finish paying in the other tab. Your files start uploading here as soon as payment goes through."
-        : "Payment opens in a new tab. Your files start uploading here as soon as it goes through."}</p>
+      <p className="site-hint">{batch.checkoutOpened ? `Finish paying in the other tab. ${after} as soon as payment goes through.`
+        : `Payment opens in a new tab. ${after} as soon as it goes through.`}</p>
     </div>;
   }
 
@@ -675,12 +743,13 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
     </div>
   </div>;
 
-  if (batch.phase === "submitting") return <div className="upload-status"><h3>Starting processing</h3><p>{files}, {formatBytes(total)}</p></div>;
+  if (batch.phase === "submitting") return <div className="upload-status"><h3>Starting processing</h3><p>{what}</p></div>;
 
   if (batch.phase === "processing") return <div className="upload-status upload-status-done">
     <h3>Processing started</h3>
-    <p>{batch.preview ? "An agent is turning your files into a space. It stays private to you, and we will email you when it is ready to open. Then you can start hosting to publish it, so you can close this sheet."
-      : "An agent is turning your files into a space. We will email you when it is ready, so you can close this sheet."}</p>
+    <p>{`${batch.link ? "An agent is bringing over your Matterport space." : "An agent is turning your files into a space."} ${batch.preview
+      ? "It stays private to you, and we will email you when it is ready to open. Then you can start hosting to publish it, so you can close this sheet."
+      : "We will email you when it is ready, so you can close this sheet."}`}</p>
     <div className="site-actions">
       <button type="button" className="site-button" onClick={() => { uploads.dismiss(batch.key); onClose(); }}>Done</button>
       {!existing && batch.spaceId && <a className="site-link" href={`/account/spaces/${batch.spaceId}`}>Open the space page</a>}
@@ -691,7 +760,7 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
     <h3>Something went wrong</h3>
     <p className="site-alert" role="alert">{batch.error ?? "Try again."}</p>
     <div className="site-actions">
-      {batch.spaceId && done > 0 && <button type="button" className="site-button" onClick={() => void uploads.submit(batch.key)}>Start processing</button>}
+      {batch.spaceId && (done > 0 || batch.link) && <button type="button" className="site-button" onClick={() => void uploads.submit(batch.key)}>Start processing</button>}
       <button type="button" className="site-link" onClick={() => void uploads.cancel(batch.key)}>Close</button>
     </div>
   </div>;

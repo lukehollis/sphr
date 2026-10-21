@@ -72,6 +72,10 @@ function store() {
   if (!(connection.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).some(column => column.name === "preview")) {
     connection.exec("ALTER TABLE jobs ADD COLUMN preview INTEGER NOT NULL DEFAULT 0");
   }
+  // Where a space comes from when it is not uploaded files: a Matterport link (JSON, see SpaceSource).
+  if (!(connection.prepare("PRAGMA table_info(customer_spaces)").all() as { name: string }[]).some(column => column.name === "source")) {
+    connection.exec("ALTER TABLE customer_spaces ADD COLUMN source TEXT");
+  }
   prepared = true;
   return connection;
 }
@@ -806,17 +810,29 @@ export type SpaceStatus = "unpaid" | "draft" | "queued" | "processing" | "ready"
  */
 export type SpaceOutput = "splat" | "tour";
 export const spaceOutputs: readonly SpaceOutput[] = ["splat", "tour"];
+/**
+ * A space built from a Matterport space instead of uploaded files: the worker downloads it from its showcase link.
+ * `permission` is when the customer confirmed they own it or have its owner's permission.
+ */
+export type SpaceSource = { kind: "matterport"; modelId: string; url: string; permission: string };
 export type CustomerSpace = { id: string; userId: string; title: string; status: SpaceStatus; sceneId: string | null;
-  notes: string | null; output: SpaceOutput | null; message: string | null; created: string; updated: string };
+  notes: string | null; output: SpaceOutput | null; message: string | null; created: string; updated: string; source: SpaceSource | null };
 type SpaceRow = { id: string; user_id: string; title: string; status: SpaceStatus; scene_id: string | null; notes: string | null;
-  output: string | null; message: string | null; created: string; updated: string };
+  output: string | null; message: string | null; created: string; updated: string; source: string | null };
 const billable = "('draft','queued','processing','ready','failed')";
 export const maxSpacesPerAccount = 500;
+
+function toSource(value: string | null): SpaceSource | null {
+  try {
+    const source = value ? JSON.parse(value) : null;
+    return source?.kind === "matterport" && /^[A-Za-z0-9]{11}$/.test(source.modelId) ? source : null;
+  } catch { return null; }
+}
 
 function toSpace(row: SpaceRow): CustomerSpace {
   return { id: row.id, userId: row.user_id, title: row.title, status: row.status, sceneId: row.scene_id, notes: row.notes,
     output: spaceOutputs.includes(row.output as SpaceOutput) ? row.output as SpaceOutput : null,
-    message: row.message, created: row.created, updated: row.updated };
+    message: row.message, created: row.created, updated: row.updated, source: toSource(row.source) };
 }
 
 export function readCustomerSpace(id: unknown) {
@@ -842,8 +858,12 @@ export class PlanLimitError extends AccountError {}
 /** The account's free preview is already spent on another space. */
 export class PreviewUsedError extends AccountError {}
 
-/** `preview` spends the account's one free preview on the new space, which then opens for files without payment. */
-export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null, preview = false) {
+/**
+ * `preview` spends the account's one free preview on the new space, which then opens for files without payment.
+ * A space with a `source` is built from it instead of uploaded files.
+ */
+export function createCustomerSpace(userId: string, title: string, status: "unpaid" | "draft", planSpaces: number | null = null, preview = false,
+  source: SpaceSource | null = null) {
   return transaction(() => {
     const users = teamUserIds(userId);
     const marks = users.map(() => "?").join(",");
@@ -862,7 +882,8 @@ export function createCustomerSpace(userId: string, title: string, status: "unpa
     }
     const id = randomId(6);
     const stamp = now();
-    store().prepare("INSERT INTO customer_spaces(id, user_id, title, status, created, updated) VALUES (?, ?, ?, ?, ?, ?)").run(id, userId, title, status, stamp, stamp);
+    store().prepare("INSERT INTO customer_spaces(id, user_id, title, status, source, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(id, userId, title, status, source ? JSON.stringify(source) : null, stamp, stamp);
     // Thrown inside the transaction, so a lost race leaves no space behind.
     if (preview && !claimPreview(userId, id)) throw new PreviewUsedError("Your free preview is already used.");
     return readCustomerSpace(id)!;
@@ -1071,7 +1092,7 @@ export function submitCustomerSpace(spaceId: string, notes: string | null, outpu
     const space = readCustomerSpace(spaceId);
     if (!space || !["draft", "failed", "ready"].includes(space.status)) throw new AccountError("This space cannot be submitted right now.");
     const uploads = listUploads(spaceId);
-    if (!uploads.some(upload => upload.status === "complete")) throw new AccountError("Upload at least one file first.");
+    if (!space.source && !uploads.some(upload => upload.status === "complete")) throw new AccountError("Upload at least one file first.");
     if (uploads.some(upload => upload.status === "uploading")) throw new AccountError("Wait for every upload to finish, or remove unfinished files.");
     const id = randomId(8);
     // A new submission replaces earlier attempts that wait for an operator; releasing one later would

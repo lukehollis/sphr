@@ -186,6 +186,19 @@ export function filesReceivedEmail(brand: string, origin: string, space: SpaceRe
   });
 }
 
+/** Processing started for a space made from a Matterport link. */
+export function linkReceivedEmail(brand: string, origin: string, space: SpaceRef, link: string) {
+  return render({
+    brand, origin, subject: `Processing started for ${space.title}`, preheader: "An agent is bringing over your Matterport space.",
+    eyebrow: space.title, heading: "We have your link",
+    blocks: [
+      { kind: "text", text: "An agent is bringing over your Matterport space: its 360 photos, where each was taken, the dollhouse and its tags. We will email you again as soon as it is ready to open." },
+      { kind: "details", rows: [["Matterport", link]] }
+    ],
+    action: { label: "Follow the progress", url: spacePage(origin, space) }
+  });
+}
+
 /**
  * `scene.public` is the space's visibility now: a space processed again keeps the visibility its owner chose.
  * `preview` is set while the space is the account's free preview: private until its date. The email says what is

@@ -111,6 +111,13 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
   line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
 .upload-pickers { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
 .upload-drop-hint { max-width: 560px; margin: 0; color: var(--site-muted); font-size: 14px; line-height: var(--leading-body); }
+/* A Matterport link instead of files, under the pickers. */
+.upload-link { display: grid; gap: 10px; width: min(560px, 100%); margin-top: var(--space-2); padding-top: var(--space-3); border-top: var(--rule-hair); text-align: left; }
+.upload-link-label { color: var(--text-heading); font-size: 18px; font-weight: var(--weight-bold); }
+.upload-link .upload-drop-hint { max-width: none; }
+.upload-link .site-alert { margin: 0; }
+.space-link { margin: 0; overflow-wrap: anywhere; }
+.space-link a { color: var(--text-heading); }
 
 .upload-batch { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-6); align-items: start; width: 100%;
   max-width: 1280px; margin: 0 auto; padding: var(--space-5) var(--page-margin) var(--space-6); }
@@ -228,6 +235,7 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
   .upload-modal-bar { padding: 0 var(--space-2); min-height: 56px; }
   .upload-drop { margin: var(--space-2); padding: var(--space-4) var(--space-2); }
   .upload-pickers { flex-direction: column; align-self: stretch; }
+  .upload-link .site-button { width: 100%; }
   .upload-batch { padding: var(--space-3) var(--space-2) var(--space-5); }
   .upload-batch-main { padding: var(--space-3) var(--space-2); }
   .upload-title-input { font-size: 26px; }

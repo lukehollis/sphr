@@ -59,6 +59,8 @@ export function jobDetails(job: Job) {
     // Jobs of free previews are listed after the others, so a runner that takes the first one serves paying customers first.
     preview: job.preview,
     space: { id: space.id, title: space.title, notes: space.notes, output: space.output ?? "auto", reprocessing: Boolean(space.sceneId) },
+    // A space made from a Matterport link: the worker downloads it from Matterport itself.
+    source: space.source ? { kind: space.source.kind, modelId: space.source.modelId, url: space.source.url } : null,
     uploads: listUploads(space.id).filter(upload => upload.status === "complete").map(upload => ({
       id: upload.id, name: upload.name, size: upload.size, type: upload.type,
       source: bucket ? { gcs: `gs://${bucket}/${upload.object}` } : { url: `/api/worker/uploads/${upload.id}` }

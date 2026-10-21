@@ -4,12 +4,12 @@ import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin,
 import { describeSpace } from "@/lib/server/customer-spaces";
 import { previewGateBody, previewMaxRuns, spacePreview } from "@/lib/server/previews";
 import { announceJob } from "@/lib/server/job-signal";
-import { filesReceivedEmail } from "@/lib/server/emails";
+import { filesReceivedEmail, linkReceivedEmail } from "@/lib/server/emails";
 import { contactEmail, siteBrand } from "@/lib/server/brand";
 import { filesSummary, notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
 
-/** Queues the uploaded files for processing. */
+/** Queues the uploaded files for processing, or the Matterport space the space was made from. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { user, body, agent, error } = await accountRequest(request, 8192, { agents: true });
   if (error) return error;
@@ -30,17 +30,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (body?.output !== undefined && parseSpaceOutput(body.output) === undefined) {
       return accountResponse({ error: "Choose splat, tour or auto for the output." }, 400);
     }
-    submitCustomerSpace(space.id, cleanText(body?.notes, 2000), parseSpaceOutput(body?.output));
+    // A Matterport space becomes a tour unless the customer asks for something else.
+    const output = parseSpaceOutput(body?.output);
+    submitCustomerSpace(space.id, cleanText(body?.notes, 2000), space.source && output === undefined && !space.output ? "tour" : output);
     announceJob();
     const files = listUploads(space.id).filter(upload => upload.status === "complete");
+    const source = space.source;
     await recordEvent("space_submitted", { userId: user.id, props: { files: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0),
-      from: agent ? "agent" : "web" } });
-    void notifyTeam({ title: "Space uploaded for processing", fields: [["Title", space.title], ["Account", user.email], ["Files", filesSummary(files)],
-      ["Kinds", [...new Set(files.map(file => file.name.split(".").pop()?.toLowerCase()).filter(Boolean))].slice(0, 8).join(", ")],
+      from: agent ? "agent" : "web", ...(source ? { source: source.kind } : {}) } });
+    void notifyTeam({ title: source ? "Matterport space submitted for processing" : "Space uploaded for processing", fields: [["Title", space.title], ["Account", user.email],
+      ...(source ? [["Matterport", source.url] as [string, string]] : [["Files", filesSummary(files)] as [string, string],
+        ["Kinds", [...new Set(files.map(file => file.name.split(".").pop()?.toLowerCase()).filter(Boolean))].slice(0, 8).join(", ")] as [string, string]]),
       ["Build as", readCustomerSpace(space.id)?.output ?? "auto"], ["From", agent ? "Their agent" : "The website"], ["Notes", cleanText(body?.notes, 300)]] });
     // Not awaited: the page should not wait on the mail server.
-    void notifyOwner(user, filesReceivedEmail(siteBrand(), publicOrigin(request), space,
-      { count: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0) }));
+    void notifyOwner(user, source ? linkReceivedEmail(siteBrand(), publicOrigin(request), space, source.url)
+      : filesReceivedEmail(siteBrand(), publicOrigin(request), space, { count: files.length, bytes: files.reduce((total, upload) => total + upload.size, 0) }));
     return accountResponse({ ok: true, space: await describeSpace(readCustomerSpace(space.id)!) });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);

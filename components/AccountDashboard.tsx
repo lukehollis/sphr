@@ -142,8 +142,8 @@ function batchLine(batch: Batch) {
   const total = batch.transfers.reduce((sum, item) => sum + item.size, 0);
   const sent = batch.transfers.reduce((sum, item) => sum + Math.min(item.sent, item.size), 0);
   const percent = total ? Math.floor(sent / total * 100) : 0;
-  if (batch.phase === "creating") return { tag: "Setting up", line: `${count} ${count === 1 ? "file" : "files"}, ${formatBytes(total)}`, percent };
-  if (batch.phase === "payment") return { tag: "Waiting for payment", line: "Finish checkout and the upload starts", percent: 0 };
+  if (batch.phase === "creating") return { tag: "Setting up", line: batch.link ? "Matterport space" : `${count} ${count === 1 ? "file" : "files"}, ${formatBytes(total)}`, percent };
+  if (batch.phase === "payment") return { tag: "Waiting for payment", line: batch.link ? "Finish checkout and processing starts" : "Finish checkout and the upload starts", percent: 0 };
   if (batch.phase === "countdown") return { tag: "Uploaded", line: `Processing starts in ${batch.countdown} s`, percent: 100 };
   if (batch.phase === "held") return { tag: "Uploaded", line: "Ready to process", percent: 100 };
   if (batch.phase === "submitting") return { tag: "Uploaded", line: "Starting processing", percent: 100 };
@@ -177,14 +177,14 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   const ready = space.status === "ready" && space.scene && (space.hosted || previewing);
   let line = `Added ${shortDate(space.created)}`;
   if (space.status === "unpaid") line = "Complete payment to start uploading";
-  else if (space.status === "draft") line = files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}, ${formatBytes(bytes)}` : "No files yet";
+  else if (space.status === "draft") line = space.source ? "Matterport space, ready to process" : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}, ${formatBytes(bytes)}` : "No files yet";
   else if (space.status === "queued") line = "Waiting for an agent";
   else if (space.status === "processing") line = space.job?.progress ?? "An agent is working on it";
   else if (space.status === "failed") line = space.message?.split("\n")[0] ?? "Processing could not finish";
   else if (previewing && space.status === "ready") line = `Free preview, private to you${space.preview?.daysLeft ? `. ${space.preview.daysLeft} ${space.preview.daysLeft === 1 ? "day" : "days"} left` : ""}`;
   else if (!space.hosted && space.preview?.expired) line = "Preview ended. Start hosting to bring it back";
   else if (!space.hosted) line = "Offline until billing restarts";
-  const tag = status === "draft" ? "Add files" : status === "queued" ? "In the queue"
+  const tag = status === "draft" ? space.source ? "Ready to process" : "Add files" : status === "queued" ? "In the queue"
     : previewing && space.status === "ready" ? "Private preview" : !space.hosted && space.preview?.expired ? "Preview ended" : undefined;
 
   const media = <>

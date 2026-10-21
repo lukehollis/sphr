@@ -39,6 +39,18 @@ const teamHook = await listen(async (request, response) => {
   response.statusCode = 204;
   response.end();
 });
+// Matterport's model graph: one space, one combined space made of two models, and nothing else.
+const showcaseSpaces = { MD4iVby1G8k: { root: 'MD4iVby1G8k', name: 'Inside the Great Pyramid', sweeps: 3 }, Combined001: { root: 'Combined999', name: 'Two buildings', sweeps: 4 } };
+const showcase = await listen(async (request, response) => {
+  let body = '';
+  for await (const chunk of request) body += chunk;
+  const id = JSON.parse(body || '{}').variables?.modelId, space = showcaseSpaces[id];
+  response.setHeader('Content-Type', 'application/json');
+  // GraphQL answers 200 for a missing model too, with errors in place of data.
+  response.end(JSON.stringify(request.url === '/api/mp/models/graph' && space
+    ? { data: { root: { id: space.root, name: space.name }, space: { id, locations: Array.from({ length: space.sweeps }, (_, index) => ({ id: `location${index}` })) } } }
+    : { data: { root: null, space: null }, errors: [{ message: 'Error fetching data (path: /space, code: not.found): Not Found' }] }));
+});
 const signer = new Stripe('sk_test_signer');
 // A small model library: two models for everyone, one for the operator's team only.
 writeFileSync(path.join(state, 'library.json'), JSON.stringify({ models: [
@@ -59,7 +71,8 @@ const env = { ...process.env, NODE_ENV: undefined, SPHR_BUILD_DIR: '.next-accoun
   SPHR_WORKER_TOKEN: workerToken, SPHR_DISCORD_WEBHOOK_URL: `${teamHook.base}/api/webhooks/1/token`, SPHR_UPLOAD_MAX_GB: '1', SPHR_UPLOAD_BUCKET: '',
   // The free preview holds three files and 20 MB here, 3 new previews a day from one address, and 8 a day on the whole site.
   SPHR_PREVIEW_MAX_FILES: '3', SPHR_PREVIEW_MAX_GB: '0.02', SPHR_PREVIEW_ADDRESS_LIMIT: '3', SPHR_PREVIEW_DAILY_LIMIT: '8',
-  SPHR_LIBRARY_FILE: path.join(state, 'library.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '' };
+  SPHR_LIBRARY_FILE: path.join(state, 'library.json'), SPHR_LIBRARY_URL: '', SPHR_TOUR_AGENT_URL: '', SPHR_TOUR_AGENT_COMMAND: '', ANTHROPIC_API_KEY: '',
+  SPHR_MATTERPORT_TEST_BASE: showcase.base };
 delete env.NODE_ENV;
 // Next's dev server adds its build directory to these files; the originals are restored afterwards.
 const generated = Object.fromEntries(['tsconfig.json', 'next-env.d.ts'].map(name => [name, readFileSync(path.join(root, name), 'utf8')]));
@@ -72,7 +85,7 @@ async function cleanup() {
   const exited = new Promise(resolve => app.exitCode !== null ? resolve() : app.once('exit', resolve));
   app.kill('SIGTERM');
   await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 10000))]);
-  for (const server of [stripeServer.server, idpServer.server, mail.server, teamHook.server]) server.close();
+  for (const server of [stripeServer.server, idpServer.server, mail.server, teamHook.server, showcase.server]) server.close();
   rmSync(path.join(root, 'public/datasets'), { recursive: true, force: true });
   rmSync(state, { recursive: true, force: true });
   rmSync(path.join(root, '.next-accounts-test'), { recursive: true, force: true });
@@ -1099,6 +1112,58 @@ try {
   assert.equal((await anonymous.get(atriumPath)).status, 200);
   console.log('Passed: the free preview: private to its owner, publishing and builders refused until hosting, Checkout back to the result, limits on files, bytes and runs, the window, the address and daily budgets, fallbacks to payment and priority for paid jobs.');
 
+  // ---- A Matterport space brought over from its link, without an E57 ----
+  const pyramid = 'https://my.matterport.com/show/?m=MD4iVby1G8k';
+  const mona = await crowd(8, '203.0.113.70');
+  const check = url => mona.person.post('/api/account/matterport', { url });
+  response = await check('https://example.com/tour/MD4iVby1G8k');
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Paste the link to a Matterport space/);
+  response = await check('https://my.matterport.com/show/?m=AAAAAAAAAAA');
+  assert.equal(response.status, 404, 'a space that is missing, private or behind a password does not open');
+  assert.match((await response.json()).error, /did not open\. Check the link, and that the space is public or unlisted/);
+  response = await check('https://my.matterport.com/show/?m=Combined001');
+  assert.deepEqual([response.status, (await response.json()).reason], [422, 'combined'], 'a combined space is turned away');
+  // Embed code works as well as the address, and the link comes back as the showcase address with the space's name.
+  body = await (await check('<iframe width="853" src="https://my.matterport.com/show/?m=MD4iVby1G8k&play=1" allow="xr-spatial-tracking"></iframe>')).json();
+  assert.deepEqual([body.link, body.name, body.sweeps, body.checked], [{ modelId: 'MD4iVby1G8k', url: pyramid }, 'Inside the Great Pyramid', 3, true]);
+  assert.equal((await anonymous.post('/api/account/matterport', { url: pyramid })).status, 401);
+  const addLink = (person, extra, address) => person.post('/api/account/spaces', { title: 'Inside the Great Pyramid', ...extra }, { headers: { 'X-Real-IP': address } });
+  response = await addLink(mona.person, { matterport: pyramid }, '203.0.113.70');
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Confirm that you own this Matterport space or have its owner's permission/, 'the owner\'s permission comes first');
+  assert.equal((await addLink(mona.person, { matterport: 'https://example.com/x', permission: true }, '203.0.113.70')).status, 400);
+  // The day's free previews are spent, so this one waits for payment like any upload, and keeps its link meanwhile.
+  body = await (await addLink(mona.person, { matterport: pyramid, permission: true }, '203.0.113.70')).json();
+  assert.deepEqual([body.space.status, body.previewDeclined, body.space.source], ['unpaid', 'busy', { kind: 'matterport', url: pyramid }]);
+  const monaSpace = body.space;
+  assert.match(database().prepare('SELECT source FROM customer_spaces WHERE id=?').get(monaSpace.id).source, /"permission":"20\d\d-/, 'when the permission was given is kept');
+  assert.equal((await mona.person.post(`/api/account/spaces/${monaSpace.id}/submit`, {})).status, 402, 'nothing is processed before payment');
+  const monaSession = [...stripeFake.state.sessions.values()].at(-1);
+  stripeFake.state.pay(monaSession.id);
+  assert.equal((await webhook({ id: 'evt_mona', type: 'checkout.session.completed', data: { object: { id: monaSession.id, object: 'checkout.session' } } })).status, 200);
+  assert.equal((await (await mona.person.get(`/api/account/spaces/${monaSpace.id}`)).json()).space.status, 'draft', 'payment opens it');
+  page = (await (await mona.person.get(`/account/spaces/${monaSpace.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Matterport space') && page.includes(pyramid) && page.includes('Ready to bring over your Matterport space'), 'its page shows the link, ready to process');
+  assert.ok(!page.includes('Add files'), 'and asks for no files');
+  // Submitting needs no uploads; the space becomes a tour and the worker is given the link.
+  body = await (await mona.person.post(`/api/account/spaces/${monaSpace.id}/submit`, { notes: 'The Grand Gallery is the best part.' })).json();
+  assert.deepEqual([body.space.status, body.space.output], ['queued', 'tour']);
+  let linkJob = (await (await worker('/api/worker/jobs?status=queued')).json()).jobs.find(item => item.space.id === monaSpace.id);
+  assert.deepEqual([linkJob.source, linkJob.uploads, linkJob.space.output], [{ kind: 'matterport', modelId: 'MD4iVby1G8k', url: pyramid }, [], 'tour']);
+  const linkMail = await mail.waitFor(message => message.includes('To: crowd8@example.com') && message.includes('Subject: Processing started for Inside the Great Pyramid'));
+  assert.ok(linkMail.includes('We have your link') && linkMail.includes(pyramid), 'the email speaks of the link, not of files');
+  // A free preview takes a link too, and starts at once.
+  database().prepare('UPDATE preview_grants SET granted=?').run(new Date(Date.now() - 2 * 864e5).toISOString());
+  const nadia = await crowd(9, '203.0.113.71');
+  body = await (await addLink(nadia.person, { matterport: pyramid, permission: true }, '203.0.113.71')).json();
+  assert.deepEqual([body.preview, body.space.status, body.space.source?.url], [true, 'draft', pyramid]);
+  assert.equal((await nadia.person.post(`/api/account/spaces/${body.space.id}/submit`, { output: 'auto' })).status, 200);
+  linkJob = (await (await worker('/api/worker/jobs?status=queued')).json()).jobs.find(item => item.space.id === body.space.id);
+  assert.deepEqual([linkJob.preview, linkJob.source.modelId], [true, 'MD4iVby1G8k']);
+  for (const [person, id] of [[mona.person, monaSpace.id], [nadia.person, body.space.id]]) assert.equal((await person.request(`/api/account/spaces/${id}`, { method: 'DELETE', json: {} })).status, 200);
+  console.log('Passed: Matterport links: checked against the showcase, the owner\'s permission required, payment and the free preview as for uploads, and the worker given the link.');
+
   // ---- Password reset signs out every session ----
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'nobody@example.com' })).status, 200, 'no account enumeration');
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'alice@example.com' })).status, 200);
@@ -1136,8 +1201,8 @@ try {
     && stepNames.indexOf('checkout_started') < stepNames.indexOf('publish_paid') && stepNames.indexOf('publish_paid') < stepNames.indexOf('space_published'), 'in the order people go');
   assert.equal(JSON.parse(steps.find(step => step.name === 'checkout_started').props).for, 'preview', 'payment started from a preview says so');
   assert.deepEqual(JSON.parse(steps.find(step => step.name === 'publish_paid').props), { plan: 'price_space', amount: 100, ready: true, days: 0 }, 'and so does paying after one');
-  assert.deepEqual(database().prepare("SELECT props FROM analytics_events WHERE name='preview_declined' ORDER BY id").all().map(row => JSON.parse(row.props).reason), ['large', 'busy', 'busy'],
-    'previews not given are counted with the reason, and a second space after the preview is not');
+  assert.deepEqual(database().prepare("SELECT props FROM analytics_events WHERE name='preview_declined' ORDER BY id").all().map(row => JSON.parse(row.props).reason), ['large', 'busy', 'busy', 'busy'],
+    'previews not given are counted with the reason (the last is the Matterport link), and a second space after the preview is not');
   console.log('Passed: first-touch analytics, sibling-site events, crawler filtering, the funnel report, repeat confirmation links and the agent address page.');
 
   // The operator's public spaces are open to builders until the operator closes one.
@@ -1172,6 +1237,8 @@ try {
   assert.equal(about('Space created', 'Title', 'Grace 2')[0].fields.Status, 'Waiting for first payment', 'a space after the preview still waits for payment');
   assert.equal(about('Preview ready', 'Account', 'alice@example.com').length, 1, 'the operator hears when a preview is ready');
   assert.ok(about('Space uploaded for processing', 'Account', 'alice@example.com').length >= 1);
+  assert.equal(about('Space created', 'Account', 'crowd8@example.com')[0].fields.Matterport, 'https://my.matterport.com/show/?m=MD4iVby1G8k', 'the operator sees the link of a Matterport space');
+  assert.equal(about('Matterport space submitted for processing', 'Account', 'crowd8@example.com')[0].fields.Matterport, 'https://my.matterport.com/show/?m=MD4iVby1G8k');
   assert.ok(about('Space needs attention').some(item => item.description === 'Please upload the E57 export instead of the raw capture.'));
   assert.equal(about('Space held for review', 'Title', 'Stalled capture').length, 1, 'a stalled job is announced once');
   assert.equal(about('Space held for review', 'Title', 'Stalled capture')[0].description, 'Stopped after 3 attempts without a result.');
