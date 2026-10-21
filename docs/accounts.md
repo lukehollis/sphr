@@ -40,6 +40,26 @@ The flow for a customer:
    it, make it public, and edit its title, start view and thumbnail (a free preview waits for hosting before it
    can be made public). If the upload cannot become a space, the page says what to upload instead.
 
+## Matterport links
+
+The sheet also takes the link to a Matterport space, for customers who have no E57: the showcase address
+(`my.matterport.com/show/?m=…`), a Matterport Cloud or Discover page, or the embed code. The link is checked
+first (`POST /api/account/matterport`), which asks Matterport's model graph, as its showcase does, whether the
+space opens without signing in and what it is called (the space's title). A private, password-protected,
+missing or combined space is turned away with what to do instead; when Matterport cannot be reached the link
+is accepted unchecked and the worker meets the same problems later. The customer must tick *I own this space
+or have the owner's permission*. The space is then created with the link (`customer_spaces.source`, which keeps
+when the permission was given) under the same payment and free-preview rules as uploads, and processing starts
+as soon as the space is paid for or is the preview, with no files and no countdown. Its page shows the link
+instead of files, and processing it again downloads the space anew. It becomes a tour.
+
+The worker is given the link in the job's `source`. Before the agent starts, the runner downloads the space
+from Matterport into `input/matterport-<model>/` (`scripts/worker/matterport-link.mjs`: the 360 photos at the
+best resolution Matterport offers the public, the 50k dollhouse mesh with its textures, the cover picture and
+the Mattertags; see [Matterport viewer archives](matterport-web-archives.md)), and the agent imports it with
+the `sphr-matterport-link` skill. A space Matterport will not open fails with what to fix; Matterport being
+unreachable gives the job back for later. The operator's Discord notices carry the link.
+
 ## The free preview
 
 Payment used to come before any result, and the people who stopped at that screen never saw what the
