@@ -68,6 +68,8 @@ def stage_scene(folder, entry, base_url, stage):
             names.update(f"faces/{node}/face{face['sphrFace']}.jpg" for face in group['sourceFaces'])
         if (folder / 'mesh/atlas.jpg').is_file():
             names.add('mesh/atlas.jpg')
+        # Pictures of a web import's Mattertags that Matterport hosted.
+        names.update(item['path'] for item in manifest.get('tagMedia', []))
     files = sorted(folder / name for name in names)
     files = [path for path in files if path.is_file()]
     hashes = {}
@@ -88,6 +90,9 @@ def stage_scene(folder, entry, base_url, stage):
         mesh = f"mesh/{manifest['slug']}-50k.glb"
         if hashes.get(mesh) != manifest['mesh']['sha256']:
             raise ValueError(f'Mesh no longer matches validated import: {folder.name}')
+        for item in manifest.get('tagMedia', []):
+            if hashes.get(item['path']) != item['sha256']:
+                raise ValueError(f"Tag media no longer matches validated import: {folder.name}/{item['path']}")
     for required in ('bootstrap.json', 'preview.jpg'):
         if required not in hashes:
             raise ValueError(f'Missing runtime asset: {folder.name}/{required}')

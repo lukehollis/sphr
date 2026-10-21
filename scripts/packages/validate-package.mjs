@@ -3,7 +3,9 @@
 //   node scripts/packages/validate-package.mjs <package folder> [--scene-id ID] [--slug SLUG] [--title TITLE] [--write]
 // For "sphr-package-v1" every runtime file must be listed in the manifest with a matching
 // SHA-256, have an allowed type, and stay inside the folder. For every package, bootstrap
-// URLs may only point at files in the package: no other hosts, folders or script URLs.
+// URLs may only point at files in the package: no other hosts, folders or script URLs. The one
+// exception is a tag's media, which may be an https address on another site: the viewer shows it
+// as a picture, a video or a link, and nothing loads it as part of the space.
 // The processing runner runs its own copy of this script; an agent cannot mark a package valid.
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -13,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 const allowed = /\.(json|jpe?g|png|webp|avif|ktx2|glb|ply|spz|splat|ksplat|sog|rad|mp4|webm|m4a|mp3|ogg|wav)$/i;
 const freeText = new Set(['text', 'secondaryText', 'title', 'description', 'caption', 'label', 'name', 'subtitle', 'titlePart1', 'titlePart2',
   'enterButtonText', 'exploreButtonText', 'loadingText', 'nextButtonText', 'previousButtonText', 'continueExploringButtonText', 'id', 'uuid']);
+const tagMedia = /^bootstrap\.space\.space_data\.tags\[\d+\]\.media\.url$/;
 
 function sha256(file) {
   const hash = createHash('sha256');
@@ -97,6 +100,7 @@ export function validatePackage(folder, expect = {}) {
       const looksLikeUrl = /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(value.trim());
       if (!looksLikeUrl) return;
       urls++;
+      if (tagMedia.test(trail) && /^https:\/\/[^\s"'<>]+$/i.test(value)) return;
       if (!value.startsWith(`${datasetUrl}/`)) { fail(`${trail} points outside the package: ${value.slice(0, 120)}`); return; }
       const relative = decodeURIComponent(value.slice(datasetUrl.length + 1)).split(/[?#]/)[0];
       if (relative.includes('..')) { fail(`${trail} climbs out of the package.`); return; }

@@ -1,7 +1,9 @@
 """Convert a local matterport-dl archive into a standard, source-bound SPHR scene.
 
 This is an offline importer. It preserves the viewer's photographs, mesh, poses,
-floor positions and graph; it never represents a web archive as measured E57 data.
+floor positions, graph and Mattertags; it never represents a web archive as measured
+E57 data. The archive is matterport-dl's, or the one the processing runner downloads
+from a Matterport link (scripts/worker/matterport-link.mjs), which has the same layout.
 """
 from __future__ import annotations
 
@@ -24,6 +26,9 @@ from geometry import C, CENTERS, RIGHTS, UPS
 from seams import measure_seams
 
 SCHEMA = "sphr-matterport-web-v1"
+# Mattertags, as the runner saves them from Matterport's model graph.
+TAGS = "api/mp/models/graph_GetMattertags.json"
+TAG_MEDIA = {"photo": "image", "video": "video", "rich": "link"}
 
 
 def digest(path):
@@ -225,6 +230,65 @@ def export_mesh(archive, model, target):
             "textureCount": len(source_assets) - 1, "bounds": reread.bounds.tolist()}, source_assets
 
 
+def direction(value):
+    vector = C @ np.array([value[key] for key in "xyz"], dtype=float)
+    length = np.linalg.norm(vector)
+    if not np.isfinite(vector).all() or length < 1e-9:
+        raise ValueError("Invalid source direction")
+    return dict(zip("xyz", (vector / length).tolist()))
+
+
+def plain_text(text):
+    """Mattertag descriptions link with markdown; the bootstrap keeps plain text with each address after its label."""
+    def link(match):
+        label, url = match[1].strip(), match[2]
+        return f"{label} ({url})" if label and label != url else url
+    return re.sub(r"\[([^\]]*)\]\((\S+?)\)", link, text).strip()
+
+
+def convert_tags(archive, stage, dataset_url):
+    """Enabled Mattertags in the shared tag contract (space.space_data.tags); imported tags are the defaults owners edit.
+
+    A photo the runner downloaded from Matterport is copied into the package; media on other hosts keeps its https address.
+    """
+    source = archive / TAGS
+    if not source.is_file():
+        return [], set(), []
+    records = (json.loads(source.read_text()).get("data") or {}).get("model", {}).get("mattertags") or []
+    tags, sources, media_files = [], {source}, []
+    for record in records:
+        anchor = record.get("anchorPosition")
+        if not record.get("enabled", True) or not anchor or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(record.get("id", ""))):
+            continue
+        description = plain_text(record.get("description") or "")[:5000]
+        title = (record.get("label") or "").strip()[:200] or description.split("\n")[0][:80] or "Tag"
+        tag = {"id": record["id"], "title": title, "position": position(anchor), "source": "matterport"}
+        if description:
+            tag["description"] = description
+        if record.get("stemNormal"):
+            tag["normal"] = direction(record["stemNormal"])
+        if isinstance(record.get("color"), str) and re.fullmatch(r"#[0-9a-fA-F]{6}", record["color"]):
+            tag["color"] = record["color"].lower()
+        kind, url = TAG_MEDIA.get(record.get("mediaType")), (record.get("media") or "").strip()
+        if kind and url.startswith(("https://", "http://")):
+            try:
+                local = local_asset(archive, url)
+            except (FileNotFoundError, ValueError):
+                local = None
+            extension = Path(urlsplit(url).path).suffix.lower()
+            if local and kind == "image" and extension in {".jpg", ".jpeg", ".png", ".webp"}:
+                target = stage / f"tags/{record['id']}{extension}"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(local, target)
+                sources.add(local)
+                media_files.append(target)
+                tag["media"] = {"type": kind, "url": f"{dataset_url}/{target.relative_to(stage)}"}
+            elif url.startswith("https://"):
+                tag["media"] = {"type": kind, "url": url}
+        tags.append(tag)
+    return tags, sources, media_files
+
+
 def graph_components(nodes):
     remaining = {node["uuid"] for node in nodes}
     adjacency = {node["uuid"]: set(node["neighbors"]) for node in nodes}
@@ -338,7 +402,23 @@ def validate_package(folder, archive=None):
                    for node in nodes if node.get('unavailableNeighborIds')]
     if unavailable != manifest.get('unavailableNeighbors', []):
         raise ValueError('Unavailable navigation receipt changed')
-    return {"schema": "sphr-matterport-web-validation-v1", "valid": True,
+    for group_node, group in manifest.get("imageManifest", {}).get("groups", {}).items():
+        for face in group["sourceFaces"]:
+            if digest(folder / f"faces/{group_node}/face{face['sphrFace']}.jpg") != face["sha256"]:
+                raise ValueError("Image manifest does not match the panoramas")
+    tags = bootstrap["space"]["space_data"].get("tags", [])
+    if len(tags) != manifest.get("tagCount", 0) or len({tag["id"] for tag in tags}) != len(tags):
+        raise ValueError("Tag count/identity mismatch")
+    for tag in tags:
+        if not tag["title"] or not np.isfinite(list(tag["position"].values())).all():
+            raise ValueError("Invalid tag")
+        media = tag.get("media", {}).get("url", "")
+        if media and not media.startswith("https://") and not (media.startswith(prefix) and (folder / media[len(prefix):]).is_file()):
+            raise ValueError("Tag media is neither in the package nor on https")
+    for record in manifest.get("tagMedia", []):
+        if digest(folder / record["path"]) != record["sha256"]:
+            raise ValueError("Tag media changed")
+    return {"schema": "sphr-matterport-web-validation-v1", "valid": True, "passed": True, "tags": len(tags),
             "sourceVerified": archive is not None, "nodes": len(nodes), "faces": len(nodes) * 6,
             "triangles": triangles, "graphComponents": components, "seams": seam_reports,
             "registration": "Source viewer camera transforms; no E57 point/photo calibration available",
@@ -394,7 +474,7 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
                       **({'unavailableNeighborIds': navigation[loc['id']][1]} if navigation[loc['id']][1] else {}),
                       "resolution": box["resolution"], "sourceDimensions": list(dimensions),
                       "sourceLocationId": loc["id"], "sourceFloorId": loc.get("floor", {}).get("id")})
-    mesh_path = f"mesh/{slug}.glb"
+    mesh_path = f"mesh/{slug}-50k.glb"
     mesh, mesh_sources = export_mesh(archive, model, stage / mesh_path)
     source_assets.update(mesh_sources)
     mesh["path"] = mesh_path
@@ -402,6 +482,10 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
     bootstrap = build_bootstrap(slug, title, dataset_url, nodes, f"{dataset_url}/{mesh_path}")
     bootstrap["space"]["space_custom"] = "matterport-web"
     bootstrap["space"]["thumbnail"] = f"{dataset_url}/preview.jpg"
+    tags, tag_sources, tag_media = convert_tags(archive, stage, dataset_url)
+    source_assets.update(tag_sources)
+    if tags:
+        bootstrap["space"]["space_data"]["tags"] = tags
     # Respect every original edge, including edges longer than the E57-derived cap.
     distances = [np.linalg.norm(np.array(list(node["position"].values())) -
                                np.array(list(other["position"].values())))
@@ -409,9 +493,18 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
     bootstrap["space"]["space_data"]["navigation"]["maxDistance"] = max(distances, default=8) + 0.1
     snapshots = archive / "api/mp/models/graph_GetSnapshots.json"
     photos = json.loads(snapshots.read_text()).get("data", {}).get("model", {}).get("assets", {}).get("photos", []) if snapshots.exists() else []
+    cover = (root.get("image") or {}).get("url")
+    try:
+        cover = local_asset(archive, cover) if cover else None
+    except (FileNotFoundError, ValueError):
+        cover = None
     if photos:
         preview = local_asset(archive, photos[0]["url"] or photos[0]["presentationUrl"])
         source_assets.update([snapshots, preview])
+    elif cover:
+        # The space's own cover picture, which the runner downloads with the rest.
+        preview = cover
+        source_assets.add(cover)
     else:
         preview = stage / f"faces/{nodes[0]['uuid']}/face1.jpg"
     with Image.open(preview) as image:
@@ -427,6 +520,11 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
                 "sourceSha256": source_binding, "sourceAssets": source_records,
                 "datasetUrl": dataset_url, "bootstrapUrl": f"{dataset_url}/bootstrap.json",
                 "nodeCount": len(nodes), "scanCount": len(nodes), "faceCount": len(nodes) * 6,
+                "imageManifest": {"groups": {node["uuid"]: {"sourceFaces": [
+                    {"sphrFace": face, "sha256": digest(stage / f"faces/{node['uuid']}/face{face}.jpg"), "resolution": node["resolution"]}
+                    for face in range(6)]} for node in nodes}},
+                "tagCount": len(tags),
+                "tagMedia": [{"path": str(p.relative_to(stage)), "bytes": p.stat().st_size, "sha256": digest(p)} for p in tag_media],
                 "mesh": mesh, "coordinateConversion": "meters; three=[x,z,-y]; Showcase fromVisionSweepQuaternion",
                 "limitations": ["Viewer archive, not E57: no raw measured depth or original point cloud",
                                 "Mesh retains the source viewer geometry and its holes",
@@ -451,7 +549,8 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
     stage.rename(final)
     write_matterport_index(directory)
     return {"dataset": str(final), "scenePath": manifest["scenePath"], "nodes": len(nodes),
-            "faces": len(nodes) * 6, "triangles": mesh["triangles"], "sourceSha256": source_binding}
+            "faces": len(nodes) * 6, "triangles": mesh["triangles"], "tags": len(tags), "graphComponents": len(report["graphComponents"]),
+            "unavailableNeighbors": len(manifest.get("unavailableNeighbors", [])), "sourceSha256": source_binding}
 
 
 if __name__ == "__main__":

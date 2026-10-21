@@ -1,14 +1,52 @@
 import json
+import os
 from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
+from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from catalog import write_matterport_index
-from web_archive import fields, load_dam, local_asset, pano_quaternion, select_skybox, source_neighbors
+from geometry import C
+from publish import stage_scene
+from web_archive import TAGS, convert, fields, load_dam, local_asset, pano_quaternion, plain_text, select_skybox, source_neighbors
+
+
+def field(tag, value):
+    return bytes([tag * 8 + 2, len(value)]) + value
+
+
+def tiny_archive(root, tags):
+    """One sweep of 512 px faces, a one-triangle DAM with its texture, and the Mattertags the runner saves."""
+    template = "https://cdn-2.matterport.com/models/m/assets/pan/512/~/s1_skybox<face>.jpg?t=signed"
+    location = {"id": "l1", "index": 0, "neighbors": [], "floor": {"id": "f1"}, "position": {"x": 1, "y": 2, "z": 0},
+                "pano": {"sweepUuid": "s1", "label": "1", "position": {"x": 1, "y": 2, "z": 1.5}, "rotation": {"x": 0, "y": 0, "z": 0, "w": 1},
+                         "skyboxes": [{"resolution": "512", "status": "available", "urlTemplate": template}, {"resolution": "4k", "status": "locked"}]}}
+    model = {"id": "Model000001", "locations": [location], "assets": {
+        "meshes": [{"status": "available", "format": "dam", "resolution": "50k", "url": "https://cdn-2.matterport.com/models/m/assets/m_50k.dam?t=signed"}],
+        "textures": [{"status": "available", "quality": "high", "resolution": "50k",
+                      "urlTemplate": "https://cdn-2.matterport.com/models/m/assets/~/tex/m_50k_<texture>.jpg?t=signed"}]}}
+    prefetch = {"queries": {"GetModelPrefetch": {"data": {"model": model}}, "GetRootPrefetch": {"data": {"model": {"id": "Model000001", "name": "Room"}}}}}
+    (root / "index.html").write_text(f"<script>window.MP_PREFETCHED_MODELDATA = parseJSON({json.dumps(json.dumps(prefetch))});</script>")
+    rng = np.random.default_rng(1)
+    for face in range(6):
+        target = root / f"models/m/assets/pan/512/~/s1_skybox{face}.jpg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(rng.integers(0, 255, (512, 512, 3), dtype=np.uint8)).save(target)
+    vertices = field(1, struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 1, 0)) + field(2, struct.pack("<6f", 0, 0, 1, 0, 0, 1))
+    (root / "models/m/assets/m_50k.dam").write_bytes(field(1, field(1, vertices) + field(2, field(1, bytes([0, 1, 2]))) + field(4, b"m_50k_000.jpg")))
+    texture = root / "models/m/assets/~/tex/m_50k_000.jpg"
+    texture.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), "gray").save(texture)
+    photo = root / "apifs/models/Model000001/images/kiln.jpg"
+    photo.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32), "red").save(photo)
+    (root / TAGS).parent.mkdir(parents=True, exist_ok=True)
+    (root / TAGS).write_text(json.dumps({"data": {"model": {"mattertags": tags}}}))
 
 
 class WebArchiveTests(unittest.TestCase):
@@ -73,6 +111,49 @@ class WebArchiveTests(unittest.TestCase):
             first = write_matterport_index(root)
             self.assertEqual(len(first), 2)
             self.assertEqual(first, write_matterport_index(root))
+
+
+    def test_tag_descriptions_keep_their_addresses_as_plain_text(self):
+        self.assertEqual(plain_text("[Visit the tour](https://example.com/tour). Or [https://a.example](https://a.example)"),
+                         "Visit the tour (https://example.com/tour). Or https://a.example")
+
+    def test_link_archive_converts_to_a_publishable_package_with_tags(self):
+        anchor, normal = {"x": 1.0, "y": 2.0, "z": 0.5}, {"x": 0.0, "y": -2.0, "z": 0.0}
+        tags = [
+            {"id": "kiln", "label": "Kiln", "description": "Fired at [the museum](https://museum.example/kilns).", "color": "#D44441", "enabled": True,
+             "mediaType": "photo", "media": "https://cdn-2.matterport.com/apifs/models/Model000001/images/kiln.jpg?t=signed", "anchorPosition": anchor, "stemNormal": normal},
+            {"id": "film", "label": "Film", "enabled": True, "mediaType": "video", "media": "https://video.example/watch?v=1", "anchorPosition": anchor},
+            {"id": "plain", "label": "", "description": "No title here", "enabled": True, "mediaType": "photo", "media": "http://insecure.example/a.jpg", "anchorPosition": anchor},
+            {"id": "hidden", "label": "Hidden", "enabled": False, "anchorPosition": anchor}]
+        with tempfile.TemporaryDirectory() as folder:
+            # Resolved, as the command line passes them (temporary folders sit behind /var on macOS).
+            archive, public = Path(folder).resolve() / "archive", Path(folder).resolve() / "public"
+            archive.mkdir()
+            tiny_archive(archive, tags)
+            with mock.patch.dict(os.environ, {"SPHR_SCENE_ID": "0123456789ab"}):
+                result = convert(archive, "customer-test01", "Pottery studio", public)
+            package = public / "datasets/matterport/customer-test01"
+            self.assertEqual([result["nodes"], result["tags"]], [1, 3], "disabled tags are left out")
+            manifest = json.loads((package / "manifest.json").read_text())
+            self.assertEqual(json.loads((package / "validation.json").read_text())["passed"], True)
+            self.assertTrue((package / "mesh/customer-test01-50k.glb").is_file())
+            faces = manifest["imageManifest"]["groups"]["s1"]["sourceFaces"]
+            self.assertEqual([face["sphrFace"] for face in faces], list(range(6)))
+            bootstrap = json.loads((package / "bootstrap.json").read_text())
+            kiln, film, plain = bootstrap["space"]["space_data"]["tags"]
+            np.testing.assert_allclose([kiln["position"][key] for key in "xyz"], C @ [1.0, 2.0, 0.5])
+            np.testing.assert_allclose([kiln["normal"][key] for key in "xyz"], C @ [0.0, -1.0, 0.0])
+            self.assertEqual([kiln["title"], kiln["description"], kiln["color"], kiln["source"]],
+                             ["Kiln", "Fired at the museum (https://museum.example/kilns).", "#d44441", "matterport"])
+            self.assertEqual(kiln["media"], {"type": "image", "url": "/datasets/matterport/customer-test01/tags/kiln.jpg"}, "a photo Matterport hosts is copied in")
+            self.assertEqual(film["media"], {"type": "video", "url": "https://video.example/watch?v=1"}, "media elsewhere keeps its https address")
+            self.assertEqual([plain["title"], "media" in plain], ["No title here", False], "and media over plain http is dropped")
+            # The publisher ships the faces, the mesh and the copied photo, each checked against the manifest.
+            entry = next(item for item in write_matterport_index(public / "datasets/matterport") if item["slug"] == "customer-test01")
+            stage = Path(folder).resolve() / "stage"
+            staged, relative = stage_scene(package, entry, "https://assets.example", stage)
+            shipped = {path.relative_to(stage / relative).as_posix() for path in (stage / relative).rglob("*") if path.is_file()}
+            self.assertEqual(shipped, {"bootstrap.json", "preview.jpg", "mesh/customer-test01-50k.glb", "tags/kiln.jpg", *(f"faces/s1/face{face}.jpg" for face in range(6))})
 
 
 if __name__ == "__main__":
