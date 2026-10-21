@@ -52,7 +52,10 @@ test('a part that fails once reloads the page and keeps where the visitor came f
 
 test('a part still refused after the reload sends mused visitors to the classic tour and reports what the network answered', async () => {
   const storage = new Map([[reloadedAt, String(Date.now())], [cameFrom, mused]]);
-  const blocked = async () => ({ status: 403, headers: new Map([['content-type', 'text/html'], ['server', 'Zscaler/6.2']]), text: async () => '<html>\n  Website blocked by policy </html>' });
+  // Shaped like the page Zscaler sent on 2026-10-20: a tracking comment, a doctype, then the reason.
+  const page403 = '<!--# TrfMHj5VD0f--> <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><head><title>Website blocked</title><style>p{color:red}</style></head>'
+    + '<body><script>var tracking = 1</script><p>Sorry, the file <b>core.js</b> is blocked:&nbsp;Malicious Content.</p></body></html>';
+  const blocked = async () => ({ status: 403, headers: new Map([['content-type', 'text/html'], ['server', 'Zscaler/6.2']]), text: async () => page403 });
   const again = page({ storage, fetch: blocked });
   again.fail('/_next/static/chunks/core.js');
   assert.equal(again.reloads(), 0, 'no second reload');
@@ -61,7 +64,7 @@ test('a part still refused after the reload sends mused visitors to the classic 
   assert.deepEqual([go.href, go.target, go.textContent], [`${mused}?version=classic`, '_top', 'Open the classic tour']);
   await settle();
   assert.equal(props(again.beacons[0]).source, 'still failing after a reload');
-  assert.equal(props(again.beacons[0]).detail, 'HTTP 403 text/html, not from Cloudflare, server Zscaler/6.2: <html> Website blocked by policy </html>');
+  assert.equal(props(again.beacons[0]).detail, 'HTTP 403 text/html Zscaler/6.2 (not Cloudflare): Website blocked | Sorry, the file core.js is blocked: Malicious Content.');
   assert.equal(again.beacons[0].referrer, mused, 'the reloaded page still counts as a visit from mused.com');
 });
 

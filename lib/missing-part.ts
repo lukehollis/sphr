@@ -7,7 +7,8 @@
  *
  * Some networks refuse a part every time: on 2026-10-20 a school district's Zscaler proxy refused the
  * framework chunk to nearly every student who opened the Great Pyramid tour inside mused.com. So a
- * second failure asks for the part again to learn what the network answers (sent as `detail`), tells
+ * second failure asks for the part again to learn what the network answers (sent as `detail`: for a
+ * block page its title and first sentences, which name the proxy's reason), tells
  * a framing page (`spacery:failed`), and shows the visitor a way on: the framing tour's classic
  * version on mused.com, or another try.
  */
@@ -47,8 +48,11 @@ export function missingPartScript(report: boolean) {
     + `if(framed())body.framed=true;navigator.sendBeacon("/api/steps",JSON.stringify(body))}catch(x){}}`
     // What the network answers for the part: a proxy's block page, a status, or no answer at all.
     + `function probe(src,done){var over=false,end=function(text){if(!over){over=true;done(String(text).slice(0,200))}};setTimeout(function(){end("no answer in 8 s")},8000);`
-    + `try{fetch(src,{cache:"no-store",credentials:"omit"}).then(function(r){return r.text().then(function(t){`
-    + `end("HTTP "+r.status+" "+(r.headers.get("content-type")||"no type")+(r.headers.get("cf-ray")?"":", not from Cloudflare")+(r.headers.get("server")?", server "+r.headers.get("server"):"")+": "+t.replace(/\\s+/g," ").slice(0,90))})})`
+    + `try{fetch(src,{cache:"no-store",credentials:"omit"}).then(function(r){return r.text().then(function(t){var type=r.headers.get("content-type")||"no type";`
+    // A block page says why in its title and first sentences; its comments, head, scripts and markup say nothing.
+    + `if(/html/i.test(type)){var title=(t.match(/<title[^>]*>([^<]*)/i)||[])[1]||"";t=(title?title+" | ":"")+t.replace(/<!--[\\s\\S]*?-->/g," ")`
+    + `.replace(/<(head|script|style)\\b[\\s\\S]*?<\\/\\1>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/&amp;/g,"&")}`
+    + `end("HTTP "+r.status+" "+type+(r.headers.get("server")?" "+r.headers.get("server"):"")+(r.headers.get("cf-ray")?"":" (not Cloudflare)")+": "+t.replace(/\\s+/g," ").trim().slice(0,150))})})`
     + `.catch(function(e){end("fetch failed: "+(e&&e.message||e))})}catch(x){end("fetch unavailable")}}`
     // A tour framed on mused.com has a classic version there; anywhere else, another try.
     + `function classic(referrer){try{var u=new URL(referrer);if(!/(^|\\.)mused\\.com$/.test(u.hostname))return null;u.searchParams.set("version","classic");return u.href}catch(x){return null}}`
