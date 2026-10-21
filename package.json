@@ -23,6 +23,7 @@
     "test:accounts": "node --test scripts/test-accounts.mjs",
     "test:matterport-link": "node --test scripts/test-matterport-link.mjs",
     "test:missing-part": "node --test scripts/test-missing-part.mjs",
+    "test:tags": "node --test scripts/test-space-tags.mjs",
     "test:social": "node --test scripts/test-social.mjs",
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
     "test:agents": "node scripts/test-agent-connector.mjs",

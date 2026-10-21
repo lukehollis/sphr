@@ -101,6 +101,29 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .scene-details dl > div { display: flex; justify-content: space-between; gap: var(--space-2); }
 .scene-details dt { color: var(--text-muted); }
 .scene-details dd { margin: 0; text-align: right; }
+/* Tags: the list under the tags button, and the card a tag opens beside the view (under the header, so its lists open over the card). */
+.tags-menu { position: relative; display: flex; pointer-events: auto; }
+.viewer-button.tags-button { width: auto; min-width: 44px; padding: 0 12px; gap: 6px; }
+.tags-panel { position: absolute; top: calc(100% + 4px); right: 0; width: 300px; max-width: calc(100vw - 2 * var(--space-3)); max-height: calc(100dvh - 160px); overflow: auto; overscroll-behavior: contain; padding: 4px 0 8px; background: rgba(0, 0, 0, .96); color: var(--text-heading); }
+.tags-panel ul { margin: 0; padding: 0; list-style: none; }
+.tags-panel li button, .tags-shown { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 16px; border: 0; background: none; color: inherit; font-size: var(--size-caption); line-height: 1.35; text-align: left; cursor: pointer; }
+.tags-panel li button:hover, .tags-shown:hover { background: rgba(255, 255, 255, .08); }
+.tags-shown { margin-bottom: 4px; border-bottom: 1px solid var(--hairline); }
+.tags-shown[aria-checked="true"] .guide-switch { background: var(--accent); border-color: var(--accent); }
+.tag-card-dot { flex: none; width: 14px; height: 14px; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
+.tag-card { position: absolute; z-index: 21; top: 88px; right: var(--space-3); width: 360px; max-width: calc(100% - 2 * var(--space-3)); max-height: calc(100% - 172px); overflow: auto; overscroll-behavior: contain; padding-bottom: 4px; background: rgba(0, 0, 0, .94); color: var(--text-heading); outline: none; }
+.tag-card-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: flex-start; gap: 10px; padding: 14px 6px 12px 16px; background: rgba(0, 0, 0, .94); }
+.tag-card-head .tag-card-dot { margin-top: 4px; }
+.tag-card-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
+.tag-card-close { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin-top: -7px; padding: 0; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.tag-card-close:hover { background: rgba(255, 255, 255, .08); color: var(--text-heading); }
+.tag-card-image { display: block; width: 100%; max-height: 280px; object-fit: contain; background: #000000; }
+.tag-card-video { position: relative; aspect-ratio: 16 / 9; background: #000000; }
+.tag-card-video iframe, .tag-card-video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.tag-card-text { padding: 14px 16px 2px; font-size: var(--size-body); line-height: var(--leading-body); }
+.tag-card-text p { margin: 0 0 12px; overflow-wrap: anywhere; }
+.tag-card-text a, .tag-card-link { color: var(--text-heading); }
+.tag-card-link { display: inline-flex; align-items: center; gap: 6px; margin: 6px 16px 12px; font-size: var(--size-caption); }
 /* The player's name before a shared tour or hunt, for its class results: over the loading screen and the space. */
 .player-name { position: absolute; inset: 0; z-index: 45; display: grid; place-items: center; padding: var(--space-3); background: rgba(0, 0, 0, .55); }
 .player-name-panel { display: grid; gap: var(--space-2); width: min(360px, 100%); padding: var(--space-4); background: var(--surface-page); color: var(--text-body); }
@@ -195,6 +218,11 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .has-guided-tour .viewer-corner { display: none; }
   .navigation-status { top: calc(72px + env(safe-area-inset-top)); left: var(--space-2); max-width: calc(100% - 32px); }
   .view-load-indicator { top: calc(120px + env(safe-area-inset-top)); }
+  /* On a phone the list hangs under the whole header, and a tag's card is a sheet over the bottom half. */
+  .tags-panel { position: fixed; top: calc(68px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); width: auto; max-width: none; }
+  .tags-panel li button, .tags-shown { font-size: 16px; }
+  .tag-card { top: auto; left: var(--space-2); right: var(--space-2); bottom: calc(var(--space-2) + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 55dvh; }
+  .tag-card-text { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   button, a { transition: none; }

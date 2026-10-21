@@ -375,6 +375,25 @@ try {
   const renamedPath = (await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.scene.path;
   assert.equal(location(await alice.get(scenePath)), renamedPath, 'the old link leads its owner to the current one');
 
+  // ---- Owners keep their own tags, which stand in for the ones the capture came with ----
+  const tagsRoute = `/api/admin/scenes/${reserved}/tags`;
+  const putTags = (who, tags, revision) => who.request(tagsRoute, { method: 'PUT', json: { tags, revision } });
+  const doorTag = { id: 'tag-door', title: ' Front door ', description: 'Built 1902.\r\nSee https://example.org/door.', position: { x: 1, y: 1.4, z: -2 },
+    normal: { x: 0, y: 0, z: 2 }, color: '#E03C31', media: { type: 'image', url: 'https://example.org/door.jpg' }, extra: 'dropped' };
+  assert.equal((await putTags(bob, [doorTag], 0)).status, 401, "only the space's owner edits its tags");
+  assert.equal((await putTags(alice, [{ ...doorTag, title: ' ' }], 0)).status, 400, 'every tag has a title');
+  assert.equal((await putTags(alice, [{ ...doorTag, media: { type: 'link', url: 'http://example.org/' } }], 0)).status, 400, 'media is on https');
+  assert.equal((await putTags(alice, [doorTag, doorTag], 0)).status, 400, 'IDs do not repeat');
+  response = await putTags(alice, [doorTag], 0);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, revision: 1, tags: [{ id: 'tag-door', title: 'Front door', description: 'Built 1902.\nSee https://example.org/door.',
+    position: { x: 1, y: 1.4, z: -2 }, normal: { x: 0, y: 0, z: 1 }, color: '#e03c31', media: { type: 'image', url: 'https://example.org/door.jpg' } }] });
+  assert.equal((await putTags(alice, [], 0)).status, 409, 'a stale revision is refused');
+  assert.match(await (await alice.get(renamedPath)).text(), /Built 1902/, "the viewer is given the owner's tags");
+  response = await putTags(alice, null, 1);
+  assert.deepEqual(await response.json(), { ok: true, revision: 2, tags: null }, "restoring goes back to the capture's own tags");
+  assert.doesNotMatch(await (await alice.get(renamedPath)).text(), /Built 1902/);
+
   // ---- The result screen asks for payment to publish: a preview stays private until hosting starts ----
   const patchSpace = json => alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json });
   response = await patchSpace({ public: true });
@@ -1253,7 +1272,7 @@ try {
   assert.match(about('Plan changed', 'Account', 'grace@example.com')[1].fields.To, /^Pay as you go, \$1\.00 a month per space$/);
 
   console.log('Passed: operator notifications for sign-ups, spaces, submissions, processing and billing changes.');
-  console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities and plans, plan changes and full plans, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing, the worker API, and the agent runner with credential isolation.');
+  console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities and plans, plan changes and full plans, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing (titles and tags), the worker API, and the agent runner with credential isolation.');
 } catch (error) {
   console.error(appLog.split('\n').slice(-60).join('\n'));
   throw error;

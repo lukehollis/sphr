@@ -387,6 +387,40 @@ gone: once the space is ready and at each stop it posts
 counted across the tour's spaces), and `continue: <url>` when the visitor takes
 the onward link. Scavenger hunts post `spacery:hunt` instead.
 
+## Tags
+
+Tags pin a title, a plain-text description and a photo, video or link to a spot
+in a space, the way Mattertags do. They are a space's, not a tour's: every tour
+and hunt on the space shows them. `space.space_data.tags` holds the ones a
+capture came with (a Matterport link imports its Mattertags, see
+`docs/matterport-web-archives.md`); an owner's edits are kept by the app (table
+`space_tags`, saved with `PUT /api/admin/scenes/<sceneId>/tags`, the whole list
+with the revision, or `null` to go back to the capture's) and replace them.
+`lib/space-tags.ts` checks both:
+
+```json
+{ "id": "tag-door", "title": "Front door", "description": "Built 1902. See https://example.org/door.",
+  "position": { "x": 1, "y": 1.4, "z": -2 }, "normal": { "x": 0, "y": 0, "z": 1 },
+  "color": "#e03c31", "media": { "type": "image", "url": "https://example.org/door.jpg" } }
+```
+
+`position` is the point on the surface in the viewer's world frame and `normal`
+the way the tag's 30 cm stem leaves it; `media` is an https address (YouTube and
+Vimeo videos play in the card, video files too, other video sites open as a link)
+or the capture's own file. A space with no surface to stand on (360 photos without
+a model) places a tag 3 m out from a panorama and gives it that panorama's
+`nodeId`: it shows from there only.
+
+`TagLayer` draws each tag as a disc that keeps its size on screen, after the
+capture's depth occluder, so walls hide tags behind them. Until a capture mesh
+left for after the first view arrives, only the tags within 4 m of the visitor
+show. Hovering a disc shows its title; clicking opens its card (`TagCard`), and the
+header's tags button lists them all: choosing one goes to the panorama nearest it
+with nothing in the way and turns to it, and its switch hides tags in the space.
+`?tags=0` (or Matterport's `?mt=0`) opens a space with tags hidden, for embeds.
+Owners place, move and edit tags in the space editor's Tags tab: Add a tag, then
+click a wall, floor or object.
+
 ## VR headsets
 
 Where the browser can show immersive VR (Quest Browser, Pico, Vision Pro, a

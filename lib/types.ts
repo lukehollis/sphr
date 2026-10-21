@@ -1,4 +1,5 @@
 import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopEarth, StopFind, StopLook, StopSky } from "@/lib/experience/types";
+import type { SpaceTag } from "@/lib/space-tags";
 
 export type Vector3Like = {
   x: number;
@@ -283,6 +284,8 @@ export type SpaceData = {
   reconstruction?: string | ReconstructionConfig;
   /** Smaller copies of the panorama faces and capture models, made offline, for a quick first view and for phones. */
   light?: LightCopies;
+  /** Tags on the space's surfaces, like Mattertags (see lib/space-tags.ts). */
+  tags?: SpaceTag[];
 };
 
 /**
@@ -490,6 +493,9 @@ export type XrPanel = {
 
 export type ObjectTransform = { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] };
 
+/** Where a click put a tag: a surface and the way it faces, or a direction from a panorama with nothing to stand on. */
+export type TagSpot = Pick<SpaceTag, "position" | "normal" | "nodeId">;
+
 export type RuntimeCallbacks = {
   onState?: (state: RuntimeState) => void;
   onLoading?: (loading: LoadingState) => void;
@@ -506,4 +512,11 @@ export type RuntimeCallbacks = {
   onXrAction?: (id: string) => void;
   /** The browser gave a lost WebGL context back, and the space drew again. */
   onContextRestored?: (details: string) => void;
+  /** A tag was clicked (null: a click elsewhere let the open one go). */
+  onTagSelect?: (id: string | null) => void;
+  /**
+   * Editor: where the click after startTagPlacement put a tag. Null: it found nothing to stand on, or (`loading`) the
+   * capture mesh it needs is still on its way.
+   */
+  onTagPlace?: (spot: TagSpot | null, loading?: boolean) => void;
 };

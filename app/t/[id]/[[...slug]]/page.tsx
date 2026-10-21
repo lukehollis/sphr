@@ -8,6 +8,7 @@ import { readSceneEdits } from "@/lib/server/admin-store";
 import { sameTeam } from "@/lib/server/accounts-store";
 import { currentUser, loginPath } from "@/lib/server/accounts";
 import { readSpaceInfo } from "@/lib/server/space-info";
+import { readSpaceTags } from "@/lib/server/space-tags";
 import { tourThumbnail } from "@/lib/server/tour-thumbnails";
 import { hasHeart, heartCount, profileCard } from "@/lib/server/profiles";
 import { siteBrand, viewerHost } from "@/lib/server/brand";
@@ -52,7 +53,7 @@ export default async function TourPage({ params }: Props) {
   // Players (not the owner trying it out) give their name for the owner's class results, unless the owner turned that off.
   const play = !(user && sameTeam(user.id, tour.userId)) && askingNames(tour.id) ? { tourId: tour.id, kind: tour.kind } : undefined;
   return <SphrApp key={tour.id} configUrl={scene.bootstrapUrl} play={play}
-    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction, light }}
+    edits={{ title: tour.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, experience: tour.experience ?? emptyExperience(tour.kind), standalone: true, variants, reconstruction, light, tags: readSpaceTags(scene.sceneId).tags }}
     preview={{ title: tour.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} build={await buildOnPath(scene.sceneId)} info={readSpaceInfo(scene.sceneId).info}
     social={{ creator: profileCard(tour.userId), heart: { tourId: tour.id, count: heartCount(tour.id), hearted: hasHeart(user?.id, tour.id), signedIn: Boolean(user), loginPath: loginPath(tourPath(tour)) } }} />;
 }

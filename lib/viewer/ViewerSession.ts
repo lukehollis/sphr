@@ -1,5 +1,6 @@
 import { normalizeTour } from '@/lib/bootstrap';
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, XrPanel } from '@/lib/types';
+import type { SpaceTag } from '@/lib/space-tags';
 import { SphrRuntime, type EntryView, type ExperienceUpdate, type GizmoMode, type PixelAnchor } from '@/lib/three/SphrRuntime';
 import { contextBack, GraphicsUnavailable, openContext } from '@/lib/three/glContext';
 import { assertNativeBootstrap } from './native';
@@ -117,9 +118,12 @@ export class ViewerSession {
         onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform),
         onContextLost: details => this.callbacks.onContextLost?.(details),
         onXrAction: id => this.callbacks.onXrAction?.(id),
-        onContextRestored: details => this.callbacks.onContextRestored?.(details)
+        onContextRestored: details => this.callbacks.onContextRestored?.(details),
+        onTagSelect: id => this.callbacks.onTagSelect?.(id),
+        onTagPlace: (spot, loading) => this.callbacks.onTagPlace?.(spot, loading)
       });
       if (this.editing) stage.three.setEditing(true);
+      if (!this.tagsShown) stage.three.setTagsShown(false);
       stage.three.setViewInset(this.viewInset);
       await stage.three.init(pointIndex, view);
       if (this.disposed) return;
@@ -273,6 +277,14 @@ export class ViewerSession {
   requestHint() { this.active?.three?.requestHint(); }
   /** How much of the bottom of the screen the tour's text covers, in pixels. */
   setViewInset(bottom: number) { this.viewInset = bottom; this.active?.three?.setViewInset(bottom); }
+  private tagsShown = true;
+  /** Whether the visitor sees tags, in this space and the next ones of the tour. */
+  setTagsShown(shown: boolean) { this.tagsShown = shown; this.active?.three?.setTagsShown(shown); }
+  focusTag(id: string) { this.active?.three?.focusTag(id); }
+  selectTag(id: string | null) { this.active?.three?.selectTag(id); }
+  setTags(tags: SpaceTag[]) { this.active?.three?.setTags(tags); }
+  startTagPlacement() { this.active?.three?.startTagPlacement(); }
+  cancelTagPlacement() { this.active?.three?.cancelTagPlacement(); }
   restartHunt() { this.active?.three?.restartHunt(); }
   goToStop(index: number) { return this.goTo(0, index); }
 

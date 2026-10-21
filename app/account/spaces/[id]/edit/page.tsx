@@ -7,6 +7,7 @@ import { accountNav } from "@/lib/account-nav";
 import { describeAccount } from "@/lib/server/customer-spaces";
 import { siteBrand } from "@/lib/server/brand";
 import { readSpaceInfo } from "@/lib/server/space-info";
+import { readSpaceTags } from "@/lib/server/space-tags";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Edit space", robots: { index: false, follow: false } };
@@ -21,6 +22,7 @@ export default async function EditCustomerSpacePage({ params }: { params: Promis
   if (!owned || !scene) notFound();
   const edits = readSceneEdits().get(scene.sceneId) ?? { title: null, startView: null, revision: 0, thumbnailVersion: null };
   const { info, revision } = readSpaceInfo(scene.sceneId);
-  return <SpaceEditor scene={scene} edits={edits} info={info} infoRevision={revision} back={{ href: `/account/spaces/${id}`, label: scene.title }}
+  const saved = readSpaceTags(scene.sceneId);
+  return <SpaceEditor scene={scene} edits={edits} info={info} infoRevision={revision} tags={saved.tags} tagsRevision={saved.revision} back={{ href: `/account/spaces/${id}`, label: scene.title }}
     tourHref={`/account/spaces/${id}/tour`} header={{ brand: siteBrand(), nav: accountNav(describeAccount(owned.user), "space"), account: owned.user.email, signOut: "account" }} />;
 }

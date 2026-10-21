@@ -8,12 +8,14 @@ import type { NavItem } from './site/Chrome';
 import type { SceneListing } from '@/lib/scene-types';
 import type { SceneEdits, StartView } from '@/lib/scene-edits';
 import { spaceInfoLimits, type SpaceInfo } from '@/lib/space-info';
+import type { SpaceTag } from '@/lib/space-tags';
 import type { RuntimeState } from '@/lib/types';
 import type { ViewerSession } from '@/lib/viewer/ViewerSession';
+import { TagsPanel, useTagEditing } from './TagEditor';
 
 type Capture = { view: StartView; thumbnail: string };
 type Header = { brand: string; home?: string; nav: NavItem[]; account?: string; signOut?: 'account' | 'admin' };
-type Tab = 'view' | 'details';
+type Tab = 'view' | 'details' | 'tags';
 const fields = { description: '', location: '', capturedBy: '', capturedOn: '', contact: '', website: '', credits: '' };
 type Fields = typeof fields;
 const fieldsOf = (info: SpaceInfo): Fields => ({ description: info.description ?? '', location: info.location ?? '', capturedBy: info.capturedBy ?? '',
@@ -21,11 +23,13 @@ const fieldsOf = (info: SpaceInfo): Fields => ({ description: info.description ?
 
 /**
  * The page for editing a space: the space itself in a smaller viewer, with tabs for its
- * start view and thumbnail, and for its title and details (where it is, who captured it,
- * whom to contact).
+ * start view and thumbnail, for its title and details (where it is, who captured it,
+ * whom to contact), and for its tags.
  */
-export default function SpaceEditor({ scene: initialScene, edits: initialEdits, info: initialInfo, infoRevision, header,
+export default function SpaceEditor({ scene: initialScene, edits: initialEdits, info: initialInfo, infoRevision, tags: initialTags = null, tagsRevision = 0, header,
   back = { href: '/admin', label: 'Spaces' }, tourHref }: { scene: SceneListing; edits: SceneEdits; info: SpaceInfo; infoRevision: number;
+  /** The owner's saved tags, or null while the space shows the ones its capture came with. */
+  tags?: SpaceTag[] | null; tagsRevision?: number;
   header: Header; back?: { href: string; label: string }; tourHref?: string }) {
   const session = useRef<ViewerSession | null>(null);
   const preview = useRef<HTMLElement | null>(null);
@@ -44,13 +48,16 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits, 
   const [message, setMessage] = useState('');
   const [reload, setReload] = useState(0);
   // Saving must not restart the viewer or discard the camera being edited.
-  const [viewerEdits, setViewerEdits] = useState(() => ({ title: initialScene.title, startView: initialEdits.startView }));
+  const [viewerEdits, setViewerEdits] = useState(() => ({ title: initialScene.title, startView: initialEdits.startView, tags: initialTags }));
+  const tagEditing = useTagEditing({ session, sceneId: initialScene.sceneId, initial: { tags: initialTags, revision: tagsRevision }, ready,
+    showTags: () => setTab('tags'), feedback: { setBusy, setError, setMessage } });
+  const tagEvents = tagEditing.events;
   const editor = useMemo(() => ({ onReady: (runtime: ViewerSession | null, reason: string | null) => {
     session.current = runtime; setReady(Boolean(runtime)); setIssue(reason);
-  }, onState: setState }), []);
+  }, onState: setState, ...tagEvents }), [tagEvents]);
   const detailsDirty = title !== scene.title
     || (Object.keys(fields) as (keyof Fields)[]).some(key => form[key] !== fieldsOf(saved.info)[key]);
-  const dirty = Boolean(capture) || detailsDirty;
+  const dirty = Boolean(capture) || detailsDirty || tagEditing.dirty;
   useEffect(() => { if (capture) preview.current?.scrollIntoView({ block: 'nearest' }); }, [capture]);
   useEffect(() => {
     if (!dirty) return;
@@ -59,7 +66,10 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits, 
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
-  function show(next: Tab) { setTab(next); setError(''); setMessage(''); }
+  function show(next: Tab) {
+    if (next !== 'tags' && tagEditing.placing) tagEditing.stopPlacing();
+    setTab(next); setError(''); setMessage('');
+  }
 
   function chooseView() {
     setError(''); setMessage('');
@@ -84,7 +94,7 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits, 
     try {
       const result = await putEdit({ title: scene.title, revision: edits.revision, ...(reset ? { capture: null } : capture ? { capture } : {}) });
       setCapture(undefined);
-      if (reset) { setViewerEdits({ title: result.scene.title, startView: null }); setReload(value => value + 1); }
+      if (reset) { setViewerEdits({ title: result.scene.title, startView: null, tags: tagEditing.saved.tags }); setReload(value => value + 1); }
       setMessage(reset ? 'Original start view and thumbnail restored.' : 'Start view saved.');
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
@@ -130,6 +140,7 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits, 
           <div className="site-segmented space-edit-tabs" role="tablist" aria-label="Edit">
             <button role="tab" id="tab-view" aria-controls="panel-view" aria-selected={tab === 'view'} aria-pressed={tab === 'view'} onClick={() => show('view')}>Start view</button>
             <button role="tab" id="tab-details" aria-controls="panel-details" aria-selected={tab === 'details'} aria-pressed={tab === 'details'} onClick={() => show('details')}>Details</button>
+            <button role="tab" id="tab-tags" aria-controls="panel-tags" aria-selected={tab === 'tags'} aria-pressed={tab === 'tags'} onClick={() => show('tags')}>Tags</button>
           </div>
 
           {tab === 'view' && <div className="space-edit-tab" role="tabpanel" id="panel-view" aria-labelledby="tab-view">
@@ -173,6 +184,10 @@ export default function SpaceEditor({ scene: initialScene, edits: initialEdits, 
                 placeholder="Who else to thank, and any license" onChange={set('credits')} /></div>
             <div className="space-edit-actions"><button type="submit" className="site-button" disabled={busy || !detailsDirty || !title.trim()}>{busy ? 'Saving…' : 'Save details'}</button></div>
           </form>}
+
+          {tab === 'tags' && <div className="space-edit-tab" role="tabpanel" id="panel-tags" aria-labelledby="tab-tags">
+            <TagsPanel editing={tagEditing} busy={busy} viewerReady={ready && Boolean(state?.loading.ready)} session={session} />
+          </div>}
 
           <div className="site-feedback" aria-live="polite">
             {message && <p className="site-note" role="status">{message}</p>}

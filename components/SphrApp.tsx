@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
 import { ViewerSession, type ViewerEntry } from "@/lib/viewer/ViewerSession";
@@ -15,8 +15,10 @@ import TourOverlay, { TourFinale } from "@/components/TourOverlay";
 import PlayerName from "@/components/PlayerName";
 import { savedPlay, sendProgress, startPlay } from "@/lib/play-report";
 import type { ViewerHost } from "@/lib/host-link";
-import { applySceneEdits, editorBootstrap, startViewEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
+import { applySceneEdits, editorBootstrap, openingSpace, startViewEditingIssue, tagEditingIssue, tourEditorBootstrap, type ViewerEdits } from '@/lib/scene-edits';
 import { vrAvailable, xrPanelFor } from "@/lib/xr-panel";
+import { readableTags, type SpaceTag } from "@/lib/space-tags";
+import TagCard from "@/components/TagCard";
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -53,6 +55,11 @@ type Props = { configUrl?: string; preview?: { title: string; image: string; add
     mode?: "start" | "tour";
     onObjectSelect?: (id: string | null) => void;
     onObjectTransform?: RuntimeCallbacks["onObjectTransform"];
+    /** Tags: the ones the capture came with, and why they can't be edited here (an embedded Matterport viewer). */
+    onTags?: (imported: SpaceTag[], issue: string | null) => void;
+    /** A tag was clicked in the space; editors choose it rather than open its card. */
+    onTagSelect?: RuntimeCallbacks["onTagSelect"];
+    onTagPlace?: RuntimeCallbacks["onTagPlace"];
   };
   /** The tour builder shows visitor controls only while previewing. */
   chrome?: boolean;
@@ -120,6 +127,9 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>(initialRuntimeState);
   const [started, setStarted] = useState(false);
+  // The tag whose card is open, and whether tags show at all (an embed can hide them with ?tags=0, or Matterport's ?mt=0).
+  const [openTag, setOpenTag] = useState<string | null>(null);
+  const [tagsShown, setTagsShown] = useState(true);
   // A frame for a thumbnail (?frame): the view alone, without controls or the tour's text.
   const [frame, setFrame] = useState(false);
   useEffect(() => { setFrame(new URLSearchParams(window.location.search).has("frame")); }, []);
@@ -158,6 +168,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
         const data = tourEditor ? tourEditorBootstrap(edited) : editor ? editorBootstrap(edited) : edited;
         if (cancelled) return;
         setBootstrap(data);
+        setOpenTag(null);
+        editor?.onTags?.(readableTags(openingSpace(source).space_data.tags), tagEditingIssue(edited));
 
         if (!viewportRef.current) return;
         const runtime = new ViewerSession(viewportRef.current, data, {
@@ -170,9 +182,15 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
           onXrAction: (id) => xrAction.current(id),
           // Recovered, so not an error: kept with the analytics to show how often it happens.
-          onContextRestored: (details) => track("graphics_restored", { details })
+          onContextRestored: (details) => track("graphics_restored", { details }),
+          onTagSelect: editor ? editor.onTagSelect : (id) => { setOpenTag(id); if (id) track("tag_open", { from: "space" }); },
+          onTagPlace: editor?.onTagPlace
         });
         runtimeRef.current = runtime;
+        const query = new URLSearchParams(window.location.search);
+        const hideTags = !editor && (query.get("tags") === "0" || query.get("mt") === "0");
+        setTagsShown(!hideTags);
+        if (hideTags) runtime.setTagsShown(false);
         if (process.env.NODE_ENV !== "production") {
           (window as Window & { __SPHR_RUNTIME__?: ViewerSession }).__SPHR_RUNTIME__ = runtime;
         }
@@ -225,6 +243,11 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
   const activePoint = tour?.spaces[runtimeState.activeSpaceIndex]?.tourpoints[runtimeState.activePointIndex] ?? null;
   const activeSpace = tour?.spaces[runtimeState.activeSpaceIndex] ?? null;
   const viewerSpace = bootstrap?.orderedSpaces?.find(space => String(space.id) === String(activeSpace?.id)) ?? bootstrap?.space;
+  const tags = useMemo(() => readableTags(viewerSpace?.space_data.tags), [viewerSpace]);
+  const tagCard = openTag ? tags.find(tag => tag.id === openTag) : undefined;
+  const closeTag = useCallback(() => { setOpenTag(null); runtimeRef.current?.selectTag(null); }, []);
+  // Another space of the tour has its own tags.
+  useEffect(() => { setOpenTag(null); }, [runtimeState.activeSpaceIndex]);
   const hasAudio = Object.values(tour?.audio ?? {}).some((audio) => Boolean(audio.url?.trim())) || Boolean(tour?.effects.some((effect) => effect.type === "sound" || effect.type === "music"));
   const details = useMemo((): SpaceDetails | undefined => {
     const space = bootstrap?.space;
@@ -247,25 +270,25 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     runtimeState.activeSpaceIndex === (tour?.spaces.length ?? 1) - 1 &&
     runtimeState.activePointIndex === ((activeSpace?.tourpoints.length ?? 1) - 1);
 
-  // On phones the tour's text spans the bottom of the screen; the picture centres what a stop
-  // looks at in the part above it instead of behind the text.
+  // On phones the tour's text, and an open tag's card, span the bottom of the screen; the picture
+  // centres what a stop or a tag looks at in the part above it instead of behind them.
   const rootRef = useRef<HTMLElement | null>(null);
   const showingCopy = Boolean(started && tour?.hasGuidedTour && runtimeState.guided && activePoint);
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
     const measure = () => {
-      const covering = showingCopy ? [...root.querySelectorAll<HTMLElement>(".tour-copy, .tour-nav")].map((element) => element.getBoundingClientRect()).filter((rect) => rect.height > 0) : [];
+      const covering = [...root.querySelectorAll<HTMLElement>(showingCopy ? ".tour-copy, .tour-nav, .tag-card" : ".tag-card")].map((element) => element.getBoundingClientRect()).filter((rect) => rect.height > 0);
       const spans = covering.some((rect) => rect.width >= window.innerWidth * 0.8);
       const top = Math.min(...covering.map((rect) => rect.top));
       runtimeRef.current?.setViewInset(spans && Number.isFinite(top) ? Math.max(0, window.innerHeight - top) : 0);
     };
     measure();
     const observer = new ResizeObserver(measure);
-    for (const element of root.querySelectorAll(".tour-overlay, .tour-copy, .tour-nav")) observer.observe(element);
+    for (const element of root.querySelectorAll(".tour-overlay, .tour-copy, .tour-nav, .tag-card")) observer.observe(element);
     window.addEventListener("resize", measure);
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
-  }, [showingCopy, activePoint, runtimeState.hunt?.hint, runtimeState.hunt?.found.length]);
+  }, [showingCopy, activePoint, runtimeState.hunt?.hint, runtimeState.hunt?.found.length, tagCard, tagsShown]);
 
   // A page that shows this hunt in a frame (a school library keeping players' progress, say) hears
   // each find and the finish: the found objects' ids, the number of finds and whether it's finished.
@@ -448,7 +471,19 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             onToggleReconstruction={() => runtimeRef.current?.toggleReconstruction()}
             onSelectReconstructionVariant={(id) => runtimeRef.current?.selectReconstructionVariant(id)}
             onEnterVr={vr && runtimeState.loading.ready ? enterVr : undefined}
+            tags={tags.length && !inVr ? {
+              list: tags,
+              shown: tagsShown,
+              onShown: (shown) => { setTagsShown(shown); runtimeRef.current?.setTagsShown(shown); if (!shown) setOpenTag(null); },
+              onOpen: (id) => {
+                if (!tagsShown) { setTagsShown(true); runtimeRef.current?.setTagsShown(true); }
+                setOpenTag(id);
+                runtimeRef.current?.focusTag(id);
+                track("tag_open", { from: "list" });
+              }
+            } : undefined}
           />
+          {tagCard && tagsShown && !inVr && <TagCard tag={tagCard} onClose={closeTag} />}
           {tour?.hasGuidedTour && <TourOverlay
             point={activePoint}
             description={bootstrap?.tour?.description}

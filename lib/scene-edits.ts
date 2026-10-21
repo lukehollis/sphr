@@ -1,12 +1,16 @@
 import type { CameraRotation, LightCopies, SphrBootstrap, SphrSpace, Vector3Like } from './types';
 import type { SceneListing } from './scene-types';
 import type { Experience } from './experience/types';
+import type { SpaceTag } from './space-tags';
 import { applyExperience } from '@/lib/experience/apply';
 
 export type StartView = { nodeId?: string; position: Vector3Like; rotation: CameraRotation; fov: number };
 export type SceneEdits = { title: string | null; startView: StartView | null; revision: number; thumbnailVersion: string | null };
-/** What the viewer applies on top of a published capture; `standalone` marks a customer's own tour of the space. */
-export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean; variants?: string | null; reconstruction?: string | null; light?: LightCopies | null };
+/**
+ * What the viewer applies on top of a published capture; `standalone` marks a customer's own tour of the space, and
+ * `tags` are the owner's tags, which replace the capture's own (null keeps those).
+ */
+export type ViewerEdits = Pick<SceneEdits, 'title' | 'startView'> & { experience?: Experience | null; standalone?: boolean; variants?: string | null; reconstruction?: string | null; light?: LightCopies | null; tags?: SpaceTag[] | null };
 
 export function sceneTitleSlug(title: string) {
   return title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -41,6 +45,14 @@ export function startViewEditingIssue(bootstrap: SphrBootstrap) {
   }
   const point = (bootstrap.tour?.tour_data?.spaces ?? bootstrap.tour?.tour_data?.tourmodels)?.[0]?.tourpoints[0];
   if (point?.targetType === 'MODEL') return 'This tour opens on a 3D object. Its opening camera is authored in the tour configuration.';
+  return null;
+}
+
+export function tagEditingIssue(bootstrap: SphrBootstrap) {
+  const space = openingSpace(bootstrap);
+  if (space.type === 'matterport' || space.src?.includes('my.matterport.com')) {
+    return 'This space still uses an embedded Matterport viewer. Import its capture, or paste its link on your spaces page, to add tags here.';
+  }
   return null;
 }
 
@@ -80,6 +92,8 @@ export function applySceneEdits(input: SphrBootstrap, edits: ViewerEdits): SphrB
   if (edits.light && !edited.space.space_data.light) {
     edited.space.space_data = { ...edited.space.space_data, light: edits.light };
   }
+  // The owner's tags stand in for the ones the capture came with.
+  if (edits.tags) edited.space.space_data = { ...edited.space.space_data, tags: edits.tags };
   return edits.experience ? applyExperience(edited, edits.experience, { standalone: edits.standalone }) : edited;
 }
 

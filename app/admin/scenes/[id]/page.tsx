@@ -5,6 +5,7 @@ import { accessControlled, readSceneEdits } from '@/lib/server/admin-store';
 import { isAdmin } from '@/lib/server/auth';
 import { siteBrand } from '@/lib/server/brand';
 import { readSpaceInfo } from '@/lib/server/space-info';
+import { readSpaceTags } from '@/lib/server/space-tags';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Edit space', robots: { index: false, follow: false } };
@@ -17,6 +18,7 @@ export default async function EditSpacePage({ params }: { params: Promise<{ id: 
   if (!scene) notFound();
   const edits = readSceneEdits().get(id) ?? { title: null, startView: null, revision: 0, thumbnailVersion: null };
   const { info, revision } = readSpaceInfo(id);
-  return <SpaceEditor scene={scene} edits={edits} info={info} infoRevision={revision}
+  const saved = readSpaceTags(id);
+  return <SpaceEditor scene={scene} edits={edits} info={info} infoRevision={revision} tags={saved.tags} tagsRevision={saved.revision}
     header={{ brand: siteBrand(), home: '/', nav: [{ href: '/', label: 'Collection' }, { href: '/admin', label: 'Manage', current: true }, { href: '/admin/analytics', label: 'Analytics' }], signOut: 'admin' }} />;
 }

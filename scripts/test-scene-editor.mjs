@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { registerHooks } from 'node:module';
 import sharp from 'sharp';
+import * as THREE from 'three';
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier.startsWith('@/')) {
@@ -83,6 +84,35 @@ test('single free-camera scenes gain an explore start without inventing a guided
   assert.equal(tour.hasGuidedTour, false);
   assert.equal(tour.spaces[0].tourpoints[0].fov, 97);
   assert.deepEqual(tour.spaces[0].tourpoints[0].position, view.position);
+});
+
+test("an owner's tags stand in for the capture's own, in the opening space of a tour too", () => {
+  const imported = [{ id: 'mp-1', title: 'From Matterport', position: { x: 0, y: 1, z: 0 }, source: 'matterport' }];
+  const owner = [{ id: 'tag-own', title: 'Mine', position: { x: 1, y: 1, z: 0 } }];
+  const source = structuredClone(input); source.space.space_data.tags = imported;
+  assert.deepEqual(applySceneEdits(source, { title: null, startView: null, tags: null }).space.space_data.tags, imported, "no saved tags keeps the capture's");
+  assert.deepEqual(applySceneEdits(source, { title: null, startView: null, tags: owner }).space.space_data.tags, owner);
+  assert.deepEqual(applySceneEdits(source, { title: null, startView: null, tags: [] }).space.space_data.tags, [], 'deleting every tag is kept too');
+  assert.deepEqual(source.space.space_data.tags, imported, 'the source is left alone');
+  const chain = { ...structuredClone(source), orderedSpaces: [structuredClone(source.space), { id: 'later', title: 'Later', space_data: { tags: imported } }] };
+  const chained = applySceneEdits(chain, { title: null, startView: null, tags: owner });
+  assert.deepEqual(chained.orderedSpaces[0].space_data.tags, owner, 'the opening space gets them');
+  assert.deepEqual(chained.orderedSpaces[1].space_data.tags, imported, 'later spaces keep their own');
+});
+
+test('a tag is shown from the nearest panorama with nothing in the way', () => {
+  const runtime = Object.create(SphrRuntime.prototype);
+  runtime.bootstrap = input;
+  runtime.nav = { getWorldPosition: node => new THREE.Vector3(node.position.x, node.position.y, node.position.z) };
+  const tag = new THREE.Vector3(0, 1.5, 1.5);
+  runtime.sceneGraph = { getRaycastObjects: () => [] };
+  assert.equal(runtime.nodeSeeing(tag).uuid, 'first', 'the nearest, when nothing stands between');
+  // A wall piece between the first panorama and the tag, clear of the line from the second.
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(1, 3), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  wall.position.set(0, 1.5, 0.75);
+  wall.updateMatrixWorld(true);
+  runtime.sceneGraph = { getRaycastObjects: () => [wall] };
+  assert.equal(runtime.nodeSeeing(tag).uuid, 'second');
 });
 
 test('thumbnail decoder rejects spoofed/truncated/oversize images and produces a real JPEG', async () => {

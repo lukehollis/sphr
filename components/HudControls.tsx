@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Footprints, Heart, Menu, Volume2, VolumeX, X } from "lucide-react";
+import { Box, Footprints, Heart, Menu, Tag, Volume2, VolumeX, X } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
 import { contactHref, formatCapturedOn } from "@/lib/space-info";
+import { defaultTagColor, type SpaceTag } from "@/lib/space-tags";
 import type { ProfileCard } from "@/lib/server/profiles";
 import { pixelFont } from "@/app/design-system/fonts";
 import { hostHref, trackBuildClick, trackHostClick, type ViewerHost } from "@/lib/host-link";
@@ -30,6 +31,9 @@ export type SpaceDetails = {
 /** A tour's hearts, and whether the visitor has given one. */
 export type TourHeart = { tourId: string; count: number; hearted: boolean; signedIn: boolean; loginPath: string };
 
+/** The space's tags, listed to open from the controls, with a switch to hide them in the space. */
+export type TagsControl = { list: SpaceTag[]; shown: boolean; onShown: (shown: boolean) => void; onOpen: (id: string) => void };
+
 type Props = {
   title?: string;
   details?: SpaceDetails;
@@ -47,6 +51,7 @@ type Props = {
   onSelectReconstructionVariant?: (id: string) => void;
   /** Offered where the browser can show the space in a VR headset. */
   onEnterVr?: () => void;
+  tags?: TagsControl;
 };
 
 export default function HudControls({
@@ -64,7 +69,8 @@ export default function HudControls({
   onToggleGuide,
   onToggleReconstruction,
   onSelectReconstructionVariant,
-  onEnterVr
+  onEnterVr,
+  tags
 }: Props) {
   const reconstruction = state.reconstruction?.available && onToggleReconstruction ? state.reconstruction : null;
   return (
@@ -76,8 +82,9 @@ export default function HudControls({
       </div>}
       <header className="viewer-header">
         <SceneHeading title={title} details={details} />
-        {(hasGuidedTour || hasAudio || heart || reconstruction || onEnterVr) && <div className="hud-right" aria-label="Viewer settings">
+        {(hasGuidedTour || hasAudio || heart || reconstruction || onEnterVr || tags) && <div className="hud-right" aria-label="Viewer settings">
           {heart && <HeartButton heart={heart} />}
+          {tags && <TagsMenu tags={tags} />}
           {/* Guided tours set it per stop; the visitor can still compare the site then and now. */}
           {reconstruction && <ControlButton label={reconstruction.visible ? "Show the capture" : "Show the reconstruction"} active={reconstruction.visible} onClick={onToggleReconstruction!}>
             <TempleIcon />
@@ -194,6 +201,44 @@ function SceneHeading({ title, details }: { title?: string; details?: SpaceDetai
           {links.map(([label, text, href]) => <div key={label}><dt>{label}</dt><dd><a href={href} target="_blank" rel="noopener nofollow">{text}</a></dd></div>)}
         </dl>}
         {details.credits && <p className="scene-credits">{details.credits}</p>}
+      </div>}
+    </div>
+  );
+}
+
+/** The tags button: a list of the space's tags to open, and a switch that hides them in the space. */
+function TagsMenu({ tags }: { tags: TagsControl }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerdown", outside); window.removeEventListener("keydown", escape); };
+  }, [open]);
+  const count = tags.list.length;
+  return (
+    <div className="tags-menu" ref={root}>
+      <button className={open ? "viewer-button tags-button active" : "viewer-button tags-button"} type="button" aria-expanded={open} aria-controls="tags-panel"
+        aria-label={`Tags, ${count}`} title={open ? "Hide the list of tags" : "Tags in this space"} onClick={() => setOpen(value => !value)}>
+        <Tag size={20} aria-hidden="true" />
+        <span aria-hidden="true">{count}</span>
+      </button>
+      {open && <div className="tags-panel" id="tags-panel">
+        <button className="tags-shown" type="button" role="switch" aria-checked={tags.shown} onClick={() => tags.onShown(!tags.shown)}>
+          <span className="guide-switch" aria-hidden="true" />
+          <span>Show tags in the space</span>
+        </button>
+        <ul aria-label="Tags">
+          {tags.list.map(tag => <li key={tag.id}>
+            <button type="button" onClick={() => { setOpen(false); tags.onOpen(tag.id); }}>
+              <span className="tag-card-dot" style={{ background: tag.color ?? defaultTagColor }} aria-hidden="true" />
+              <span>{tag.title}</span>
+            </button>
+          </li>)}
+        </ul>
       </div>}
     </div>
   );

@@ -12,9 +12,11 @@ import type {
   SceneGraphNode,
   SphrBootstrap,
   SplatConfig,
+  TagSpot,
   TourPoint,
   XrPanel
 } from "@/lib/types";
+import { readableTags, type SpaceTag } from "@/lib/space-tags";
 import { TextureCache } from "@/lib/three/TextureCache";
 import { prefersLight } from "@/lib/three/light";
 import { ktx2Loader } from "@/lib/three/ktx2";
@@ -26,6 +28,7 @@ import { NavigationLayer } from "@/lib/three/layers/NavigationLayer";
 import { SceneGraphLayer } from "@/lib/three/layers/SceneGraphLayer";
 import { ObjectLayer } from "@/lib/three/layers/ObjectLayer";
 import { EffectsLayer } from "@/lib/three/layers/EffectsLayer";
+import { TagLayer } from "@/lib/three/layers/TagLayer";
 import { ExperienceAudio } from "@/lib/experience/audio";
 import { answersCue } from "@/lib/experience/registry";
 import { SkyboxLayer } from "@/lib/three/layers/SkyboxLayer";
@@ -203,6 +206,15 @@ export class SphrRuntime {
   private readonly huntFound = new Set<string>();
   private hintShown = false;
   private hoverObjectId: string | null = null;
+  private tags: TagLayer | null = null;
+  private hoverTagId: string | null = null;
+  private selectedTag: string | null = null;
+  /** Editor: the next click places a tag instead of moving. */
+  private placingTag = false;
+  /** The visitor's choice to see tags, which may come before the space has loaded them. */
+  private tagsShown = true;
+  /** A frame for a thumbnail shows the view alone, without rings or tags. */
+  private navigationHidden = false;
   private lastSurfaceHover = 0;
   private tooltip: HTMLDivElement | null = null;
   private spaceBounds: THREE.Box3 | null = null;
@@ -387,9 +399,14 @@ export class SphrRuntime {
     ]);
     if (this.disposed) { this.sceneGraph.dispose(); return; }
     this.annotations.init();
+    this.tags = new TagLayer(this.scene);
+    this.tags.setTags(readableTags(this.bootstrap.space.space_data.tags));
+    this.tags.setShown(this.tagsShown);
+    this.updateOccluding();
     this.nav?.setOccluders(this.sceneGraph.getRaycastObjects());
-    // Until the capture mesh can hide them behind walls, placed objects wait out of sight.
+    // Until the capture mesh can hide them behind walls, placed objects and tags wait out of sight.
     if (this.sceneGraph.complete === false && this.objects) this.objects.root.visible = false;
+    if (this.sceneGraph.complete === false) this.tags.setReady(false);
 
     // A link's spot stands in for the stop at that location while the camera settles there.
     this.entryPoint = entryNode ? initialPoint : undefined;
@@ -429,6 +446,7 @@ export class SphrRuntime {
     if (this.disposed || this.sceneGraph !== graph) return;
     this.nav?.setOccluders(graph.getRaycastObjects());
     if (this.objects) this.objects.root.visible = true;
+    this.tags?.setReady(true);
     this.emitState();
   }
 
@@ -941,6 +959,8 @@ export class SphrRuntime {
     this.cursor?.dispose();
     this.sceneGraph?.dispose();
     this.annotations?.dispose();
+    this.tags?.dispose();
+    this.tags = null;
     this.gizmo?.detach();
     if (this.gizmo) this.scene.remove(this.gizmo.getHelper());
     this.gizmo?.dispose();
@@ -1087,6 +1107,7 @@ export class SphrRuntime {
     this.canvas.addEventListener("pointermove", this.handlePointerMove);
     this.canvas.addEventListener("pointerup", this.handlePointerUp);
     this.canvas.addEventListener("pointercancel", this.handlePointerCancel);
+    this.canvas.addEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.addEventListener("dblclick", this.handleDoubleClick);
     this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
     window.addEventListener("keydown", this.handleKeyDown);
@@ -1101,6 +1122,7 @@ export class SphrRuntime {
     this.canvas.removeEventListener("pointermove", this.handlePointerMove);
     this.canvas.removeEventListener("pointerup", this.handlePointerUp);
     this.canvas.removeEventListener("pointercancel", this.handlePointerCancel);
+    this.canvas.removeEventListener("pointerleave", this.handlePointerLeave);
     this.canvas.removeEventListener("dblclick", this.handleDoubleClick);
     this.canvas.removeEventListener("wheel", this.handleWheel);
     window.removeEventListener("keydown", this.handleKeyDown);
@@ -1178,6 +1200,8 @@ export class SphrRuntime {
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    if (this.placingTag) { this.canvas.style.cursor = "crosshair"; this.cursor?.hide(); this.nav?.setHovered(null); return; }
+    if (this.hoverTag(event)) return;
     if (this.hoverExperience(event)) return;
     const hoveredNode = this.nav?.getIntersectedNode(this.raycaster) ?? null;
     this.nav?.setHovered(hoveredNode && hoveredNode.uuid !== this.currentNode?.uuid ? hoveredNode.uuid : null);
@@ -1200,6 +1224,14 @@ export class SphrRuntime {
     this.pointerMoved = true;
   };
 
+  /** The pointer left the space for the controls over it: the label of whatever it was over goes. */
+  private handlePointerLeave = () => {
+    if (this.tooltip) this.tooltip.dataset.visible = "false";
+    this.hoverObjectId = null;
+    this.hoverTagId = null;
+    this.tags?.setHovered(null);
+  };
+
   private handlePointerUp = (event: PointerEvent) => {
     if (event.pointerId !== this.activePointerId) return;
     this.activePointerId = null;
@@ -1207,24 +1239,21 @@ export class SphrRuntime {
     const dx = event.clientX - this.pointerDown.x;
     const dy = event.clientY - this.pointerDown.y;
     if (this.pointerMoved || Math.hypot(dx, dy) > 5 || this.isNavigating || event.button !== 0) return;
-    // A single click in dollhouse must not consume the first half of a double click.
-    if (this.state.viewMode === "ORBIT") {
-      if (this.objects) {
-        const rect = this.canvas.getBoundingClientRect();
-        this.raycaster.setFromCamera(new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1), this.camera);
-        const picked = this.pickObject();
-        if (picked && this.editing) this.selectObject(picked);
-        else if (picked) this.handleObjectClick(picked);
-      }
-      return;
-    }
-
     const rect = this.canvas.getBoundingClientRect();
     const pointer = new THREE.Vector2(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(pointer, this.camera);
+    if (this.placingTag) { this.placeTag(pointer); return; }
+    if (this.clickTag()) return;
+    // A single click in dollhouse must not consume the first half of a double click.
+    if (this.state.viewMode === "ORBIT") {
+      const picked = this.objects ? this.pickObject() : null;
+      if (picked && this.editing) this.selectObject(picked);
+      else if (picked) this.handleObjectClick(picked);
+      return;
+    }
     this.clickInView(pointer);
   };
 
@@ -1547,9 +1576,10 @@ export class SphrRuntime {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Hides the location rings, for a clean frame of the view (a tour's thumbnail). */
+  /** Hides the location rings and tags, for a clean frame of the view (a tour's thumbnail). */
   setNavigationHidden(hidden: boolean) {
     if (this.nav) this.nav.group.visible = !hidden;
+    this.navigationHidden = hidden;
   }
 
   captureStartView(): { view: StartView; thumbnail: string } {
@@ -1569,7 +1599,7 @@ export class SphrRuntime {
     output.width = 960; output.height = 640;
     const context = output.getContext('2d');
     if (!context) throw new Error('Unable to create the thumbnail.');
-    const hidden = [this.nav?.group, this.scene.getObjectByName('annotations'), this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
+    const hidden = [this.nav?.group, this.scene.getObjectByName('annotations'), this.tags?.group, this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
     const visibility = hidden.map(object => object.visible);
     try {
       hidden.forEach(object => { object.visible = false; });
@@ -1587,11 +1617,12 @@ export class SphrRuntime {
     }
   }
 
-  private async navigateToNode(node: NodeData) {
+  /** @param facing a point to turn toward on arrival (a tag), instead of keeping the heading or a tour stop's view */
+  private async navigateToNode(node: NodeData, facing?: THREE.Vector3) {
     if (this.isNavigating) return;
     const fromOverview = this.state.viewMode === "ORBIT";
     // Hunt steps keep their clue while visitors walk around looking.
-    const tourPoint = this.tour.kind === "hunt" && this.state.guided ? null : this.findTourPointForNode(node.uuid);
+    const tourPoint = facing || (this.tour.kind === "hunt" && this.state.guided) ? null : this.findTourPointForNode(node.uuid);
     if (tourPoint) {
       await this.goTo(tourPoint.spaceIndex, tourPoint.pointIndex, false, !fromOverview, fromOverview);
       return;
@@ -1623,10 +1654,10 @@ export class SphrRuntime {
     this.nav?.setOrbit(false);
     this.nav?.setActive(node.uuid);
     const pose = this.poseForNode(node, "FPV");
-    if (!fromOverview) {
-      pose.target.copy(pose.position).addScaledVector(direction, 0.1);
-      pose.fov = this.camera.fov;
-    }
+    const toward = facing ? facing.clone().sub(pose.position) : null;
+    if (toward && toward.lengthSq() > 1e-6) pose.target.copy(pose.position).addScaledVector(toward.normalize(), 0.1);
+    else if (!fromOverview) pose.target.copy(pose.position).addScaledVector(direction, 0.1);
+    if (!fromOverview) pose.fov = this.camera.fov;
     if (fromOverview) this.flyFromOverview(pose);
     else {
       const reconstruction = this.reconFlight("FPV", "FPV");
@@ -1635,6 +1666,162 @@ export class SphrRuntime {
     }
     this.emitState();
     this.prefetchNeighbors(node);
+  }
+
+  // ---- Tags ----
+
+  /** Pointer over a tag: its title beside the pointer, and a pointing cursor. */
+  private hoverTag(event: PointerEvent) {
+    const id = this.pickTag();
+    if (id !== this.hoverTagId) {
+      this.hoverTagId = id;
+      this.tags?.setHovered(id);
+      // Placed objects share the label; an object's shows again once the pointer leaves the tag.
+      this.hoverObjectId = null;
+      this.showTooltip(id ? this.tags?.get(id)?.title ?? "" : "", event);
+    } else if (id) this.moveTooltip(event);
+    if (!id) return false;
+    this.canvas.style.cursor = "pointer";
+    this.cursor?.hide();
+    this.nav?.setHovered(null);
+    return true;
+  }
+
+  /** The tag under the pointer ray, unless a wall in front of it hides it. */
+  private pickTag() {
+    const picked = this.tags?.pick(this.raycaster);
+    if (!picked) return null;
+    if (!picked.overView) {
+      const wall = this.raycaster.intersectObjects(this.surfaceTargets(), true)[0];
+      if (wall && wall.distance < picked.distance - 0.15) return null;
+    }
+    return picked.id;
+  }
+
+  /** A click on a tag opens it; a click anywhere else lets the open one go. */
+  private clickTag() {
+    const id = this.pickTag();
+    if (id) {
+      this.selectTag(id);
+      this.callbacks.onTagSelect?.(id);
+      return true;
+    }
+    if (this.selectedTag) {
+      this.selectTag(null);
+      this.callbacks.onTagSelect?.(null);
+    }
+    return false;
+  }
+
+  /** Editor: the next click in the space places a tag, and onTagPlace says where. */
+  startTagPlacement() {
+    this.placingTag = true;
+    this.canvas.style.cursor = "crosshair";
+    this.cursor?.hide();
+    // Tags stand on the capture mesh: one left for after the first view comes now.
+    void this.captureLoaded();
+  }
+
+  cancelTagPlacement() {
+    this.placingTag = false;
+    this.canvas.style.cursor = "";
+  }
+
+  /** Editor: a click while placing. A miss keeps placing, so the next click can try again. */
+  private placeTag(pointer: THREE.Vector2) {
+    if (this.sceneGraph?.complete === false) { this.callbacks.onTagPlace?.(null, true); return; }
+    const spot = this.tagSpot(pointer);
+    if (spot) this.cancelTagPlacement();
+    this.callbacks.onTagPlace?.(spot, false);
+  }
+
+  /** Where the raycaster's ray meets the capture for a tag: a surface and the way it faces the viewer. */
+  private tagSpot(pointer: THREE.Vector2): TagSpot | null {
+    const round = (vector: THREE.Vector3) => ({ x: Number(vector.x.toFixed(4)), y: Number(vector.y.toFixed(4)), z: Number(vector.z.toFixed(4)) });
+    const direction = this.raycaster.ray.direction;
+    const surfaces = this.sceneGraph?.getRaycastObjects() ?? [];
+    const hit = this.raycaster.intersectObjects(surfaces, true).find((item) => item.distance > 0.15);
+    if (hit) {
+      const normal = hit.face ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize() : direction.clone().negate();
+      if (normal.dot(direction) > 0) normal.negate();
+      return { position: round(hit.point), normal: round(normal) };
+    }
+    const splat = this.splatSurface(pointer);
+    if (splat) return { position: round(splat.point), normal: round(splat.normal) };
+    // A panorama with no surface to stand on: the tag hangs 3 m out where the click looked, seen from here only.
+    if (!surfaces.length && !this.splats && this.panorama && this.currentNode && this.state.viewMode === "FPV") {
+      return { position: round(this.camera.position.clone().addScaledVector(direction, 3)), nodeId: this.currentNode.uuid };
+    }
+    return null;
+  }
+
+  /** Highlight a tag (its card is open), or none. */
+  selectTag(id: string | null) {
+    this.selectedTag = id && this.tags?.get(id) ? id : null;
+    this.tags?.setSelected(this.selectedTag);
+  }
+
+  /** Editor: show the tags as edited, without reloading the space. */
+  setTags(tags: SpaceTag[]) {
+    this.tags?.setTags(tags);
+    this.selectTag(this.selectedTag);
+    if (this.hoverTagId && !this.tags?.get(this.hoverTagId)) this.hoverTagId = null;
+    this.updateOccluding();
+  }
+
+  /** The visitor's choice to see the tags or not. */
+  setTagsShown(shown: boolean) {
+    this.tagsShown = shown;
+    this.tags?.setShown(shown);
+    if (!shown) this.selectTag(null);
+  }
+
+  /**
+   * Bring a tag into view: from the panorama nearest it that sees it, turned toward it. Without
+   * panoramas, the dollhouse orbits to it and first person stands back from it, facing it.
+   */
+  focusTag(id: string) {
+    const tag = this.tags?.get(id);
+    const head = this.tags?.head(id);
+    if (!tag || !head || this.isNavigating) return;
+    this.selectTag(id);
+    // The view is about to move under a pointer that may rest on another tag.
+    this.hoverTagId = null;
+    this.tags?.setHovered(null);
+    if (this.tooltip) this.tooltip.dataset.visible = "false";
+    if (this.nav && !this.bootstrap.space.space_data.noPanos) {
+      const node = tag.nodeId ? this.resolveNode(tag.nodeId) : this.nodeSeeing(head);
+      if (!node) return;
+      if (node.uuid !== this.currentNode?.uuid || this.state.viewMode === "ORBIT") { void this.navigateToNode(node, head); return; }
+      const direction = head.clone().sub(this.camera.position);
+      if (direction.lengthSq() > 1e-6) this.flyTo({ position: this.camera.position.clone(), target: this.camera.position.clone().addScaledVector(direction.normalize(), 0.1), fov: this.camera.fov });
+      return;
+    }
+    if (this.state.viewMode === "ORBIT") {
+      const offset = this.camera.position.clone().sub(this.controls.target);
+      this.flyTo({ position: head.clone().add(offset), target: head, fov: this.camera.fov });
+      return;
+    }
+    const back = tag.normal ? new THREE.Vector3(tag.normal.x, tag.normal.y, tag.normal.z) : this.camera.position.clone().sub(head).normalize();
+    this.flyTo({ position: head.clone().addScaledVector(back, 2), target: head, fov: this.camera.fov });
+  }
+
+  /** The panorama that sees a point best: the nearest with nothing in the way, else the nearest. */
+  private nodeSeeing(point: THREE.Vector3) {
+    const nodes = this.getNodes().map((node) => ({ node, position: this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position) }))
+      .sort((a, b) => a.position.distanceToSquared(point) - b.position.distanceToSquared(point));
+    const walls = this.sceneGraph?.getRaycastObjects() ?? [];
+    const ray = new THREE.Raycaster();
+    for (const { node, position } of nodes.slice(0, 8)) {
+      if (!walls.length) return node;
+      const direction = point.clone().sub(position);
+      const distance = direction.length();
+      ray.set(position, direction.normalize());
+      ray.near = 0.15;
+      ray.far = Math.max(0.15, distance - 0.2);
+      if (!ray.intersectObjects(walls, true).length) return node;
+    }
+    return nodes[0]?.node ?? null;
   }
 
   // ---- Placed objects, effects, scavenger hunts and editing ----
@@ -1656,7 +1843,12 @@ export class SphrRuntime {
     });
     const objects = this.objects.setObjects(this.tour.objects, objectsAfter);
     await Promise.all([objectsAfter ? null : objects, this.effects.setEffects(this.tour.effects)]);
-    this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0);
+    this.updateOccluding();
+  }
+
+  /** In first person the hidden capture mesh writes depth while there are objects, effects or tags for walls to hide. */
+  private updateOccluding() {
+    this.sceneGraph?.setOccluding(this.tour.objects.length > 0 || this.tour.effects.length > 0 || (this.tags?.count ?? 0) > 0);
   }
 
   /** Effect audio is created on first use, following the viewer's mute state. */
@@ -1897,7 +2089,7 @@ export class SphrRuntime {
     this.prepareEarth(this.currentNode);
     await Promise.all([this.objects?.setObjects(update.objects), this.effects?.setEffects(update.effects)]);
     if (this.disposed) return;
-    this.sceneGraph?.setOccluding(update.objects.length > 0 || update.effects.length > 0);
+    this.updateOccluding();
     if (this.selectedObject && !update.objects.some((object) => object.id === this.selectedObject)) this.selectObject(null);
     // Edits rebuild objects; keep the gizmo on the selection without sending the editor back to it.
     else if (this.selectedObject) this.selectObject(this.selectedObject, true);
@@ -1953,7 +2145,7 @@ export class SphrRuntime {
     output.width = width; output.height = height;
     const context = output.getContext("2d");
     if (!context) throw new Error("Unable to capture the view.");
-    const hidden = [this.nav?.group, this.scene.getObjectByName("annotations"), this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
+    const hidden = [this.nav?.group, this.scene.getObjectByName("annotations"), this.tags?.group, this.gizmo?.getHelper()].filter(Boolean) as THREE.Object3D[];
     const visibility = hidden.map((object) => object.visible);
     try {
       hidden.forEach((object) => { object.visible = false; });
@@ -2183,6 +2375,8 @@ export class SphrRuntime {
       // A headset's eye is about as many pixels tall as this, at the viewer's field of view.
       this.nav?.update(this.camera, immersive ? 1200 : this.canvas.clientHeight);
       this.objects?.update(elapsed, now / 1000);
+      this.tags?.update(this.camera, this.canvas.clientHeight, { node: this.currentNode?.uuid ?? null, orbit: this.state.viewMode === "ORBIT",
+        hidden: immersive || this.navigationHidden });
       this.effects?.update(now / 1000, elapsed);
       this.looks?.update(elapsed);
       this.splats?.update();

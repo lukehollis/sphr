@@ -52,7 +52,7 @@
 /* ---- Space edit page ---- */
 .space-edit .site-title h1 { font-size: 34px; }
 .space-edit-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--space-4); align-items: start; margin-top: var(--space-3); }
-.space-edit-viewer { position: relative; aspect-ratio: 16 / 10; min-height: 320px; overflow: hidden; background: #111111; outline: 1px solid var(--site-line); }
+.space-edit-viewer { position: relative; width: 100%; aspect-ratio: 16 / 10; min-height: 320px; overflow: hidden; background: #111111; outline: 1px solid var(--site-line); }
 .space-edit-viewer .sphr-root { position: absolute; inset: 0; }
 .space-edit-viewer .editor-zoom { bottom: 16px; right: 16px; }
 .space-edit-panel { min-width: 0; }
@@ -66,6 +66,24 @@
 .space-edit-actions .site-button { width: 100%; }
 .space-edit-reset { justify-self: start; }
 .space-edit .site-feedback { margin-top: var(--space-2); }
+/* The Tags tab: the space's tags, then the chosen one's fields. */
+.tag-edit-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; background: var(--site-line); border: 1px solid var(--site-line); }
+.tag-edit-list button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; background: var(--paper); color: var(--text-heading); font: inherit; font-size: var(--size-caption); text-align: left; cursor: pointer; }
+.tag-edit-list button:hover { background: var(--site-hover, var(--paper-tint)); }
+.tag-edit-list button[aria-pressed="true"] { background: var(--paper-tint); box-shadow: inset 3px 0 0 var(--text-heading); }
+.tag-edit-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-edit-source { flex: none; color: var(--site-muted); font-size: 12px; }
+.tag-edit-fields { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: var(--space-2); border: 1px solid var(--site-line); }
+.tag-edit-legend { max-width: 100%; padding: 0 6px; overflow: hidden; color: var(--text-heading); font-size: var(--size-caption); font-weight: var(--weight-bold); text-overflow: ellipsis; white-space: nowrap; }
+.tag-edit-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.tag-edit-swatch, .tag-edit-custom { width: 32px; height: 32px; padding: 0; border: 2px solid #ffffff; border-radius: 50%; box-shadow: 0 0 0 1px var(--site-line); cursor: pointer; }
+.tag-edit-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text-heading); }
+.tag-edit-custom { position: relative; overflow: hidden; background: conic-gradient(#e03c31, #f7c948, #2e9d62, #0098db, #8b5cf6, #e03c31); }
+.tag-edit-custom:focus-within { outline: var(--focus-ring); outline-offset: 2px; }
+.tag-edit-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.tag-edit-preview .tag-card-image { max-height: 200px; }
+.tag-edit-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tag-edit-tools .site-button { min-height: 44px; padding: 8px 10px; gap: 6px; font-size: 13px; }
 
 /* ---- Viewer: hearts and who made a tour ---- */
 .heart-toggle { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border: 0; background: var(--surface-page); color: var(--text-heading);
