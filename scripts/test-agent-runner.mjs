@@ -12,15 +12,44 @@ import { fileURLToPath } from 'node:url';
 
 const runner = fileURLToPath(new URL('./worker/agent-runner.mjs', import.meta.url));
 
-/** One queued job with a five-byte upload; counts downloads and records every action and health check the runner posts. */
-async function fakeApp({ defer = true } = {}) {
+// A one-chunk DAM naming texture 000, as Matterport serves its dollhouse mesh.
+const field = (number, bytes) => Buffer.concat([Buffer.from([number * 8 + 2, bytes.length]), bytes]);
+const dam = field(1, Buffer.concat([field(1, Buffer.alloc(0)), field(4, Buffer.from('m_50k_000.jpg'))]));
+
+/** Matterport's model graph and CDN, served from the stand-in application's own address. `model` is 'ok', 'missing' or 'down'. */
+function fakeMatterport(origin, model, request, text, response) {
+  if (model === 'down') { response.writeHead(503); return response.end('busy'); }
+  const body = JSON.parse(text);
+  const cdn = `${origin}/cdn`;
+  const answer = body.operationName === 'GetMattertags' ? { data: { model: { id: 'MD4iVby1G8k', mattertags: [] } } }
+    : model === 'missing' ? { data: { root: null, model: null }, errors: [{ message: 'Not Found' }] }
+    : { data: { root: { id: 'MD4iVby1G8k', name: 'Pyramid' }, model: { id: 'MD4iVby1G8k', locations: [{ id: 'l1', index: 0, neighbors: [],
+      pano: { sweepUuid: 's1', skyboxes: [{ resolution: '2k', status: 'available', urlTemplate: `${cdn}/pan/2k/~/s1_skybox<face>.jpg?t=signed` }] } }],
+      assets: { meshes: [{ id: 'm', status: 'available', format: 'dam', resolution: '50k', url: `${cdn}/m_50k.dam?t=signed` }],
+        textures: [{ status: 'available', quality: 'high', resolution: '50k', urlTemplate: `${cdn}/~/tex/m_50k_<texture>.jpg?t=signed` }] } } } };
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.end(JSON.stringify(answer));
+}
+
+/**
+ * One queued job with a five-byte upload, or, with `matterport`, a space made from a Matterport link (served by the
+ * same stand-in); counts downloads and records every action and health check the runner posts.
+ */
+async function fakeApp({ defer = true, matterport } = {}) {
   const job = { id: '0123456789abcdef', status: 'queued', sceneId: 'abcdef123456', slug: 'customer-abc123def456', preview: false,
     space: { id: 'abc123def456', title: 'Test space', notes: null, output: 'auto', reprocessing: false },
-    uploads: [{ id: 'u1', name: 'capture.zip', size: 5, type: 'application/zip', source: { url: '/api/worker/uploads/u1' } }] };
+    uploads: matterport ? [] : [{ id: 'u1', name: 'capture.zip', size: 5, type: 'application/zip', source: { url: '/api/worker/uploads/u1' } }],
+    source: matterport ? { kind: 'matterport', modelId: 'MD4iVby1G8k', url: 'https://my.matterport.com/show/?m=MD4iVby1G8k' } : null };
   const app = { actions: [], downloads: 0, health: [] };
   const server = createServer(async (request, response) => {
     const send = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); };
     if (request.url.startsWith('/api/worker/uploads/')) { app.downloads++; response.writeHead(200); return response.end('hello'); }
+    if (request.url.startsWith('/cdn/')) { response.writeHead(200); return response.end(request.url.includes('.dam') ? dam : 'image'); }
+    if (request.url === '/api/mp/models/graph') {
+      let graph = '';
+      for await (const chunk of request) graph += chunk;
+      return fakeMatterport(app.origin, matterport, request, graph, response);
+    }
     if (request.method === 'GET') return send(200, { jobs: job.status === 'queued' ? [job] : [] });
     let text = '';
     for await (const chunk of request) text += chunk;
@@ -45,7 +74,8 @@ async function runOnce(command, options = {}) {
   try {
     const child = spawn(process.execPath, [runner, 'run', '--once'], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH,
       SPHR_WORKER_URL: app.origin, SPHR_WORKER_TOKEN: 'x'.repeat(40), SPHR_WORKER_NAME: 'test-worker', SPHR_WORKER_DIR: dir,
-      SPHR_AGENT_ISOLATION: 'container', SPHR_AGENT_COMMAND: JSON.stringify(command), SPHR_WORKER_DISK_RESERVE_GB: '0', ...options.env } });
+      SPHR_AGENT_ISOLATION: 'container', SPHR_AGENT_COMMAND: JSON.stringify(command), SPHR_WORKER_DISK_RESERVE_GB: '0',
+      SPHR_MATTERPORT_TEST_BASE: app.origin, ...options.env } });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
@@ -102,4 +132,26 @@ test('the worker tells the application whether it can start agents', async () =>
   const broken = await runOnce(['docker', 'run', '--rm', 'sphr-runner-test-no-such-image', 'true']);
   assert.equal(broken.health.length, 1, broken.output);
   assert.match(broken.health[0].problem, /the agent image sphr-runner-test-no-such-image is missing/);
+});
+
+test('a Matterport link is downloaded by the runner, and the agent finds the space in its input', async () => {
+  const look = 'test -f input/matterport-MD4iVby1G8k/link.json && grep -q \'"modelId": "MD4iVby1G8k"\' job.json'
+    + ' && printf \'{"status":"failed","message":"found %s files"}\' "$(find input/matterport-MD4iVby1G8k -type f | wc -l | tr -d " ")" > output/result.json';
+  const run = await runOnce(['sh', '-c', look], { matterport: 'ok' });
+  assert.deepEqual(actions(run), ['claim', 'fail'], run.output);
+  // Six faces, the mesh and its texture, the tags, index.html and link.json.
+  assert.equal(run.actions[1].message, 'found 11 files', run.output);
+  assert.equal(run.downloads, 0, 'no uploads to fetch');
+});
+
+test('a Matterport space that does not open is reported to the customer without starting the agent', async () => {
+  const run = await runOnce(['sh', '-c', 'echo started > output/progress.log'], { matterport: 'missing' });
+  assert.deepEqual(actions(run), ['claim', 'fail'], run.output);
+  assert.match(run.actions[1].message, /did not open\. It may be private, need a password, or no longer exist\. Make it public or unlisted on Matterport/);
+});
+
+test('a Matterport that cannot be reached gives the job back for later', async () => {
+  const run = await runOnce(['sh', '-c', 'exit 0'], { matterport: 'down' });
+  assert.deepEqual(actions(run), ['claim', 'defer'], run.output);
+  assert.match(run.actions[1].message, /Matterport answered 503/);
 });

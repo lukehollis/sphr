@@ -2,7 +2,8 @@
 // Processes hosted customer uploads with a coding agent (Claude Code, Codex, …).
 //
 // The runner, not the agent, holds the worker token and publishing credentials. It claims
-// a job, downloads the uploads, runs the agent with a scrubbed environment in the job's
+// a job, downloads the uploads (or, for a space made from a Matterport link, the space from
+// Matterport, since the agent has no network), runs the agent with a scrubbed environment in the job's
 // directory, validates the package the agent built, publishes it under the scene ID the
 // server reserved for this job, and reports the result. Uploaded files are untrusted:
 // the agent must run isolated from this runner's files, processes and cloud credentials,
@@ -23,6 +24,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { readJobFile } from './job-files.mjs';
+import { downloadMatterport, MatterportError } from './matterport-link.mjs';
 import { canAutoPromote, promote, storeProposal, writeMeta } from './skill-proposals.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -101,6 +103,20 @@ async function download(job) {
     files.push({ path: target, name: upload.name, size: upload.size, type: upload.type });
   }
   return files;
+}
+
+/**
+ * A space made from a Matterport link: the runner downloads it into input/matterport-<model>/, as the
+ * sphr-matterport-link skill expects, because the agent's sandbox has no network. Only Matterport is contacted.
+ */
+async function downloadLink(job, link) {
+  const folder = path.join(jobDir(job), 'input', `matterport-${link.modelId}`);
+  log(job, `downloading Matterport space ${link.modelId}`);
+  api(`/api/worker/jobs/${job.id}`, { action: 'progress', message: 'Downloading the Matterport space' }).catch(() => undefined);
+  const summary = await downloadMatterport(link.url, folder, { base: env('SPHR_MATTERPORT_TEST_BASE'), log: line => log(job, line),
+    maxBytes: Number(env('SPHR_MATTERPORT_MAX_GB') ?? 20) * 1e9 });
+  return { path: folder, name: `Matterport space "${summary.name}" (${summary.modelId})`, size: summary.bytes, type: 'matterport',
+    sweeps: summary.sweeps, tags: summary.tags };
 }
 
 function prompt(job) {
@@ -284,6 +300,8 @@ function runtimeFiles(folder, manifest) {
   const names = new Set(['bootstrap.json', 'preview.jpg']);
   if (manifest.mesh) names.add(`mesh/${manifest.slug}-50k.glb`);
   if (existsSync(path.join(folder, 'mesh/atlas.jpg'))) names.add('mesh/atlas.jpg');
+  // Photos of a Matterport space's tags, copied into the package by web_archive.py.
+  for (const item of manifest.tagMedia ?? []) names.add(item.path);
   for (const [node, group] of Object.entries(manifest.imageManifest?.groups ?? {})) {
     for (const face of group.sourceFaces ?? []) names.add(`faces/${node}/face${face.sphrFace}.jpg`);
   }
@@ -487,7 +505,8 @@ async function processJob(queued) {
   let job;
   try { job = (await api(`/api/worker/jobs/${queued.id}`, { action: 'claim', worker })).job; }
   catch (error) { if (error.status === 409) return 'skipped'; throw error; }
-  log(job, `claimed "${job.space.title}" (${job.uploads.length} files)`);
+  const link = job.source?.kind === 'matterport' ? job.source : undefined;
+  log(job, `claimed "${job.space.title}" (${link ? `Matterport link ${link.url}` : `${job.uploads.length} files`})`);
   // Checked before downloading anything: a worker that cannot start agents hands the job straight back.
   const problem = agentProblem();
   if (problem) {
@@ -495,18 +514,27 @@ async function processJob(queued) {
     return defer(job, `${worker} cannot start agents: ${problem}.`);
   }
   pause.times = 0;
-  const short = diskProblem(job.uploads.reduce((total, upload) => total + upload.size, 0));
+  const short = diskProblem(job.uploads.reduce((total, upload) => total + upload.size, 0) + (link ? 2e9 : 0));
   if (short) {
     coolDown(job);
     return defer(job, `${worker} is short of disk space: ${short}.`);
   }
   try {
     const files = await download(job);
+    if (link) files.push(await downloadLink(job, link));
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
       notes: job.space.notes, output: ['splat', 'tour'].includes(job.space.output) ? job.space.output : 'auto',
-      reprocessing: job.space.reprocessing, inputs: files }, null, 2) + '\n');
+      reprocessing: job.space.reprocessing, inputs: files,
+      ...(link ? { source: { kind: 'matterport', url: link.url, modelId: link.modelId, folder: `input/matterport-${link.modelId}` } } : {}) }, null, 2) + '\n');
     rmSync(path.join(jobDir(job), 'output/result.json'), { force: true });
   } catch (error) {
+    // A space Matterport will not open, or one larger than a space can hold, is the customer's to fix.
+    if (error instanceof MatterportError && error.kind !== 'network') {
+      const message = error.kind === 'missing' ? `${error.message} Make it public or unlisted on Matterport, then process it again.` : error.message;
+      await api(`/api/worker/jobs/${job.id}`, { action: 'fail', message });
+      log(job, `reported to the customer: ${error.message}`);
+      return 'failed';
+    }
     coolDown(job);
     return defer(job, error.message);
   }
@@ -536,7 +564,7 @@ if (command === 'run' && !['container', 'user', 'vm'].includes(isolation) && !re
 }
 if (command === 'list') {
   const { jobs } = await api('/api/worker/jobs?status=queued,running,held');
-  for (const job of jobs) console.log(`${job.id}  ${job.status.padEnd(8)} ${job.sceneId}  ${job.uploads.length} files  ${job.space.title}`);
+  for (const job of jobs) console.log(`${job.id}  ${job.status.padEnd(8)} ${job.sceneId}  ${job.source ? 'Matterport link' : `${job.uploads.length} files`}  ${job.space.title}`);
 } else if (command === 'run') {
   const once = rest.includes('--once');
   const active = new Set();
