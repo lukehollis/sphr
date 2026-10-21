@@ -2,8 +2,8 @@
 // Packages a scanned or photogrammetry mesh (OBJ, GLB/glTF, PLY, STL, USDZ, FBX…) as a model space
 // the visitor can orbit.
 //   node scripts/packages/build-model.mjs --input scan.obj --title "Title" [--up y|z] [--max-faces 1500000] [--lit]
-// Textured scans render unlit so their baked lighting shows as captured; --lit adds scene lights
-// for plain or vertex-colored meshes (the default for untextured models).
+// Textured scans render unlit so their baked lighting shows as captured; designed models (flat colours, or PBR
+// textures with normal and roughness maps) get scene lights. --lit forces lights on.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,7 +35,7 @@ try {
   const box = bounds(positions);
   const camera = orbitCamera(box, { elevation: Number(options.elevation ?? 25) });
   await pointPreview(positions, colors, box, path.join(id.folder, 'preview.jpg'), camera);
-  const lit = Boolean(options.lit) || !conversion.textured;
+  const lit = Boolean(options.lit) || (conversion.lighting ? conversion.lighting !== 'baked' : !conversion.textured);
   const bootstrap = {
     space: { id: id.sceneId, title: id.title, type: 'splat', space_data: { noPanos: true, initialPosition: camera.position, initialRotation: camera.rotation } },
     tour: { title: id.title, tour_data: { mode: 'explore',

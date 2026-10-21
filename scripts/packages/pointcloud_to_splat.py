@@ -41,7 +41,7 @@ def quaternion_matrix(w, x, y, z):
 def read_e57(path):
     import pye57
     e57 = pye57.E57(str(path))
-    points, colors, intensities = [], [], []
+    points, colors, intensities, stations = [], [], [], []
     for index in range(e57.scan_count):
         header = e57.get_header(index)
         fields = set(header.point_fields)
@@ -57,6 +57,7 @@ def read_e57(path):
         rotation = quaternion_matrix(*header.rotation) if header.rotation is not None else np.eye(3)
         translation = np.asarray(header.translation if header.translation is not None else [0, 0, 0])
         points.append(local[valid] @ rotation.T + translation)
+        stations.append(translation.astype(np.float64))
         if {'colorRed', 'colorGreen', 'colorBlue'} <= fields:
             colors.append(np.column_stack([data['colorRed'], data['colorGreen'], data['colorBlue']])[valid].astype(np.float64))
         if 'intensity' in fields:
@@ -65,7 +66,7 @@ def read_e57(path):
     if rgb is not None and rgb.max() > 255:
         rgb = rgb / 256.0
     intensity = np.concatenate(intensities) if len(intensities) == len(points) and intensities else None
-    return np.concatenate(points), rgb, intensity, 'z'
+    return np.concatenate(points), rgb, intensity, 'z', np.asarray(stations)
 
 
 def read_open3d(path):
@@ -133,7 +134,9 @@ def main():
     reader = READERS.get(args.input.suffix.lower())
     if not reader:
         parser.error(f'Unsupported point cloud format: {args.input.suffix}')
-    points, colors, intensity, up = reader(args.input)
+    # Terrestrial scanners (E57) also say where they stood: open spots with a clear view, for the opening view.
+    points, colors, intensity, up, *rest = reader(args.input)
+    stations = rest[0] if rest else np.zeros((0, 3))
     up = args.up or up
     source = len(points)
     finite = np.isfinite(points).all(axis=1)
@@ -144,9 +147,12 @@ def main():
         raise SystemExit('The file contains no points.')
     if up == 'z':
         points = np.column_stack([points[:, 0], points[:, 2], -points[:, 1]])
+        if len(stations):
+            stations = np.column_stack([stations[:, 0], stations[:, 2], -stations[:, 1]])
     offset = np.median(points, axis=0)
     offset[1] = np.percentile(points[:, 1], 2)  # floor level at y = 0
     points = points - offset
+    stations = stations - offset if len(stations) else stations
     if colors is None and intensity is not None and intensity.max() > 0:
         level = (intensity / np.percentile(intensity, 99)).clip(0, 1) * 235 + 20
         colors = np.column_stack([level, level, level])
@@ -160,7 +166,8 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     write_splat(args.output, points.astype(np.float32), colors, voxel * 0.7)
     print(json.dumps({'sourcePoints': int(source), 'points': int(len(points)), 'voxelMeters': round(float(voxel), 4), 'up': up,
-                      'offset': [round(float(value), 3) for value in offset], 'output': str(args.output)}))
+                      'offset': [round(float(value), 3) for value in offset], 'output': str(args.output),
+                      'stations': [[round(float(value), 3) for value in station] for station in stations]}))
 
 
 if __name__ == '__main__':

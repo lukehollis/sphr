@@ -162,13 +162,31 @@ export function startPoint(camera) {
     rotation: camera.rotation, ...(orbit ? { distance: camera.distance } : {}), zoom: 0, files: [], models: [], annotations: [], sounds: [] };
 }
 
-/** Renders colored points with a simple depth buffer, looking down -z from the orbit camera. */
-export async function pointPreview(positions, colors, box, out, camera = orbitCamera(box)) {
+/** The viewer's look direction for an azimuth/polar rotation in degrees (Euler YXZ applied to -z). */
+export function viewDirection({ azimuth = 0, polar = 0 }) {
+  const a = azimuth * Math.PI / 180, p = polar * Math.PI / 180;
+  return [-Math.sin(a) * Math.cos(p), Math.sin(p), -Math.cos(a) * Math.cos(p)];
+}
+
+/** The viewer's azimuth/polar in degrees for a look direction. */
+export function viewRotation([x, y, z]) {
+  const length = Math.hypot(x, y, z) || 1;
+  return { azimuth: Math.atan2(-x, -z) * 180 / Math.PI, polar: Math.asin(Math.max(-1, Math.min(1, y / length))) * 180 / Math.PI };
+}
+
+/**
+ * Renders colored points with a simple depth buffer, as the viewer's camera sees them. With `sizes` (each
+ * splat's largest extent, in scene units) every point is drawn at its size on screen, so a first-person view
+ * inside a splat reads like the splat instead of scattered specks.
+ */
+export async function pointPreview(positions, colors, box, out, camera = orbitCamera(box), sizes = null) {
   const { width, height } = previewSize;
   const pixels = graphPaper(width, height);
   const depths = new Float32Array(width * height).fill(Infinity);
-  const pitch = -camera.rotation.polar * Math.PI / 180;
-  const cos = Math.cos(pitch), sin = Math.sin(pitch);
+  const forward = viewDirection(camera.rotation);
+  const azimuth = (camera.rotation.azimuth ?? 0) * Math.PI / 180;
+  const right = [Math.cos(azimuth), 0, -Math.sin(azimuth)];
+  const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]];
   const focal = height / (2 * Math.tan(30 * Math.PI / 180));
   const count = positions.length / 3;
   const size = count > 400000 ? 1 : count > 100000 ? 2 : 3;
@@ -176,12 +194,14 @@ export async function pointPreview(positions, colors, box, out, camera = orbitCa
     const dx = positions[index * 3] - camera.position.x;
     const dy = positions[index * 3 + 1] - camera.position.y;
     const dz = positions[index * 3 + 2] - camera.position.z;
-    // Camera looks down by the pitch: forward (0, -sin, -cos), up (0, cos, -sin).
-    const cy = dy * cos - dz * sin, depth = -dy * sin - dz * cos;
+    const depth = dx * forward[0] + dy * forward[1] + dz * forward[2];
     if (depth <= 0.05) continue;
-    const u = Math.round(width / 2 + focal * dx / depth), v = Math.round(height / 2 - focal * cy / depth);
-    for (let oy = 0; oy < size; oy++) for (let ox = 0; ox < size; ox++) {
-      const px = u + ox, py = v + oy;
+    const cx = dx * right[0] + dz * right[2], cy = dx * up[0] + dy * up[1] + dz * up[2];
+    const u = Math.round(width / 2 + focal * cx / depth), v = Math.round(height / 2 - focal * cy / depth);
+    const side = sizes ? Math.max(1, Math.min(14, Math.round(1.5 * sizes[index] * focal / depth))) : size;
+    const offset = sizes ? Math.floor(side / 2) : 0;
+    for (let oy = 0; oy < side; oy++) for (let ox = 0; ox < side; ox++) {
+      const px = u + ox - offset, py = v + oy - offset;
       if (px < 0 || py < 0 || px >= width || py >= height) continue;
       const cell = py * width + px;
       if (depth >= depths[cell]) continue;
@@ -246,8 +266,23 @@ export function denseCore(positions, keepFraction = 0.6) {
   return kept.length >= 300 ? Float32Array.from(kept) : positions;
 }
 
+/**
+ * Where a splat's subject is. Trainers resolve what the cameras saw most into many small, opaque splats and
+ * leave floaters and the far background as large ones, so the smallest quarter outlines the subject.
+ * Point clouds converted to splats have one size for every point and fall back to the dense core.
+ */
+export function subjectCore(positions, extents) {
+  if (!extents?.length) return denseCore(positions);
+  const cut = Float32Array.from(extents).sort()[Math.floor(extents.length * 0.25)];
+  const kept = [];
+  for (let index = 0; index < extents.length; index++) {
+    if (extents[index] <= cut) kept.push(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+  }
+  return kept.length >= 300 ? denseCore(Float32Array.from(kept)) : denseCore(positions);
+}
+
 /** Euler angles (radians, XYZ order as the viewer applies them) of the shortest rotation taking `up` to +Y. */
-function eulerTurningToUp([ux, uy, uz]) {
+export function eulerTurningToUp([ux, uy, uz]) {
   let axis = [-uz, 0, ux]; // up × Y
   let angle = Math.acos(Math.max(-1, Math.min(1, uy)));
   const length = Math.hypot(...axis);

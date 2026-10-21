@@ -50,9 +50,11 @@ export function sampleSplats(file, limit = 400000) {
     const [x, y, z] = ['x', 'y', 'z'].map(property);
     if (!x || !y || !z) return undefined;
     const dc = ['f_dc_0', 'f_dc_1', 'f_dc_2'].map(property), rgb = ['red', 'green', 'blue'].map(property), opacity = property('opacity');
+    const scale = ['scale_0', 'scale_1', 'scale_2'].map(property);
     const step = Math.max(1, Math.floor(header.vertices / limit));
     const count = Math.ceil(header.vertices / step);
     const positions = new Float32Array(count * 3), colors = new Uint8Array(count * 3);
+    const extents = scale.every(Boolean) ? new Float32Array(count) : null;
     const handle = openSync(file, 'r');
     const row = Buffer.alloc(header.stride);
     let kept = 0;
@@ -63,19 +65,21 @@ export function sampleSplats(file, limit = 400000) {
         const value = item => view[readers[item.type]](item.offset, true);
         if (opacity && 1 / (1 + Math.exp(-value(opacity))) < 0.2) continue;
         positions.set([value(x), value(y), value(z)], kept * 3);
+        if (extents) extents[kept] = Math.exp(Math.max(value(scale[0]), value(scale[1]), value(scale[2])));
         const color = dc.every(Boolean) ? dc.map(item => Math.max(0, Math.min(255, (0.5 + 0.28209479 * value(item)) * 255)))
           : rgb.every(Boolean) ? rgb.map(item => value(item) * (item.type.includes('float') ? 255 : 1)) : [200, 200, 200];
         colors.set(color, kept * 3);
         kept++;
       }
     } finally { closeSync(handle); }
-    return { total: header.vertices, positions: positions.subarray(0, kept * 3), colors: colors.subarray(0, kept * 3), gaussian: header.gaussian };
+    return { total: header.vertices, positions: positions.subarray(0, kept * 3), colors: colors.subarray(0, kept * 3), gaussian: header.gaussian,
+      extents: extents ? extents.subarray(0, kept) : null };
   }
   if (lower.endsWith('.splat')) {
     const total = Math.floor(statSync(file).size / 32);
     const step = Math.max(1, Math.floor(total / limit));
     const count = Math.ceil(total / step);
-    const positions = new Float32Array(count * 3), colors = new Uint8Array(count * 3);
+    const positions = new Float32Array(count * 3), colors = new Uint8Array(count * 3), extents = new Float32Array(count);
     const handle = openSync(file, 'r');
     const row = Buffer.alloc(32);
     let kept = 0;
@@ -85,10 +89,11 @@ export function sampleSplats(file, limit = 400000) {
         if (row[27] < 50) continue;
         positions.set([row.readFloatLE(0), row.readFloatLE(4), row.readFloatLE(8)], kept * 3);
         colors.set([row[24], row[25], row[26]], kept * 3);
+        extents[kept] = Math.max(Math.abs(row.readFloatLE(12)), Math.abs(row.readFloatLE(16)), Math.abs(row.readFloatLE(20)));
         kept++;
       }
     } finally { closeSync(handle); }
-    return { total, positions: positions.subarray(0, kept * 3), colors: colors.subarray(0, kept * 3), gaussian: true };
+    return { total, positions: positions.subarray(0, kept * 3), colors: colors.subarray(0, kept * 3), gaussian: true, extents: extents.subarray(0, kept) };
   }
   return undefined;
 }

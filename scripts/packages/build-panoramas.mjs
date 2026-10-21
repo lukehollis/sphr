@@ -18,7 +18,7 @@ export function collectImages(inputs) {
 }
 
 /** Writes the package; returns which inputs became panoramas and which were skipped. */
-export async function buildPanoramas(images, id, { maxWidth = 8192, captions = false, kind = 'panoramas', tool = 'build-panoramas', inputs = images, spacing = 3 } = {}) {
+export async function buildPanoramas(images, id, { maxWidth = 8192, captions = false, kind = 'panoramas', tool = 'build-panoramas', inputs = images, spacing = 3, labels } = {}) {
   freshFolder(id.folder);
   mkdirSync(path.join(id.folder, 'pano'));
   const used = [], skipped = [];
@@ -34,7 +34,7 @@ export async function buildPanoramas(images, id, { maxWidth = 8192, captions = f
     // The viewer maps photos onto the inside of a sphere, which mirrors them; store them flipped.
     await sharp(image, { limitInputPixels: 30000 * 15000 }).rotate().flop().resize({ width: Math.min(width, maxWidth), withoutEnlargement: true })
       .jpeg({ quality: 82, progressive: true, mozjpeg: true }).toFile(path.join(id.folder, name));
-    used.push({ file: image, name, width, height, label: path.basename(image).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') });
+    used.push({ file: image, name, width, height, label: labels === 'stops' ? `Stop ${used.length + 1}` : path.basename(image).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') });
   }
   if (!used.length) return { used, skipped };
 

@@ -31,6 +31,6 @@ try {
   if (extract.status !== 0) fail('ffmpeg could not extract frames.');
   const images = readdirSync(frames).sort().map(name => path.join(frames, name));
   if (!images.length) fail('No frames were extracted; check --start and --end.');
-  const { used, skipped } = await buildPanoramas(images, id, { maxWidth: Number(options['max-width'] ?? 8192), kind: 'video360', tool: 'build-video360', inputs: [input] });
+  const { used, skipped } = await buildPanoramas(images, id, { maxWidth: Number(options['max-width'] ?? 8192), kind: 'video360', tool: 'build-video360', inputs: [input], labels: 'stops' });
   console.log(JSON.stringify({ folder: id.folder, preview: path.join(id.folder, 'preview.jpg'), frames: used.length, everySeconds: Number(every.toFixed(2)), video: info, skipped }, null, 2));
 } finally { rmSync(frames, { recursive: true, force: true }); }

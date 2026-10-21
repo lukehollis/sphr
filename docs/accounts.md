@@ -451,11 +451,17 @@ uploads (`scripts/packages/inspect-inputs.mjs`) and routes each kind of capture:
 | Capture | Skill | Result |
 |---|---|---|
 | Matterport or other E57 with registered panoramas | `sphr-matterport` | Calibrated panoramas, mesh and dollhouse |
-| Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG) | `sphr-splat-package` | Splat space opening in orbit (`build-splat.mjs`) |
-| 360 photos; 360 video | `sphr-panorama-package` | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`) |
-| Ordinary video or photo sets | `sphr-video` | COLMAP poses and a trained splat, or held for an operator without a GPU trainer |
-| Lidar point clouds (LAS/LAZ, E57 without images, PLY, PCD, XYZ) | `sphr-lidar-package` | Point-cloud splat (`build-pointcloud.mjs`) |
-| Scanned meshes (OBJ, GLB, PLY, STL, USDZ, FBX) | `sphr-lidar-package` | Orbitable model (`build-model.mjs`) |
+| Gaussian splat (PLY, SPZ, SPLAT, KSPLAT, SOG; old GaussianSplats3D `.splat` is converted) | `sphr-splat-package` | Splat space orbiting its subject (`build-splat.mjs`) |
+| 360 photos; 360 video; raw Insta360 `.insv`/`.insp` | `sphr-panorama-package`, or `sphr-video` for 3DGS | Guided panorama tour (`build-panoramas.mjs`, `build-video360.mjs`, `build-insta360.mjs`), or 3DGS from the frames cut into views (`pano_views.py`) |
+| Ordinary video or photo sets | `sphr-video` | COLMAP poses and a Brush-trained splat on GPU workers, opening from a capture camera (`build-splat.mjs --cameras`); held for an operator without a GPU |
+| Lidar point clouds (LAS/LAZ, E57 without images, PLY, PCD, XYZ) | `sphr-lidar-package` | Point-cloud splat; E57 interiors open where the scanner stood (`build-pointcloud.mjs`) |
+| Scanned meshes (OBJ, GLB, PLY, STL, USDZ, FBX) | `sphr-lidar-package` | Orbitable model, unlit for photo scans and lit for designed models; rigs frozen at their first frame (`build-model.mjs`) |
+
+Customers choose **3DGS** or **360 tour** in the upload sheet (or `output` through their agent); the space
+stores `splat`, `tour` or null for automatic, which builds a tour from an E57 scan and 3DGS from anything
+else. Splat training follows `sphr-train-3dgs` (adapted from the real2sim project): nerfstudio splatfacto
+with a bilateral grid, camera optimizer, scale regularization and antialiasing for automatic-exposure
+captures, Brush for locked exposure, judged on held-out photo-versus-render sheets.
 
 Every tool writes a `sphr-package-v1` package: `bootstrap.json`, `preview.jpg`, the runtime
 files, and `manifest.json` listing each file with its SHA-256. `validate-package.mjs` checks
@@ -548,6 +554,58 @@ Self-hosted installations that serve packages from their own `public/datasets` d
 can set `SPHR_WORKER_PUBLISH=local` (and optionally `SPHR_WORKER_LOCAL_DATASETS`) to
 install packages there instead of publishing to Cloud Storage. Restart `next start` so it
 serves the new files.
+
+### Isolating the agent on a Linux worker
+
+On Linux the agent's container shares the host's kernel and, on Docker's default network, can reach the
+host's own services, the LAN and the tailnet. A GPU worker such as siracusa therefore runs it on an internal
+network whose only exit is an allowlisting proxy (`scripts/worker/egress-proxy.mjs`):
+
+```sh
+docker network create --internal -o com.docker.network.bridge.inhibit_ipv4=true spacery-sandbox
+docker run -d --name spacery-egress --restart unless-stopped --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --user node --memory 256m --pids-limit 256 -e ALLOW=api.anthropic.com \
+  -v "$PWD/scripts/worker/egress-proxy.mjs:/proxy.mjs:ro" node:22-alpine node /proxy.mjs
+docker network connect spacery-sandbox spacery-egress
+docker build -f scripts/worker/agent.Dockerfile -t sphr-agent .
+docker build -f scripts/worker/agent-gpu.Dockerfile -t sphr-agent-gpu .
+```
+
+`inhibit_ipv4` keeps the host from having an address on that network, so containers cannot reach the host's
+SSH, file shares or dev servers either. The agent command then adds, before the image name:
+
+```
+--network spacery-sandbox --cap-drop ALL --security-opt no-new-privileges --read-only
+--tmpfs /tmp:rw,exec,size=2g --pids-limit 4096 --memory 48g --cpus 6 --gpus all
+-e NVIDIA_DRIVER_CAPABILITIES=all -e HTTPS_PROXY=http://spacery-egress:3128
+-e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 -e HOME -e TMPDIR={job}/tmp
+```
+
+and leaves `SPHR_AGENT_HOME` unset so the agent's home is inside the job folder. `docker logs spacery-egress`
+lists every connection the sandbox attempted. The runner never follows symlinks in what the agent writes,
+and gVisor (`--runtime runsc`) adds a user-space kernel when it is installed.
+
+### Skills the agent learns
+
+When a job needs a method no skill describes, the agent builds the tool in the job folder and
+leaves a skill proposal in `output/skill-proposal/` (see the intake skill). After the job, the
+runner copies it to `local/skill-proposals/<id>/` (`SPHR_SKILL_PROPOSALS_DIR`) and rejects it if
+it contains anything particular to the job: IDs, paths, the customer's title or uploaded file
+names. A second agent run then reviews it in a folder holding only the proposal, never the
+upload, so instructions planted in a customer's file cannot reach the skills unchecked
+(`SPHR_SKILL_REVIEW=off` skips the review and leaves proposals pending). With
+`SPHR_SKILL_AUTOPROMOTE=1`, an approved **new** skill from a job that published is installed in
+`.agents/skills/<name>/` and committed, and later jobs use it at once. Corrections to existing
+skills always wait for you:
+
+```sh
+node scripts/worker/skill-proposals.mjs list
+node scripts/worker/skill-proposals.mjs show <id>
+node scripts/worker/skill-proposals.mjs promote <id>        # installs and commits
+node scripts/worker/skill-proposals.mjs reject <id> "why"
+```
+
+A learned skill is ordinary text and scripts under git; revert its commit to remove it.
 
 ## Worker API
 

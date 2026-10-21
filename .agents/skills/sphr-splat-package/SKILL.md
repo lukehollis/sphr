@@ -17,8 +17,8 @@ splat (ignoring stray floaters) and turns it horizontal, with up on the side the
 It frames the opening orbit on the dense body of the capture. Check `preview.jpg`: the ground must be
 at the bottom and the subject in view. If it is not:
 
-- `--rotation x,y,z` in degrees replaces the automatic leveling (for example `180,0,0` for an upside-down
-  COLMAP-frame export when there is no clear ground). `--no-level` keeps the file's own axes.
+- `--rotation x,y,z` in degrees replaces the automatic leveling, for an uploaded splat that still comes out
+  tilted. For a splat you trained yourself, use `--cameras` instead (sphr-video).
 - `--interior` opens standing inside the capture (rooms, buildings you walk through) instead of orbiting
   it from outside (objects, statues, exteriors, drone captures).
 - `--elevation 25` sets how steeply the opening orbit looks down (degrees).
@@ -26,8 +26,13 @@ at the bottom and the subject in view. If it is not:
 The tool copies the file unchanged, estimates bounds from a sample (ignoring stray floaters), renders
 `preview.jpg` and writes the package. `.spz`, `.sog` and `.ksplat` cannot be sampled, so their preview is a
 title card and the opening view is generic; say so in your message and suggest the customer sets the
-start view with **Edit**. A legacy compressed `.splat` that Spark cannot read can be converted first:
-`node scripts/convert-legacy-splat.mjs <in> <out.splat>`.
+start view with **Edit**. Old GaussianSplats3D scenes (2023 viewers, old SPHR) saved a compressed `.splat`
+that Spark cannot read; the tool recognises it, converts it to standard rows and reports `converted` (to
+convert by hand: `node scripts/convert-legacy-splat.mjs <in> <out.splat>`).
+
+The opening orbit frames the capture's subject: the smallest quarter of the splats, which trainers spend on
+what the cameras saw most, so floaters and the far background do not push the camera back. When the splat
+came from your own COLMAP run, pass `--cameras <model folder>` as the sphr-video skill describes.
 
 Several splats of the same place: package the largest or most complete one. Very large files (over
 ~1.5 GB) load slowly on phones; mention that in your message.
