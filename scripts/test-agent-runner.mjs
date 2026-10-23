@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +73,8 @@ async function fakeApp({ defer = true, matterport, refuse } = {}) {
 }
 
 const fakeAgent = fileURLToPath(new URL('./test-support/fake-agent.mjs', import.meta.url));
+// The stand-in agent builds a real package with sharp; a worker's checkout may run without the app's dependencies.
+const packages = existsSync(fileURLToPath(new URL('../node_modules/sharp', import.meta.url))) || 'the stand-in agent needs npm ci (sharp)';
 
 /** Runs one pass of the runner with `command` as the agent command; `options.env` adds to its environment. */
 async function runOnce(command, options = {}) {
@@ -172,7 +174,7 @@ test('a result the application cannot take at first is sent again, not left runn
   assert.equal(run.code, 0, run.output);
 });
 
-test('a published space whose report is refused waits for an operator, with how to report it again', async () => {
+test('a published space whose report is refused waits for an operator, with how to report it again', { skip: packages === true ? false : packages }, async () => {
   const run = await runOnce([process.execPath, fakeAgent, '{job}'], { refuse: { action: 'complete', times: 1, status: 403 } });
   assert.deepEqual(actions(run), ['claim', 'complete', 'hold'], run.output);
   assert.match(run.actions[2].message, /^The space was published, but reporting it was refused \(HTTP 403\)\. Report it again with: agent-runner\.mjs publish 0123456789abcdef$/);
