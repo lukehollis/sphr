@@ -16,6 +16,7 @@ import type { TourView } from "@/lib/server/user-tours";
 import { accountNav } from "@/lib/account-nav";
 import type { ProfileCard, SharedTour } from "@/lib/server/profiles";
 import type { Plan } from "@/lib/server/billing";
+import type { ImportSummary } from "@/lib/server/imports";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
 export const legalLinks = [{ href: "/pricing", label: "Pricing" }, { href: "/terms", label: "Terms" }, { href: "/privacy", label: "Privacy" }];
@@ -130,6 +131,17 @@ function PreviewBar({ spaces }: { spaces: SpaceView[] }) {
     <a className="site-button site-button-accent" href={`/account/plan?space=${lapsed.id}`}>Start hosting<span aria-hidden="true">→</span></a>
   </div>;
   return null;
+}
+
+/** Lists of Matterport spaces still coming over, each with a link to its progress page. */
+function ImportsBar({ imports }: { imports: ImportSummary[] }) {
+  const open = imports.filter(item => !item.finished);
+  if (!open.length) return null;
+  return <div className="spaces-imports">{open.map(item => <div key={item.id} className="site-callout site-callout-action" role="status">
+    <p>Bringing over <strong>{item.total} Matterport {item.total === 1 ? "space" : "spaces"}</strong>. {item.ready} ready, {item.working + item.waiting} on the way
+      {item.failed ? `, ${item.failed} ${item.failed === 1 ? "needs" : "need"} attention` : ""}.</p>
+    <a className="site-button" href={`/account/import/${item.id}`}>Follow the progress<span aria-hidden="true">→</span></a>
+  </div>)}</div>;
 }
 
 /** The drawing from the empty state, with a scan line passing over it while an agent works. */
@@ -287,8 +299,9 @@ function LinkedAgents({ initial }: { initial: AgentToken[] }) {
   </section>;
 }
 
-export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [], tours = [], following = [] }:
-  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[]; tours?: TourView[]; following?: FollowingTour[] }) {
+export default function AccountDashboard({ account: initialAccount, spaces: initial, plans, notice, fromCheckout, brand, agents = [], tours = [], following = [], imports = [] }:
+  { account: AccountView; spaces: SpaceView[]; plans: Plan[]; notice?: string; fromCheckout?: boolean; brand: string; agents?: AgentToken[]; tours?: TourView[]; following?: FollowingTour[];
+    /** Lists of Matterport spaces the account is bringing over. */ imports?: ImportSummary[] }) {
   const [spaces, setSpaces] = useState(initial);
   const [account, setAccount] = useState(initialAccount);
   const [error, setError] = useState("");
@@ -421,6 +434,7 @@ export default function AccountDashboard({ account: initialAccount, spaces: init
       </div>}
       <BillingBar account={account} spaces={spaces} plans={plans} />
       <PreviewBar spaces={spaces} />
+      <ImportsBar imports={imports} />
 
       {spaces.length || pending.length ? <section aria-label="Spaces" className="spaces-grid">
         <button type="button" className="space-add" onClick={openFresh} disabled={blocked}>

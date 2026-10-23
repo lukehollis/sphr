@@ -466,6 +466,7 @@ function LinkForm({ onLink }: { onLink: (link: MatterportLink) => Promise<unknow
       I own this space or have the owner&apos;s permission</label>
     {error && <p className="site-alert" role="alert">{error}</p>}
     <div><button type="submit" className="site-button" disabled={busy || !allowed || !value.trim()}>{busy ? "Checking the link…" : "Bring it over"}</button></div>
+    <p className="upload-drop-hint">Bringing over many spaces? <a href="/account/import">Paste a list of links or choose a CSV file</a>.</p>
   </form>;
 }
 

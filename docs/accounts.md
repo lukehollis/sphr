@@ -58,7 +58,38 @@ from Matterport into `input/matterport-<model>/` (`scripts/worker/matterport-lin
 best resolution Matterport offers the public, the 50k dollhouse mesh with its textures, the cover picture and
 the Mattertags; see [Matterport viewer archives](matterport-web-archives.md)), and the agent imports it with
 the `sphr-matterport-link` skill. A space Matterport will not open fails with what to fix; Matterport being
-unreachable gives the job back for later. The operator's Discord notices carry the link.
+unreachable gives the job back for later, and the runner then leaves every Matterport link alone for a while
+(5 minutes, doubling up to an hour) while uploads go on; a pause Matterport asks for (`Retry-After`) is kept.
+The operator's Discord notices carry the link.
+
+### Lists of Matterport links
+
+Customers leaving Matterport often have dozens of spaces. `/account/import` (linked from the sheet) takes a
+pasted list of links or a CSV file of them: links in any column, a `title` or `name` column for titles, each
+space once (`readMatterportList` in `lib/matterport-link.ts`). The customer confirms once that they own the
+spaces or have their owners' permission, and `POST /api/account/imports` keeps the list (tables `imports` and
+`import_items`, `lib/server/imports.ts`). Each link is checked with Matterport as a single link is, three at a
+time; a space that will not open, a combined space, one already in the account or already on its way is left
+out with the reason. A list holds at most `SPHR_IMPORT_MAX_LINKS` links (200).
+
+The links then come over as a queue, each becoming an ordinary space made from a link when its turn comes:
+
+- At most `SPHR_IMPORT_PARALLEL` (1) of an account's list spaces are queued or processing at once, so one
+  customer's list never fills the worker's queue; another customer's job waits behind one of them at most.
+- Lists use at most `SPHR_IMPORT_DAILY` (15) of the account's 20 daily submissions, leaving the rest for the
+  customer's own uploads; the next space waits for the day's window to end.
+- Payment and the free preview work per space as for a single link. Before hosting starts, the first space is
+  the free preview when it is on offer, and otherwise waits for payment so Checkout has a space to bill; the
+  rest wait until hosting starts (`/account/plan?import=<id>`, which returns to the list). With hosting each
+  space joins the subscription as it is made, and a full plan holds the list until the plan has room.
+
+The queue moves when one of its spaces finishes (the worker routes), when the list's page asks, on returning
+from Checkout and once a minute (`instrumentation.ts`). `/account/import/<id>` follows every link (checking,
+waiting with how many come first or when its day starts, processing, ready with a link to open it, or the
+note for one that needs attention) and says what holds the list back, with the button for it. Customers can
+take waiting links off the list or stop the rest. One email says the list was received and one says it is
+done; the spaces of a list send no emails of their own, except a free preview's ready email. The operator
+hears of each list and of its end, and still of each space that needs attention.
 
 ## The free preview
 
@@ -319,6 +350,12 @@ SPHR_STRIPE_WEBHOOK_SECRET=whsec_...
 # SPHR_PREVIEW_MAX_RUNS=3
 # SPHR_PREVIEW_DAILY_LIMIT=10
 # SPHR_PREVIEW_ADDRESS_LIMIT=5
+
+# Lists of Matterport links: links per list, an account's list spaces queued or processing at once, and the
+# daily submissions (of 20) lists may use.
+# SPHR_IMPORT_MAX_LINKS=200
+# SPHR_IMPORT_PARALLEL=1
+# SPHR_IMPORT_DAILY=15
 
 # Uploads. Without a bucket, files are kept under SPHR_STATE_DIR/uploads.
 SPHR_UPLOAD_BUCKET=example-customer-uploads

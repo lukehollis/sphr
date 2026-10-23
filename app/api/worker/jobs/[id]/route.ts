@@ -8,6 +8,14 @@ import { spacePreview } from "@/lib/server/previews";
 import { contactEmail, siteBrand } from "@/lib/server/brand";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { recordEvent } from "@/lib/server/analytics";
+import { advanceImports, importOfSpace } from "@/lib/server/imports";
+
+/** A space that came over from a list of Matterport links: the list's page and its last email speak for it, and its next link can start. */
+function listedSpace(space: { id: string; userId: string }) {
+  const listed = Boolean(importOfSpace(space.id));
+  if (listed) void advanceImports(space.userId).catch((error: unknown) => console.error("Unable to move an import:", error instanceof Error ? error.message : error));
+  return listed;
+}
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -63,7 +71,7 @@ export async function POST(request: Request, { params }: Params) {
         void notifyTeam({ title: "Space held for review", tone: "warn", description: message ?? undefined,
           fields: [["Title", held.space.title], ["Account", readUser(held.space.userId)?.email]] });
         // Not awaited, like every owner email here: the worker never waits on the mail server, and notifyOwner logs its own failures.
-        void notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "",
+        if (!listedSpace(held.space)) void notifyOwner(readUser(held.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), held.space, held.space.message ?? "",
           { support: contactEmail(), held: true }));
       }
       return workerResponse({ job: jobDetails(readJob(job.id)!) });
@@ -86,10 +94,12 @@ export async function POST(request: Request, { params }: Params) {
         const preview = spacePreview(result.space);
         await recordEvent("space_ready", { userId: result.space.userId });
         if (preview) await recordEvent("preview_ready", { userId: result.space.userId, props: { first: result.previewStarted } });
-        void notifyTeam({ title: preview ? "Preview ready" : "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
+        // A space of a list is told about with the whole list, except the free preview, whose email is what leads to hosting.
+        const listed = listedSpace(result.space) && !preview;
+        if (!listed) void notifyTeam({ title: preview ? "Preview ready" : "Space ready", tone: "good", url: `${publicOrigin(request)}${listing.scenePath}`, fields: [["Title", result.space.title],
           ["Account", readUser(result.space.userId)?.email], ["Link", `${publicOrigin(request)}${listing.scenePath}`], ["Note", message]] });
         // A space processed again keeps its scene ID and the visibility its owner chose.
-        void notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
+        if (!listed) void notifyOwner(readUser(result.space.userId), spaceReadyEmail(siteBrand(), publicOrigin(request), result.space,
           { path: listing.scenePath, thumbnail: listing.thumbnail, public: isScenePublic(job.sceneId) }, preview ? { until: preview.until } : undefined));
       }
       return workerResponse({ job: jobDetails(result.job) });
@@ -101,7 +111,7 @@ export async function POST(request: Request, { params }: Params) {
         await recordEvent("space_failed", { userId: result.space.userId });
         void notifyTeam({ title: "Space needs attention", tone: "bad", description: message,
           fields: [["Title", result.space.title], ["Account", readUser(result.space.userId)?.email]] });
-        void notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message, { support: contactEmail() }));
+        if (!listedSpace(result.space)) void notifyOwner(readUser(result.space.userId), spaceFailedEmail(siteBrand(), publicOrigin(request), result.space, message, { support: contactEmail() }));
       }
       return workerResponse({ job: jobDetails(result.job) });
     }

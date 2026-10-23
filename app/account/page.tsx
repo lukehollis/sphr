@@ -7,6 +7,7 @@ import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
 import { siteBrand } from "@/lib/server/brand";
 import { describeTours } from "@/lib/server/user-tours";
 import { followingTours } from "@/lib/server/profiles";
+import { listImports, summarizeImport } from "@/lib/server/imports";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your spaces", robots: { index: false, follow: false } };
@@ -40,5 +41,5 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     : params.checkout ? "Payment received. Add your files to each space." : undefined;
   return <AccountDashboard brand={siteBrand()} account={describeAccount(fresh)} spaces={spaces} plans={await readPlans()} notice={notice}
     fromCheckout={typeof params.checkout === "string"} agents={listAgentTokens(fresh.id)} tours={await describeTours(fresh.id)}
-    following={await followingTours(fresh.id)} />;
+    following={await followingTours(fresh.id)} imports={listImports(fresh.id).map(summarizeImport)} />;
 }

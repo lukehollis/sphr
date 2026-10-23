@@ -34,6 +34,9 @@ async function announceStalled(job: Job, space: CustomerSpace, origin: string) {
   saveEvent("space_failed", { userId: space.userId, props: { stalled: true } });
   void notifyTeam({ title: "Space held for review", tone: "warn", description: job.message ?? undefined,
     fields: [["Title", space.title], ["Account", owner?.email]] });
+  // A space of a list of Matterport links is told about with the list, whose next link can start now.
+  const { advanceImports, importOfSpace } = await import("./imports");
+  if (importOfSpace(space.id)) { await advanceImports(space.userId); return; }
   await notifyOwner(owner, spaceFailedEmail(siteBrand(), origin, space, space.message ?? "", { support: contactEmail(), stalled: true }));
 }
 

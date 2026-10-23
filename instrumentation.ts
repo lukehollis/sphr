@@ -1,10 +1,13 @@
 import type { Instrumentation } from "next";
 
-// Watches for customer jobs that wait while no processing worker asks for them (lib/server/worker-watch.ts).
+// Watches for customer jobs that wait while no processing worker asks for them (lib/server/worker-watch.ts), and
+// moves lists of Matterport spaces along as their day's submissions free up or payment arrives (lib/server/imports.ts).
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
   const { watchWorkers } = await import("./lib/server/worker-watch");
   watchWorkers();
+  const { watchImports } = await import("./lib/server/imports");
+  watchImports();
 }
 
 // Server errors are recorded with the site's analytics and reported to the operator (see

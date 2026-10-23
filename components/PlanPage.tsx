@@ -28,11 +28,13 @@ const planLabel = (plan: Plan) => plan.spaces === null ? "pay as you go" : plan.
  * the plans that show every player (pay as you go bills nothing until there is a space, so it can't).
  * From a space's page (`forSpace`), it publishes a free preview or keeps it: Checkout returns to that space.
  * From the pricing page (`picked`), that plan is chosen already, and a plan covering a set number of
- * spaces can be paid for before any space.
+ * spaces can be paid for before any space. From a list of Matterport spaces coming over (`forImport`),
+ * Checkout returns to the list, whose waiting spaces then start.
  */
-export default function PlanPage({ account: initial, plans, brand, build, results, forSpace, picked }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
+export default function PlanPage({ account: initial, plans, brand, build, results, forSpace, forImport, picked }: { account: AccountView; plans: Plan[]; brand: string; build?: string;
   /** The customer's tour whose class results they came to see in full. */ results?: string;
   /** The space being published or kept after its free preview. */ forSpace?: { id: string; title: string; until: string | null; expired: boolean };
+  /** The list of Matterport spaces waiting for hosting or for room in the plan. */ forImport?: { id: string; waiting: number };
   /** The plan chosen on the pricing page. */ picked?: string }) {
   const [account, setAccount] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -57,7 +59,8 @@ export default function PlanPage({ account: initial, plans, brand, build, result
     try { await work(); } catch (failure) { setError((failure as Error).message); } finally { setBusy(false); }
   }
   const pay = () => run(async () => {
-    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...results ? { results } : build ? { build } : forSpace ? { space: forSpace.id } : {} });
+    const result = await accountRequest("/api/account/billing/checkout", { plan: selected?.id, ...results ? { results } : build ? { build } : forSpace ? { space: forSpace.id }
+      : forImport ? { import: forImport.id } : {} });
     // Without a link, a payment made earlier was just applied.
     window.location.assign(result.url ?? "/account");
   });
@@ -65,7 +68,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
     const result = await accountRequest("/api/account/billing/plan", { plan: selected!.id });
     setAccount(result.account);
     setChoice(null);
-    setMessage(`You're on ${planLabel(selected!)} now.`);
+    setMessage(`You're on ${planLabel(selected!)} now.${forImport ? " The spaces waiting on your list start coming over again." : ""}`);
   });
   const portal = () => run(openPortal);
 
@@ -89,7 +92,9 @@ export default function PlanPage({ account: initial, plans, brand, build, result
       : `You're on ${current.name} at ${price(current)}, which covers ${current.spaces === 1 ? "one space" : `up to ${current.spaces} spaces`}. You have ${spaces}.`;
   } else if (active) lead = "Your plan is not offered any more. You can keep it or choose another below.";
   else if (paused) lead = "Hosting is paused until a payment goes through. Update your payment method to change plans.";
-  else if (forSpace) {
+  else if (forImport) {
+    lead = `Start hosting to bring over the ${forImport.waiting === 1 ? "Matterport space" : `${forImport.waiting} Matterport spaces`} waiting on your list.${perSpace ? ` Pay as you go is ${price(perSpace)} for each space, and a plan covers a set number for one price.` : ""}`;
+  } else if (forSpace) {
     lead = forSpace.expired ? `${forSpace.title} is offline because its free preview ended. Start hosting to bring it back, with the same link.`
       : `Start hosting to make ${forSpace.title} public with a link you can share and an embed, or to keep it after its free preview${forSpace.until ? ` ends on ${previewDate(forSpace.until)}` : ""}.${perSpace ? ` Pay as you go is ${price(perSpace)} for each space.` : ""}`;
   } else if (spaces === 0 && plans.length > 1) {
@@ -101,7 +106,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
   return <div className="site"><div className="site-frame">
     <SiteHeader brand={brand} nav={accountNav(account, "plan")} account={account.email} signOut="account" />
     <main className="site-main">
-      <a className="site-back" href="/account">← Your spaces</a>
+      {forImport ? <a className="site-back" href={`/account/import/${forImport.id}`}>← Your Matterport list</a> : <a className="site-back" href="/account">← Your spaces</a>}
       <div className="site-title">
         <div><h1>{building ? forResults ? "Choose a plan to see every player" : "Choose a plan for the agent" : active ? "Your plan" : subscription && !paused ? "Restart hosting"
           : spaces === 0 ? "Choose a plan" : "Start hosting"}</h1></div>
@@ -139,6 +144,7 @@ export default function PlanPage({ account: initial, plans, brand, build, result
           : building && forResults ? "You pay on a secure checkout page and can cancel any time. Then you're back at your class results."
           : building ? "You pay on a secure checkout page and can cancel any time. Then you go straight to building."
           : forSpace ? "You pay on a secure checkout page, can cancel any time, and come back to your space afterwards."
+          : forImport && spaces > 0 ? "You pay on a secure checkout page and can cancel any time. Then you're back at your list, and its spaces start coming over."
           : spaces > 0 || upfront ? "You pay on a secure checkout page and can cancel any time."
           : account.preview?.available ? "Nothing to pay yet. Your first capture is a free private preview, and you pay when you publish it or keep it."
           : "You pay once you add your first space."}</p>

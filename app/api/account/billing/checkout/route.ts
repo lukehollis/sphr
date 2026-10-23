@@ -4,6 +4,7 @@ import { billingEnabled, startCheckout } from "@/lib/server/billing";
 import { recordEvent } from "@/lib/server/analytics";
 import { buildReturnPath, readUserTour } from "@/lib/server/user-tours";
 import { reportProblem } from "@/lib/server/error-report";
+import { readImport } from "@/lib/server/imports";
 
 /**
  * Starts or resumes payment for waiting spaces, on the plan the customer chose (pay as you
@@ -24,16 +25,19 @@ export async function POST(request: Request) {
   // Publishing a space that is a free preview: payment returns to that space's page.
   const published = typeof body?.space === "string" ? readCustomerSpace(body.space) : undefined;
   const space = published && published.status !== "deleted" && sameTeam(published.userId, user.id) ? published : undefined;
+  // Starting hosting for a list of Matterport spaces: payment returns to the list's page.
+  const list = typeof body?.import === "string" ? readImport(body.import) : undefined;
+  const back = list && sameTeam(list.userId, user.id) ? `/account/import/${list.id}` : undefined;
   // Without a space or the builder, only a plan covering a set number of spaces can be bought (startCheckout checks),
   // and only when it is asked for on its own: someone else's tour or space leads nowhere.
   const upfront = !build && !payableSpaceCount(user.id);
-  if (upfront && (body?.plan === undefined || body.plan === null || body.results !== undefined || body.space !== undefined)) {
+  if (upfront && (body?.plan === undefined || body.plan === null || body.results !== undefined || body.space !== undefined || body.import !== undefined)) {
     return accountResponse({ error: "Add a space first." }, 400);
   }
   try {
-    const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent, build, build ? undefined : space?.id);
+    const next = await startCheckout(user, publicOrigin(request), body?.plan ?? undefined, agent, build, build ? undefined : space?.id, build ? undefined : back);
     if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : body?.source === "pricing" ? "pricing" : "web",
-      ...build ? { for: results ? "results" : "tours" } : space ? { for: readSpacePreview(space.id) ? "preview" : "space" } : upfront ? { for: "plan" } : {} } });
+      ...build ? { for: results ? "results" : "tours" } : back ? { for: "import" } : space ? { for: readSpacePreview(space.id) ? "preview" : "space" } : upfront ? { for: "plan" } : {} } });
     return accountResponse({ ok: true, ..."url" in next ? { url: next.url, plan: next.plan } : "portal" in next ? { url: next.portal } : { paid: true } });
   } catch (failure) {
     if (failure instanceof AccountError) return accountResponse({ error: failure.message }, 400);

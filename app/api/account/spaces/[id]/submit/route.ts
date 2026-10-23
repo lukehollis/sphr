@@ -1,6 +1,6 @@
 import { AccountError, cleanText, listUploads, parseSpaceOutput, readCustomerSpace, sameTeam, submitCustomerSpace } from "@/lib/server/accounts-store";
 import { allowAttempt } from "@/lib/server/admin-store";
-import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted } from "@/lib/server/accounts";
+import { accountRequest, accountResponse, attemptKey, notifyOwner, publicOrigin, spaceHosted, submitsPerDay } from "@/lib/server/accounts";
 import { describeSpace } from "@/lib/server/customer-spaces";
 import { previewGateBody, previewMaxRuns, spacePreview } from "@/lib/server/previews";
 import { announceJob } from "@/lib/server/job-signal";
@@ -22,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (preview?.expired) return accountResponse(previewGateBody(space, "ended"), 402);
   if (preview && preview.runsLeft < 1) return accountResponse(previewGateBody(space, "limit", `A free preview is processed ${previewMaxRuns()} times at most.`), 402);
   // Each submission runs an agent; the limits survive deleting and recreating spaces.
-  if (!allowAttempt([[attemptKey("submit", user.id), 20], [attemptKey("submit-space", space.id), 5]], 24 * 60 * 60 * 1000)) {
+  if (!allowAttempt([[attemptKey("submit", user.id), submitsPerDay], [attemptKey("submit-space", space.id), 5]], 24 * 60 * 60 * 1000)) {
     const contact = contactEmail();
     return accountResponse({ error: `This space has been submitted many times today. Try again tomorrow, or ${contact ? `write to ${contact}` : "contact support"}.` }, 429);
   }

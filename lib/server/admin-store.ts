@@ -180,6 +180,12 @@ export function allowAttempt(entries: readonly (readonly [key: string, limit: nu
   } catch (error) { db().exec("ROLLBACK"); throw error; }
 }
 
+/** How much of a limit `allowAttempt` has counted for a key, and when its window ends; nothing is counted. */
+export function attemptsUsed(key: string) {
+  const row = db().prepare("SELECT attempts, resets FROM login_limits WHERE key=? AND resets>?").get(key, Date.now()) as { attempts: number; resets: number } | undefined;
+  return { attempts: row?.attempts ?? 0, resets: row ? new Date(row.resets).toISOString() : null };
+}
+
 export function isScenePublic(scene: string) {
   if (!accessControlled()) return true;
   return (db().prepare("SELECT public FROM visibility WHERE scene=?").get(scene) as { public: number } | undefined)?.public === 1;

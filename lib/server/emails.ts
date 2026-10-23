@@ -199,6 +199,44 @@ export function linkReceivedEmail(brand: string, origin: string, space: SpaceRef
   });
 }
 
+const spaces = (count: number) => `${count} Matterport ${count === 1 ? "space" : "spaces"}`;
+const importPage = (origin: string, id: string) => `${origin}/account/import/${id}`;
+
+/**
+ * A list of Matterport spaces to bring over: they come one at a time, each made a space as it starts. `waiting` says
+ * the rest wait for hosting to start (a free preview may come first), `refused` how many links will not come over.
+ */
+export function importStartedEmail(brand: string, origin: string, list: { id: string; count: number; refused: number; daily: number; payment: boolean; preview: boolean }) {
+  return render({
+    brand, origin, subject: `Bringing over ${spaces(list.count)}`, preheader: "They come over one at a time, and each appears in your spaces as it is ready.",
+    heading: "We have your list",
+    blocks: [
+      { kind: "text", text: `An agent brings over your Matterport spaces one at a time, each with its 360 photos, where each was taken, the dollhouse and its tags. Up to ${list.daily} start each day. They appear in your spaces as they are ready, and we will email you once all of them are here.` },
+      ...(list.payment ? [{ kind: "text" as const, text: list.preview ? "The first is your free private preview. The others wait until hosting starts, and the progress page has the button for it."
+        : "They wait until hosting starts. The progress page has the button for it." }] : []),
+      { kind: "details", rows: [["To bring over", spaces(list.count)], ...(list.refused ? [["Left out", `${list.refused} ${list.refused === 1 ? "link" : "links"}, the page says why`] as [string, string]] : [])] }
+    ],
+    action: { label: "Follow the progress", url: importPage(origin, list.id) }
+  });
+}
+
+/** Every space of a list has come over, or stopped with a note. */
+export function importFinishedEmail(brand: string, origin: string, list: { id: string; counts: { ready: number; failed: number; refused: number; skipped: number; started: number };
+  failed: string[] }) {
+  const { ready, failed, started } = list.counts;
+  return render({
+    brand, origin, subject: failed ? `Your Matterport spaces are here, ${failed} ${failed === 1 ? "needs" : "need"} attention` : "Your Matterport spaces are here",
+    preheader: `${ready} of ${started} ${started === 1 ? "space is" : "spaces are"} ready to open.`,
+    heading: ready === started ? `${ready === 1 ? "Your space is" : `All ${ready} spaces are`} ready` : `${ready} of ${started} spaces are ready`,
+    blocks: [
+      { kind: "text", text: "They start private, so you choose which ones to share. Each is a tour of its 360 photos with the dollhouse and the tags it had on Matterport." },
+      ...(failed ? [{ kind: "text" as const, text: `${failed === 1 ? "One could" : `${failed} could`} not be finished. The progress page says why for each, and its space page can start it again.` }] : []),
+      { kind: "details", rows: [["Ready", String(ready)], ...(failed ? [["Needs attention", list.failed.slice(0, 10).join(", ") + (list.failed.length > 10 ? ` and ${list.failed.length - 10} more` : "")] as [string, string]] : [])] }
+    ],
+    action: { label: "See every space", url: importPage(origin, list.id) }
+  });
+}
+
 /**
  * `scene.public` is the space's visibility now: a space processed again keeps the visibility its owner chose.
  * `preview` is set while the space is the account's free preview: private until its date. The email says what is

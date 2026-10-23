@@ -141,7 +141,8 @@ function assertBillingManager(userId: string) {
  * A plan that covers a set number of spaces can also be bought before any space, from the pricing
  * page (a teacher taking a plan for class results); pay as you go still needs a space or the builder.
  */
-export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string, space?: string): Promise<CheckoutStart> {
+export async function startCheckout(user: User, origin: string, planId?: unknown, fromAgent = false, build?: string, space?: string,
+  /** A page of the customer's own, such as a list of spaces coming over, that payment returns to. */ returnPath?: string): Promise<CheckoutStart> {
   assertBillingManager(user.id);
   return serialized(`checkout:${user.id}`, async () => {
     const current = readUser(user.id)!;
@@ -191,7 +192,7 @@ export async function startCheckout(user: User, origin: string, planId?: unknown
       plan = await resolvePlan(undefined);
     }
     const quantity = plan.spaces === null ? count : 1;
-    const returnTo = space && !fromAgent ? `${origin}/account/spaces/${space}` : undefined;
+    const returnTo = returnPath && !fromAgent ? `${origin}${returnPath}` : space && !fromAgent ? `${origin}/account/spaces/${space}` : undefined;
     const successUrl = back || (returnTo ? `${returnTo}?checkout={CHECKOUT_SESSION_ID}` : `${origin}/account?checkout={CHECKOUT_SESSION_ID}${fromAgent ? "&agent=1" : ""}`);
     // An open session is only reused when it returns to the same page.
     if (open?.url && openLine?.quantity === quantity && openLine.price?.id === plan.id && open.success_url === successUrl) return { url: open.url, plan: plan.id };

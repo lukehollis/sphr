@@ -39,12 +39,13 @@ const teamHook = await listen(async (request, response) => {
   response.statusCode = 204;
   response.end();
 });
-// Matterport's model graph: one space, one combined space made of two models, and nothing else.
+// Matterport's model graph: one space, one combined space made of two models, spaces for lists ("BatchHall01" is "Hall 01"), and nothing else.
 const showcaseSpaces = { MD4iVby1G8k: { root: 'MD4iVby1G8k', name: 'Inside the Great Pyramid', sweeps: 3 }, Combined001: { root: 'Combined999', name: 'Two buildings', sweeps: 4 } };
+const batchSpace = id => /^Batch[A-Za-z]+\d\d$/.test(id ?? '') ? { root: id, name: `${id.slice(5, -2)} ${id.slice(-2)}`, sweeps: 5 } : undefined;
 const showcase = await listen(async (request, response) => {
   let body = '';
   for await (const chunk of request) body += chunk;
-  const id = JSON.parse(body || '{}').variables?.modelId, space = showcaseSpaces[id];
+  const id = JSON.parse(body || '{}').variables?.modelId, space = showcaseSpaces[id] ?? batchSpace(id);
   response.setHeader('Content-Type', 'application/json');
   // GraphQL answers 200 for a missing model too, with errors in place of data.
   response.end(JSON.stringify(request.url === '/api/mp/models/graph' && space
@@ -1183,6 +1184,144 @@ try {
   for (const [person, id] of [[mona.person, monaSpace.id], [nadia.person, body.space.id]]) assert.equal((await person.request(`/api/account/spaces/${id}`, { method: 'DELETE', json: {} })).status, 200);
   console.log('Passed: Matterport links: checked against the showcase, the owner\'s permission required, payment and the free preview as for uploads, and the worker given the link.');
 
+  // ---- Many Matterport spaces at once: a list of links, one permission, a queue, and one page that follows them all ----
+  database().prepare('UPDATE preview_grants SET granted=?').run(new Date(Date.now() - 2 * 864e5).toISOString());
+  const ivy = await crowd(10, '203.0.113.80');
+  const addList = (person, json, address = '203.0.113.80') => person.post('/api/account/imports', json, { headers: { 'X-Real-IP': address } });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 3100));
+  response = await addList(ivy.person, { text: 'Ask Sam for the links', permission: true });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Paste the links to your Matterport spaces/);
+  response = await addList(ivy.person, { links: ['https://my.matterport.com/show/?m=BatchHall01'] });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /own these Matterport spaces or have their owners' permission/, "the owners' permission comes first");
+  response = await addList(ivy.person, { links: Array.from({ length: 201 }, (_, index) => `https://my.matterport.com/show/?m=Batch${String(index).padStart(6, '0')}`), permission: true });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /up to 200 spaces/, 'a list has a size limit');
+  assert.equal((await anonymous.post('/api/account/imports', { links: [pyramid], permission: true })).status, 401);
+  // A CSV file: titles from its name column, Matterport Cloud pages and embed code are read; a repeat and a note are left out.
+  const csv = ['Name,Link', 'Front hall,https://my.matterport.com/show/?m=BatchHall01', ',https://my.matterport.com/models/BatchHall02',
+    'Missing,https://my.matterport.com/show/?m=Private0001', 'Combined,https://my.matterport.com/show/?m=Combined001', 'Again,https://my.matterport.com/show/?m=BatchHall01&play=1',
+    '<iframe src="https://my.matterport.com/show/?m=BatchHall03" allow="xr-spatial-tracking"></iframe>', 'Ask Sam about the attic'].join('\n');
+  response = await addList(ivy.person, { text: csv, permission: true });
+  body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  let list = body.import;
+  assert.equal(body.preview, true, 'the first space of a list is the free preview, as a single link would be');
+  assert.deepEqual(list.items.map(item => [item.modelId, item.title, item.status]), [['BatchHall01', 'Front hall', 'queued'], ['BatchHall02', 'Hall 02', 'waiting'],
+    ['Private0001', 'Missing', 'refused'], ['Combined001', 'Combined', 'refused'], ['BatchHall03', 'Hall 03', 'waiting']],
+    'each space once, titled from the file or named by Matterport, and checked');
+  assert.match(list.items[2].reason, /did not open/);
+  assert.match(list.items[3].reason, /combined space/);
+  assert.deepEqual([list.counts.total, list.counts.refused, list.counts.waiting, list.blocker.kind], [5, 2, 2, 'payment'], 'the others wait for hosting');
+  assert.match(database().prepare('SELECT source FROM customer_spaces WHERE id=?').get(list.items[0].space.id).source, /"permission":"20\d\d-/, 'the permission given once is kept with each space');
+  const listJobs = async prefix => (await (await worker('/api/worker/jobs?status=queued,running')).json()).jobs.filter(item => item.source?.modelId.startsWith(prefix));
+  let listed = await listJobs('BatchHall');
+  assert.deepEqual(listed.map(item => [item.source.modelId, item.preview, item.space.output]), [['BatchHall01', true, 'tour']], 'one space of a list reaches the worker at a time');
+  assert.equal((await bob.get(`/api/account/imports/${list.id}`)).status, 404, "another customer's list is not theirs to see");
+  assert.equal((await bob.post(`/api/account/imports/${list.id}`, { action: 'stop' })).status, 404);
+  assert.equal((await bob.get(`/account/import/${list.id}`)).status, 404);
+  page = (await (await ivy.person.get(`/account/import/${list.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Your free preview of Front hall comes over first. Start hosting to bring over the other 2 spaces.') && page.includes(`/account/plan?import=${list.id}`),
+    'its page says what the rest wait for, with the way to start hosting');
+  assert.ok(page.includes('Waits for hosting to start') && page.includes('This Matterport space did not open') && page.includes('In line for processing'), 'and what each link is doing');
+  page = (await (await ivy.person.get('/account')).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('3 Matterport spaces') && page.includes(`/account/import/${list.id}`), 'the account page leads to the list');
+  assert.ok((await (await ivy.person.get('/account/import')).text()).includes(`/account/import/${list.id}`), 'and so does the form, under the lists');
+  const listMail = await mail.waitFor(message => message.includes('To: crowd10@example.com') && message.includes('Subject: Bringing over 3 Matterport spaces'));
+  assert.ok(listMail.includes('The first is your free private preview') && listMail.includes(`/account/import/${list.id}`), 'one email for the whole list, leading to its page');
+  // Hosting starts from the plan page, and payment comes back to the list.
+  page = (await (await ivy.person.get(`/account/plan?import=${list.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Start hosting to bring over the 2 Matterport spaces waiting on your list') && page.includes('Your Matterport list'));
+  body = await (await ivy.person.post('/api/account/billing/checkout', { import: list.id })).json();
+  const ivySession = [...stripeFake.state.sessions.values()].at(-1);
+  assert.deepEqual([body.url, ivySession.quantity], [ivySession.url, 1], 'Checkout bills the space there is');
+  assert.ok(ivySession.success_url.startsWith(`${base}/account/import/${list.id}?checkout=`), 'and returns to the list');
+  const ivySubscription = stripeFake.state.pay(ivySession.id);
+  page = (await (await ivy.person.get(`/account/import/${list.id}?checkout=${ivySession.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Payment received. The waiting spaces start coming over now.'));
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.deepEqual([list.hosting, list.blocker.kind, list.items[1].status, list.items[1].ahead, list.items[1].space], [true, 'turn', 'waiting', 0, null],
+    'the next waits for its turn, with no space made yet');
+  const finishListed = async (job, outcome) => {
+    assert.equal((await worker(`/api/worker/jobs/${job.id}`, { action: 'claim', worker: 'route-test' })).status, 200);
+    return worker(`/api/worker/jobs/${job.id}`, outcome === 'ready' ? { action: 'complete', message: 'Brought over 5 photos.', scene: { sceneId: job.sceneId, titleSlug: 'hall',
+      scenePath: `/s/${job.sceneId}/hall`, slug: job.slug, title: job.space.title, bootstrapUrl: `/datasets/matterport/${job.slug}/bootstrap.json`,
+      thumbnail: `/datasets/matterport/${job.slug}/preview.jpg` } } : { action: 'fail', message: outcome });
+  };
+  let finished = await finishListed(listed[0], 'ready');
+  assert.equal(finished.status, 200, await finished.text());
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.deepEqual(list.items.map(item => item.status), ['ready', 'queued', 'refused', 'refused', 'waiting'], 'a space finished lets the next one start');
+  assert.equal(list.items[0].space.path, `/s/${listed[0].sceneId}/hall`, 'a ready space opens from the list');
+  assert.equal(ivySubscription.items.data[0].quantity, 2, 'each space joins pay as you go as it comes over');
+  // The day's submissions: a list uses 15 of the account's 20, then its spaces keep their place until the next day.
+  const ivySubmits = `account-submit:${createHash('sha256').update(ivy.id).digest('hex')}`;
+  database().prepare('UPDATE login_limits SET attempts=15 WHERE key=?').run(ivySubmits);
+  listed = await listJobs('BatchHall');
+  assert.deepEqual(listed.map(item => item.source.modelId), ['BatchHall02']);
+  finished = await finishListed(listed[0], 'This Matterport space did not open. Make it public or unlisted on Matterport, then process it again.');
+  assert.equal(finished.status, 200, await finished.text());
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.deepEqual([list.blocker.kind, list.items[1].status, list.items[4].status], ['daily', 'failed', 'waiting'], 'the next waits for the day');
+  assert.ok(list.items[4].after > new Date().toISOString() && list.blocker.until === list.items[4].after, 'and says when it starts');
+  assert.equal((await listJobs('BatchHall')).length, 0);
+  page = (await (await ivy.person.get(`/account/import/${list.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Up to 15 spaces start each day, so the next one starts after') && page.includes('Starts after'), 'its page says which spaces wait, and until when');
+  assert.ok(page.includes('This Matterport space did not open. Make it public or unlisted'), 'a space that stopped says why');
+  database().prepare('UPDATE login_limits SET attempts=2 WHERE key=?').run(ivySubmits);
+  await settle();
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.equal(list.items[4].status, 'queued', 'once the day has room the list goes on');
+  listed = await listJobs('BatchHall');
+  finished = await finishListed(listed[0], 'ready');
+  assert.equal(finished.status, 200, await finished.text());
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.ok(list.finished, 'the list is done when every space is ready or needs attention');
+  assert.deepEqual([list.counts.ready, list.counts.failed, list.counts.refused], [2, 1, 2]);
+  const doneMail = await mail.waitFor(message => message.includes('To: crowd10@example.com') && message.includes('Subject: Your Matterport spaces are here, 1 needs attention'));
+  assert.ok(doneMail.includes('2 of 3 spaces are ready') && doneMail.includes('Hall 02') && doneMail.includes(`/account/import/${list.id}`), 'one email when the list is done');
+  assert.ok(!mail.messages.some(message => message.includes('To: crowd10@example.com') && /Subject: (?:Hall 0\d|Front hall) (?:is ready|needs attention)|Subject: Processing started/.test(message)),
+    'and none for each space of the list');
+  // A second list: a space already brought over is left out, and links can be taken off before they start.
+  body = await (await addList(ivy.person, { links: ['https://my.matterport.com/show/?m=BatchHall01', { url: 'https://my.matterport.com/show/?m=BatchWing01', title: 'Annex' },
+    'https://my.matterport.com/show/?m=BatchWing02', 'https://my.matterport.com/show/?m=BatchWing03'], permission: true })).json();
+  list = body.import;
+  assert.deepEqual(list.items.map(item => [item.title, item.status, item.reason]), [['Front hall', 'refused', 'Already in your spaces.'], ['Annex', 'queued', null],
+    ['Wing 02', 'waiting', null], ['Wing 03', 'waiting', null]], 'a space the account has is not brought over twice');
+  assert.equal(list.items[0].space.status, 'ready', 'and leads to the space it has');
+  body = await (await ivy.person.post(`/api/account/imports/${list.id}`, { action: 'skip', item: list.items[2].id })).json();
+  assert.equal(body.import.items[2].status, 'skipped');
+  assert.equal((await ivy.person.post(`/api/account/imports/${list.id}`, { action: 'skip', item: list.items[2].id })).status, 409);
+  assert.equal((await ivy.person.post(`/api/account/imports/${list.id}`, { action: 'skip', item: list.items[1].id })).status, 409, 'a space on its way stays');
+  body = await (await ivy.person.post(`/api/account/imports/${list.id}`, { action: 'stop' })).json();
+  assert.deepEqual(body.import.items.map(item => item.status), ['refused', 'queued', 'skipped', 'skipped'], 'stopping takes off every link still waiting');
+  assert.equal((await ivy.person.request(`/api/account/spaces/${list.items[1].space.id}`, { method: 'DELETE', json: {} })).status, 200);
+  await settle();
+  list = (await (await ivy.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.ok(list.finished && list.counts.deleted === 1, 'a list whose only space was deleted is done');
+  assert.equal(mail.messages.filter(message => message.includes('To: crowd10@example.com') && message.includes('Subject: Your Matterport spaces are here')).length, 1,
+    'and ends without another email');
+  // A full plan holds a list back until the plan has room.
+  const jun = await crowd(11, '203.0.113.81');
+  body = await (await jun.person.post('/api/account/billing/checkout', { plan: 'price_starter' })).json();
+  const junSession = [...stripeFake.state.sessions.values()].at(-1);
+  stripeFake.state.pay(junSession.id);
+  assert.equal((await webhook({ id: 'evt_jun', type: 'checkout.session.completed', data: { object: { id: junSession.id, object: 'checkout.session' } } })).status, 200);
+  for (let index = 1; index <= 6; index++) assert.equal((await jun.create(`Jun ${index}`)).status, 200);
+  body = await (await addList(jun.person, { links: ['https://my.matterport.com/show/?m=BatchRoom01', 'https://my.matterport.com/show/?m=BatchRoom02'], permission: true }, '203.0.113.81')).json();
+  list = body.import;
+  assert.deepEqual([body.preview, list.blocker.kind, list.blocker.spaces, list.items[0].status, list.items[0].space], [false, 'plan', 6, 'waiting', null], 'a full plan holds the list');
+  page = (await (await jun.person.get(`/account/import/${list.id}`)).text()).replaceAll('<!-- -->', '');
+  assert.ok(page.includes('Your plan covers 6 spaces and all of them are in use. Change plans to bring over the other 2 spaces.') && page.includes('Waits for room in your plan'));
+  assert.equal((await jun.person.post('/api/account/billing/plan', { plan: 'price_pro' })).status, 200);
+  await settle();
+  list = (await (await jun.person.get(`/api/account/imports/${list.id}`)).json()).import;
+  assert.deepEqual([list.items[0].status, list.items[1].status, list.blocker.kind], ['queued', 'waiting', 'turn'], 'room in the plan lets it go on');
+  assert.equal((await jun.person.post(`/api/account/imports/${list.id}`, { action: 'stop' })).status, 200);
+  assert.equal((await jun.person.request(`/api/account/spaces/${list.items[0].space.id}`, { method: 'DELETE', json: {} })).status, 200);
+  console.log('Passed: lists of Matterport links: a CSV or pasted list read once per space and checked, one permission, the free preview and payment as for single links, one space at a time, the day\'s submissions and a full plan holding a list back with the reason shown, one email per list, and taking links off.');
+
   // ---- Password reset signs out every session ----
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'nobody@example.com' })).status, 200, 'no account enumeration');
   assert.equal((await anonymous.post('/api/account/password/forgot', { email: 'alice@example.com' })).status, 200);
@@ -1271,6 +1410,12 @@ try {
     [['Starter', 'Pro'], ['Pro', 'Pay as you go']]);
   assert.match(about('Plan changed', 'Account', 'grace@example.com')[1].fields.To, /^Pay as you go, \$1\.00 a month per space$/);
 
+  assert.equal(about('Matterport list to bring over', 'Account', 'crowd10@example.com').length, 2, 'the team hears of each list once');
+  assert.equal(about('Matterport list to bring over', 'Account', 'crowd10@example.com')[0].fields.Status, 'Free preview first, the rest wait for hosting');
+  assert.equal(about('Matterport list brought over', 'Account', 'crowd10@example.com').length, 1, 'and once when one is done');
+  assert.deepEqual([about('Matterport list brought over', 'Account', 'crowd10@example.com')[0].fields.Ready, about('Matterport list brought over', 'Account', 'crowd10@example.com')[0].fields['Need attention']], ['2', '1']);
+  assert.equal(about('Space created', 'Account', 'crowd10@example.com').length + about('Space ready', 'Account', 'crowd10@example.com').length, 0, 'not for each space of a list');
+  assert.equal(about('Space needs attention', 'Account', 'crowd10@example.com').length, 1, 'but a space of a list that needs attention is still told');
   console.log('Passed: operator notifications for sign-ups, spaces, submissions, processing and billing changes.');
   console.log('Passed: email sign-up and verification, password login and reset, Google/Apple/LinkedIn sign-in with state, PKCE, nonce and account linking, Checkout and webhook billing with per-space quantities and plans, plan changes and full plans, pausing and resuming hosting, resumable uploads, customer isolation, owner-only private viewing and editing (titles and tags), the worker API, and the agent runner with credential isolation.');
 } catch (error) {

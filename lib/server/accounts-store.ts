@@ -80,6 +80,9 @@ function store() {
   return connection;
 }
 
+/** The accounts database, with every table and column in place, for modules that keep their own tables beside it. */
+export const accountsDatabase = () => store();
+
 function transaction<T>(work: () => T): T {
   const connection = store();
   connection.exec("BEGIN IMMEDIATE");

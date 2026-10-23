@@ -61,7 +61,7 @@ export function clientAddress(request: Request) {
   return request.headers.get("x-real-ip") || "local";
 }
 
-const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12}|\?space=[a-f0-9]{12}|\?plan=price_[A-Za-z0-9]{1,100})?|\/profile|\/team|\/join\/[a-z0-9-]{6,80}|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour|\?checkout=cs_[A-Za-z0-9_]{1,200})?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
+const returnPattern = /^\/(?:account(?:\/plan(?:\?build=(?:[a-f0-9]{12}|1)|\?results=[a-f0-9]{12}|\?space=[a-f0-9]{12}|\?import=[a-f0-9]{12}|\?plan=price_[A-Za-z0-9]{1,100})?|\/import(?:\/[a-f0-9]{12}(?:\?checkout=cs_[A-Za-z0-9_]{1,200})?)?|\/profile|\/team|\/join\/[a-z0-9-]{6,80}|\/connect\/[A-Z0-9]{4}-[A-Z0-9]{4}|\/spaces\/[a-f0-9]{12}(?:\/edit|\/tour|\?checkout=cs_[A-Za-z0-9_]{1,200})?|\/tours\/(?:new(?:\?scene=[a-f0-9]{12}(?:&kind=hunt)?)?|[a-f0-9]{12}(?:\/results)?)|\?checkout=cs_[A-Za-z0-9_]{1,200}(?:&agent=1)?)?|[st]\/[a-f0-9]{12}(?:\/[a-z0-9-]+)?|u\/[a-z0-9][a-z0-9._-]{2,29})?$/;
 export function safeReturnPath(value: unknown, fallback = "/account") {
   return typeof value === "string" && returnPattern.test(value) ? value : fallback;
 }
@@ -70,6 +70,9 @@ export function safeReturnPath(value: unknown, fallback = "/account") {
 export function attemptKey(scope: string, value: string) {
   return `account-${scope}:${createHash("sha256").update(value.toLowerCase()).digest("hex")}`;
 }
+
+/** Spaces one account may submit for processing in 24 hours: each submission runs an agent. */
+export const submitsPerDay = 20;
 
 /** Without billing configured, every customer space is hosted. */
 export function spaceHosted(space: CustomerSpace) {

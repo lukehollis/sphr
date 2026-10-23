@@ -304,3 +304,35 @@ a.space-card-media:hover .space-card-open, a.space-card-media:focus-visible .spa
   .team-split { grid-template-columns: minmax(0, 1fr); }
 }
 
+
+/* Bringing over many Matterport spaces (components/MatterportImport.tsx): the list form and each list's progress. */
+.import-form { display: grid; gap: var(--space-2); max-width: 760px; margin-bottom: var(--space-6); }
+.import-lead { margin: 0 0 var(--space-1); color: var(--text-body); font-size: 17px; line-height: var(--leading-body); }
+.import-links { min-height: 220px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 13px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.import-form .site-alert { margin: 0; }
+.import-lists { max-width: 760px; margin: 0; padding: 0; list-style: none; border-top: var(--rule-hair); }
+.import-lists a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 4px var(--space-3); padding: 14px 0;
+  border-bottom: var(--rule-hair); color: var(--site-muted); font-size: 14px; text-decoration: none; }
+.import-lists strong { color: var(--text-heading); }
+.import-lists a:hover strong, .import-lists a:focus-visible strong { text-decoration: underline; }
+/* The figures' bottom rule doubles as the progress bar. */
+.import-meter { margin: calc(-1 * var(--space-4) - 3px) 0 var(--space-4); }
+.import-items { margin: 0 0 var(--space-3); padding: 0; list-style: none; border-top: var(--rule-hair); }
+.import-item { display: grid; grid-template-columns: minmax(0, 1.3fr) 130px minmax(0, 1.5fr) 130px; align-items: center; gap: 6px var(--space-3); padding: 12px 0;
+  border-bottom: var(--rule-hair); font-size: 14px; line-height: var(--leading-body); }
+.import-item-name { display: grid; gap: 2px; min-width: 0; }
+.import-item-name a, .import-item-name strong { color: var(--text-heading); font-weight: var(--weight-bold); overflow-wrap: anywhere; }
+.import-item-name small { color: var(--site-muted); font-size: 12px; overflow-wrap: anywhere; }
+.import-item-line { display: -webkit-box; overflow: hidden; color: var(--text-body); overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.import-item-refused .import-item-line, .import-item-skipped .import-item-line, .import-item-deleted .import-item-line { color: var(--site-muted); }
+.import-item-refused .import-item-line { display: block; }
+.import-item-actions { display: flex; justify-content: flex-end; gap: var(--space-2); white-space: nowrap; }
+.import-actions { margin-bottom: var(--space-4); }
+.spaces-imports { margin-bottom: var(--space-4); }
+@media (max-width: 820px) {
+  .import-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .import-item-line, .import-item-actions { grid-column: 1 / -1; }
+  .import-item-actions { justify-content: flex-start; }
+  .import-item-actions:empty { display: none; }
+  .import-lists a { grid-template-columns: minmax(0, 1fr); }
+}

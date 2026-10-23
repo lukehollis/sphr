@@ -899,3 +899,20 @@ test('the free preview: one for each account, its limits, a window that starts w
   assert.doesNotMatch(ready.text, /It is private for now/, 'a preview has its own wording');
   assert.match(emails.spaceReadyEmail('Spaces', origin, { id: 'abcdef123456', title: 'Porch' }, { path: '/s/0123456789ab/porch' }).text, /private for now/, 'a hosted space keeps its wording');
 });
+
+test('lists of Matterport links: pasted, CSV files with titles, embed code, repeats and notes', async () => {
+  const { readMatterportList } = await import('../lib/matterport-link.ts');
+  const show = id => `https://my.matterport.com/show/?m=${id}`;
+  let list = readMatterportList(`Our spaces\n\n${show('AAAAAAAAAAA')}\nhttps://discover.matterport.com/space/BBBBBBBBBBB\n`
+    + `my.matterport.com/models/CCCCCCCCCCC/edit  ${show('DDDDDDDDDDD')}&play=1\nhttps://example.com/tour/EEEEEEEEEEE\n${show('AAAAAAAAAAA')}&qs=1\n`);
+  assert.deepEqual(list.links.map(link => link.modelId), ['AAAAAAAAAAA', 'BBBBBBBBBBB', 'CCCCCCCCCCC', 'DDDDDDDDDDD'], 'every way of writing a link, two on one line');
+  assert.ok(list.links.every(link => link.url === show(link.modelId) && !link.title), 'always the showcase address; a plain list gives no titles');
+  assert.deepEqual([list.repeated, list.unreadable], [1, 2], 'a repeat is kept once, and lines without a link are counted');
+  // Semicolons, quoted titles holding the delimiter, and a link followed straight by the next cell.
+  list = readMatterportList(`Space title;Link;Notes\n"Hall; east wing";${show('AAAAAAAAAAA')};first\nCellar;${show('BBBBBBBBBBB')},x;\n;${show('CCCCCCCCCCC')};`);
+  assert.deepEqual(list.links.map(link => [link.modelId, link.title]), [['AAAAAAAAAAA', 'Hall; east wing'], ['BBBBBBBBBBB', 'Cellar'], ['CCCCCCCCCCC', undefined]]);
+  assert.equal(list.unreadable, 0, 'the header row is not a line without a link');
+  list = readMatterportList(`name\turl\nLobby\t<iframe width="853" src="${show('AAAAAAAAAAA')}&play=1" frameborder="0"></iframe>\n`);
+  assert.deepEqual(list.links.map(link => [link.modelId, link.title]), [['AAAAAAAAAAA', 'Lobby']], 'tabs, and embed code in a cell');
+  assert.deepEqual(readMatterportList('').links, []);
+});
