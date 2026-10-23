@@ -1,7 +1,7 @@
 import gardenSpaceJson from "@/lib/data/garden-space.json";
 import gardenTourJson from "@/lib/data/garden-tour.json";
 import gardenUiJson from "@/lib/data/garden-ui.json";
-import { withAssetBase } from "@/lib/hosted-assets";
+import { withAssetBase, withConfigBase } from "@/lib/hosted-assets";
 import type {
   NormalizedTour,
   SphrBootstrap,
@@ -120,7 +120,9 @@ async function fetchBootstrapFromUrl(url: string): Promise<SphrBootstrap> {
   if (!response.ok) {
     throw new Error(`Failed to load config ${url}: ${response.status} ${response.statusText}`);
   }
-  return withAssetBase((await response.json()) as SphrBootstrap);
+  // A downloaded space names its files by their paths beside the scene file, wherever it ended up.
+  const configUrl = response.url || new URL(url, window.location.href).href;
+  return withAssetBase(withConfigBase((await response.json()) as SphrBootstrap, configUrl));
 }
 
 export async function loadBootstrapData(explicitConfigUrl?: string): Promise<SphrBootstrap> {

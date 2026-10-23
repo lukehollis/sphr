@@ -25,6 +25,7 @@
     "test:missing-part": "node --test scripts/test-missing-part.mjs",
     "test:tags": "node --test scripts/test-space-tags.mjs",
     "test:zip": "node --test scripts/test-zip.mjs",
+    "test:download": "node --test scripts/test-downloaded-space.mjs",
     "test:social": "node --test scripts/test-social.mjs",
     "test:accounts-routes": "node scripts/test-accounts-routes.mjs",
     "test:agents": "node scripts/test-agent-connector.mjs",

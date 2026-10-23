@@ -280,6 +280,14 @@ operator's space list has the same link. `GET /api/admin/scenes/<id>/download` (
 - a `README.txt` that says what each file is and lists the files tags and tours show from other
   websites, which are named, not fetched.
 
+The unzipped folder opens in the viewer as it is. The viewer reads a path in one of the folders
+above (`faces/`, `pano/`, `mesh/`, `splat/`, `model/`, `tour-files/` or `preview.jpg`) as a file
+beside the scene file it came from (`withConfigBase` in `lib/hosted-assets.ts`); text, absolute
+addresses and `/datasets/` paths stay as they are. Copy the folder into the viewer's `public/` and
+open `/?config=/<folder>/bootstrap.json`, or serve it from any web host and open
+`/?config=https://<host>/<folder>/bootstrap.json` (a host other than the viewer's must allow
+cross-origin reads). The README says the same.
+
 The zip is written as it is sent: files are stored uncompressed with data descriptors, read one at a
 time from storage (`SPHR_CUSTOMER_ASSET_BUCKET`, listed with the application's credentials, which
 gives the exact length up front) or from the scene file's own folder, so a download of any size
@@ -734,6 +742,7 @@ All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
 ```sh
 npm run test:accounts
 npm run test:zip
+npm run test:download
 npm run test:accounts-routes
 npm run typecheck
 npm run build

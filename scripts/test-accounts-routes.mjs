@@ -839,7 +839,8 @@ try {
   assert.ok(!Object.keys(download).some(name => name.includes(guestTour.id)), "tours other people made on the space are theirs, not in the owner's download");
   const readmeText = inFolder('README.txt').toString();
   for (const text of ['Riverside studio, 2nd floor', `downloaded on`, `from ${base}${publicPath}`, 'What each file is', 'pano/', 'One equirectangular JPEG image', 'tours/', 'tour-files/',
-    'Files on other websites', 'https://example.org/door.jpg', 'https://models.example/amphora.glb', 'open source, at https://source.example/sphr']) assert.ok(readmeText.toLowerCase().includes(text.toLowerCase()), text);
+    'Files on other websites', 'https://example.org/door.jpg', 'https://models.example/amphora.glb', 'open source, at https://source.example/sphr',
+    'http://localhost:3000/?config=/riverside-studio-2nd-floor/bootstrap.json', 'any web host']) assert.ok(readmeText.toLowerCase().includes(text.toLowerCase()), text);
   // Downloads that finished leave room for the next.
   for (let index = 0; index < 3; index++) {
     response = await aliceLaptop.get(downloadRoute);

@@ -137,8 +137,8 @@ const describe: Record<string, (count: number) => string> = {
   "preview.jpg": () => "The picture that stands for the space in lists and when it is shared."
 };
 
-function readme({ title, link, brand, downloaded, entries, external, source }: { title: string; link: string; brand: string; downloaded: string;
-  entries: string[]; external: string[]; source?: string }) {
+function readme({ title, link, brand, downloaded, folder, entries, external, source }: { title: string; link: string; brand: string; downloaded: string;
+  folder: string; entries: string[]; external: string[]; source?: string }) {
   const groups = new Map<string, number>();
   const folders = new Set<string>();
   for (const entry of entries) {
@@ -160,7 +160,9 @@ function readme({ title, link, brand, downloaded, entries, external, source }: {
   ];
   if (external.length) lines.push("", "Files on other websites", "",
     "Some tags and tours show files kept on other websites. They are not in this folder, and the tags and tours name them by these addresses.", "", ...external);
-  if (source) lines.push("", `The viewer that reads bootstrap.json is open source, at ${source}`);
+  if (source) lines.push("", `The viewer that reads bootstrap.json is open source, at ${source}`, "",
+    `To open the space in it, run the viewer, copy this folder into its public folder and open http://localhost:3000/?config=/${folder}/bootstrap.json`,
+    "The folder opens as it is from any web host too: add ?config= and the address of its bootstrap.json to the viewer's address. A host other than the viewer's must let the viewer read its files (CORS).");
   return Buffer.from(`${lines.join("\n")}\n`);
 }
 
@@ -226,7 +228,7 @@ export async function spaceExport(scene: SceneListing, origin: string, now = new
   const entries = ["README.txt", ...generated.map((file) => file.path), ...media.map((file) => file.path)];
   const folder = scene.titleSlug;
   const downloaded = now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
-  const notes = readme({ title: scene.title, link, brand: siteBrand(), downloaded, entries, external: [...external].sort(), source: sourceUrl() });
+  const notes = readme({ title: scene.title, link, brand: siteBrand(), downloaded, folder, entries, external: [...external].sort(), source: sourceUrl() });
   return { name: folder, files: [
     bufferFile(`${folder}/README.txt`, notes, now),
     ...generated.map((file) => bufferFile(`${folder}/${file.path}`, file.bytes, now)),
