@@ -154,4 +154,5 @@ test('a Matterport that cannot be reached gives the job back for later', async (
   const run = await runOnce(['sh', '-c', 'exit 0'], { matterport: 'down' });
   assert.deepEqual(actions(run), ['claim', 'defer'], run.output);
   assert.match(run.actions[1].message, /Matterport answered 503/);
+  assert.match(run.output, /Matterport turned this worker away: .*Matterport links wait until/, 'the links waiting to come from Matterport wait together');
 });

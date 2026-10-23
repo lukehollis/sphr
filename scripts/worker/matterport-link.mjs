@@ -128,8 +128,12 @@ export async function downloadMatterport(link, folder, { fetch = globalThis.fetc
         continue;
       }
       if ((response.status >= 500 || response.status === 429) && attempt < 3) {
+        // A Matterport that asks for a pause (Retry-After, in seconds) gets it, up to two minutes and within the time left.
+        const asked = Number(response.headers.get('retry-after'));
         await response.body?.cancel();
-        await new Promise(resolve => setTimeout(resolve, 1000 * 4 ** attempt));
+        const wait = Number.isFinite(asked) && asked > 0 ? Math.min(asked * 1000, 120_000) : 1000 * 4 ** attempt;
+        if (wait >= deadline - Date.now()) throw new MatterportError('network', `Matterport answered ${response.status} and asked for a pause.`);
+        await new Promise(resolve => setTimeout(resolve, wait));
         return request(url, init, attempt + 1);
       }
       return response;

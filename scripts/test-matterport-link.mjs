@@ -89,6 +89,22 @@ test('addresses outside Matterport, redirects away from it and spaces that do no
   await assert.rejects(downloadMatterport('https://example.com/tour', folder(), { fetch: matterport().fetch }), error => error instanceof MatterportError && error.kind === 'missing');
 });
 
+test('a Matterport that asks for a pause gets it before the request is made again', async () => {
+  const fake = matterport();
+  let refused = 0;
+  const fetch = async (url, init) => new URL(url).pathname === '/api/mp/models/graph' && !refused++
+    ? new Response('Too many requests', { status: 429, headers: { 'retry-after': '2' } }) : fake.fetch(url, init);
+  const target = folder();
+  const started = Date.now();
+  const summary = await downloadMatterport(id, target, { fetch });
+  assert.ok(Date.now() - started >= 2000, 'it waited as long as Matterport asked');
+  assert.equal(summary.sweeps, 2);
+  await assert.rejects(downloadMatterport(id, folder(), { minutes: 0.01,
+    fetch: async () => new Response('Too many requests', { status: 429, headers: { 'retry-after': '60' } }) }),
+    error => error instanceof MatterportError && error.kind === 'network' && /asked for a pause/.test(error.message), 'a pause longer than the time left gives the job back');
+  rmSync(path.dirname(target), { recursive: true, force: true });
+});
+
 test('a space larger than the limit stops with a reason the customer can read', async () => {
   const target = folder();
   await assert.rejects(downloadMatterport(id, target, { fetch: matterport().fetch, maxBytes: 100 }),

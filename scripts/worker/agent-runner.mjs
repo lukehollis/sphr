@@ -424,6 +424,16 @@ function pauseClaims(problem) {
   pause.until = Date.now() + backoff(pause.times, 5);
   console.error(`[${new Date().toISOString()}] agents cannot start: ${problem}; taking no jobs until ${new Date(pause.until).toISOString()}`);
 }
+// When Matterport turns the runner away (unreachable, busy, or asking it to slow down), every space waiting to come
+// from it, often one customer's list, waits together (5 minutes, doubling up to an hour) instead of each being tried
+// and given back in turn. Uploads go on meanwhile.
+const matterport = { until: 0, times: 0 };
+const matterportResting = job => job.source?.kind === 'matterport' && matterport.until > Date.now();
+function restMatterport(problem) {
+  matterport.times++;
+  matterport.until = Date.now() + backoff(matterport.times, 5);
+  console.error(`[${new Date().toISOString()}] Matterport turned this worker away: ${problem}; Matterport links wait until ${new Date(matterport.until).toISOString()}`);
+}
 
 /**
  * Why this worker lacks room for a job of `bytes` uploaded bytes, or nothing. A job takes about three times its
@@ -521,7 +531,10 @@ async function processJob(queued) {
   }
   try {
     const files = await download(job);
-    if (link) files.push(await downloadLink(job, link));
+    if (link) {
+      files.push(await downloadLink(job, link));
+      matterport.times = 0;
+    }
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
       notes: job.space.notes, output: ['splat', 'tour'].includes(job.space.output) ? job.space.output : 'auto',
       reprocessing: job.space.reprocessing, inputs: files,
@@ -535,7 +548,8 @@ async function processJob(queued) {
       log(job, `reported to the customer: ${error.message}`);
       return 'failed';
     }
-    coolDown(job);
+    if (link && error instanceof MatterportError) restMatterport(error.message);
+    else coolDown(job);
     return defer(job, error.message);
   }
   const since = Date.now();
@@ -576,7 +590,7 @@ if (command === 'list') {
       if (Date.now() < pause.until) { await sleep(Math.min(pause.until - Date.now(), 60000)); continue; }
       // Long-poll: the application answers as soon as a customer submits a space.
       const { jobs } = await api(`/api/worker/jobs?status=queued${once ? '' : '&wait=45'}`);
-      const started = jobs.find(job => !coolingDown(job.id));
+      const started = jobs.find(job => !coolingDown(job.id) && !matterportResting(job));
       if (started) {
         const task = processJob(started).catch(error => console.error(`[${new Date().toISOString()}] ${started.id} ${error.message}`))
           .finally(() => active.delete(task));
