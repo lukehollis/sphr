@@ -33,9 +33,10 @@ function fakeMatterport(origin, model, request, text, response) {
 
 /**
  * One queued job with a five-byte upload, or, with `matterport`, a space made from a Matterport link (served by the
- * same stand-in); counts downloads and records every action and health check the runner posts.
+ * same stand-in); counts downloads and records every action and health check the runner posts. `refuse` answers the
+ * first `times` posts of one action with `status`, as a proxy or a restarting application would.
  */
-async function fakeApp({ defer = true, matterport } = {}) {
+async function fakeApp({ defer = true, matterport, refuse } = {}) {
   const job = { id: '0123456789abcdef', status: 'queued', sceneId: 'abcdef123456', slug: 'customer-abc123def456', preview: false,
     space: { id: 'abc123def456', title: 'Test space', notes: null, output: 'auto', reprocessing: false },
     uploads: matterport ? [] : [{ id: 'u1', name: 'capture.zip', size: 5, type: 'application/zip', source: { url: '/api/worker/uploads/u1' } }],
@@ -56,6 +57,10 @@ async function fakeApp({ defer = true, matterport } = {}) {
     const body = JSON.parse(text);
     if (request.url === '/api/worker/health') { app.health.push(body); return send(200, { ok: true }); }
     if (body.action !== 'progress') app.actions.push(body);
+    if (refuse && body.action === refuse.action && refuse.times-- > 0) {
+      response.writeHead(refuse.status, { 'Content-Type': 'text/html' });
+      return response.end('<html><title>Attention Required!</title></html>');
+    }
     if (body.action === 'claim') { job.status = 'running'; return send(200, { job }); }
     if (body.action === 'defer' && !defer) return send(400, { error: 'Unknown action.' });
     job.status = ['defer', 'release'].includes(body.action) ? 'queued' : body.action;
@@ -67,6 +72,8 @@ async function fakeApp({ defer = true, matterport } = {}) {
   return app;
 }
 
+const fakeAgent = fileURLToPath(new URL('./test-support/fake-agent.mjs', import.meta.url));
+
 /** Runs one pass of the runner with `command` as the agent command; `options.env` adds to its environment. */
 async function runOnce(command, options = {}) {
   const app = await fakeApp(options);
@@ -75,7 +82,8 @@ async function runOnce(command, options = {}) {
     const child = spawn(process.execPath, [runner, 'run', '--once'], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH,
       SPHR_WORKER_URL: app.origin, SPHR_WORKER_TOKEN: 'x'.repeat(40), SPHR_WORKER_NAME: 'test-worker', SPHR_WORKER_DIR: dir,
       SPHR_AGENT_ISOLATION: 'container', SPHR_AGENT_COMMAND: JSON.stringify(command), SPHR_WORKER_DISK_RESERVE_GB: '0',
-      SPHR_MATTERPORT_TEST_BASE: app.origin, ...options.env } });
+      SPHR_MATTERPORT_TEST_BASE: app.origin, SPHR_WORKER_REPORT_RETRY_MS: '20', SPHR_WORKER_PUBLISH: 'local',
+      SPHR_WORKER_LOCAL_DATASETS: path.join(dir, 'published'), ...options.env } });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
@@ -155,4 +163,17 @@ test('a Matterport that cannot be reached gives the job back for later', async (
   assert.deepEqual(actions(run), ['claim', 'defer'], run.output);
   assert.match(run.actions[1].message, /Matterport answered 503/);
   assert.match(run.output, /Matterport turned this worker away: .*Matterport links wait until/, 'the links waiting to come from Matterport wait together');
+});
+
+test('a result the application cannot take at first is sent again, not left running for hours', async () => {
+  const run = await runOnce(['sh', '-c', 'printf \'{"status":"failed","message":"Upload a capture."}\' > output/result.json'], { refuse: { action: 'fail', times: 2, status: 503 } });
+  assert.deepEqual(actions(run), ['claim', 'fail', 'fail', 'fail'], run.output);
+  assert.match(run.output, /could not report "fail" \(HTTP 503\); trying again/);
+  assert.equal(run.code, 0, run.output);
+});
+
+test('a published space whose report is refused waits for an operator, with how to report it again', async () => {
+  const run = await runOnce([process.execPath, fakeAgent, '{job}'], { refuse: { action: 'complete', times: 1, status: 403 } });
+  assert.deepEqual(actions(run), ['claim', 'complete', 'hold'], run.output);
+  assert.match(run.actions[2].message, /^The space was published, but reporting it was refused \(HTTP 403\)\. Report it again with: agent-runner\.mjs publish 0123456789abcdef$/);
 });

@@ -628,6 +628,12 @@ node scripts/worker/agent-runner.mjs fail <job> "What to upload instead"
 node scripts/worker/agent-runner.mjs release <job>          # back to the queue
 ```
 
+The runner sends a job's outcome again for about eight minutes while the application cannot be reached or
+answers with a server error, since an outcome that never arrives leaves the job running until its lease ends
+and a customer's list of Matterport spaces waiting behind it. A published space whose result is refused
+outright (a proxy may turn the message away) is held instead, with the `publish` command that reports it
+again; the customer sees it as held and the next space of a list starts.
+
 Before it downloads a job's files, the runner checks that the image and network named in a `docker run`
 agent command exist (`node scripts/worker/agent-runner.mjs check` does the same by hand). A worker that
 cannot start agents, or an agent that exits without writing anything to `output/`, is a problem on our side,

@@ -488,9 +488,26 @@ async function defer(job, reason) {
   return 'deferred';
 }
 
+/**
+ * Sends a job's outcome, trying again for about eight minutes while the application cannot be reached or answers
+ * with a server error. An outcome that never arrives would leave the job running until its lease ends, hours later,
+ * and a customer's list of Matterport spaces waiting behind it. Any other refusal is thrown at once.
+ */
+async function report(job, body) {
+  const pause = Number(env('SPHR_WORKER_REPORT_RETRY_MS') ?? 15000);
+  for (let attempt = 0; ; attempt++) {
+    try { return await api(`/api/worker/jobs/${job.id}`, body); }
+    catch (error) {
+      if ((error.status && error.status < 500 && error.status !== 429) || attempt >= 5) throw error;
+      log(job, `could not report "${body.action}" (${error.message}); trying again`);
+      await sleep(pause * 2 ** attempt);
+    }
+  }
+}
+
 async function hold(job, reason) {
   log(job, `held for an operator: ${reason}`);
-  await api(`/api/worker/jobs/${job.id}`, { action: 'hold', message: reason.slice(0, 1000) });
+  await report(job, { action: 'hold', message: reason.slice(0, 1000) });
   return 'held';
 }
 
@@ -499,14 +516,20 @@ async function finish(job) {
   if (!result) return hold(job, 'The agent did not write a valid output/result.json.');
   if (result.status === 'needs_operator') return hold(job, result.message || 'The agent asked for an operator.');
   if (result.status === 'failed') {
-    await api(`/api/worker/jobs/${job.id}`, { action: 'fail', message: result.message || 'These files could not be processed.' });
+    await report(job, { action: 'fail', message: result.message || 'These files could not be processed.' });
     log(job, `reported to the customer: ${result.message}`);
     return 'failed';
   }
   let scene;
   try { scene = publish(job, validatePackage(job)); }
   catch (error) { return hold(job, error.message); }
-  await api(`/api/worker/jobs/${job.id}`, { action: 'complete', message: result.message || null, scene });
+  // A published space whose result is refused (a proxy may turn away the message) waits for an operator, who can
+  // report it again without processing it again; the customer sees it as held, and the next space of a list starts.
+  try { await report(job, { action: 'complete', message: result.message || null, scene }); }
+  catch (error) {
+    if (!error.status) throw error;
+    return hold(job, `The space was published, but reporting it was refused (${error.message}). Report it again with: agent-runner.mjs publish ${job.id}`);
+  }
   log(job, `ready as scene ${job.sceneId}`);
   return 'done';
 }
@@ -544,7 +567,7 @@ async function processJob(queued) {
     // A space Matterport will not open, or one larger than a space can hold, is the customer's to fix.
     if (error instanceof MatterportError && error.kind !== 'network') {
       const message = error.kind === 'missing' ? `${error.message} Make it public or unlisted on Matterport, then process it again.` : error.message;
-      await api(`/api/worker/jobs/${job.id}`, { action: 'fail', message });
+      await report(job, { action: 'fail', message });
       log(job, `reported to the customer: ${error.message}`);
       return 'failed';
     }
