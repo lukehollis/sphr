@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import struct
 from urllib.parse import unquote, urlsplit
 
 import numpy as np
@@ -183,6 +184,82 @@ def select_skybox(pano):
     return max(available, key=lambda box: ranks[box["resolution"]]), ranks
 
 
+GLB_MAGIC, GLB_JSON, GLB_BIN = b"glTF", 0x4E4F534A, 0x004E4942
+
+
+def read_glb(data):
+    """A GLB's JSON document and binary chunk."""
+    magic, version, length = struct.unpack_from("<4sII", data, 0)
+    if magic != GLB_MAGIC or version != 2 or length != len(data):
+        raise ValueError("Not a glTF 2 binary")
+    json_length, json_type = struct.unpack_from("<II", data, 12)
+    if json_type != GLB_JSON:
+        raise ValueError("GLB does not start with its JSON chunk")
+    document = json.loads(data[20:20 + json_length])
+    at = 20 + json_length
+    if at == len(data):
+        return document, b""
+    bin_length, bin_type = struct.unpack_from("<II", data, at)
+    if bin_type != GLB_BIN or at + 8 + bin_length > len(data):
+        raise ValueError("Malformed GLB binary chunk")
+    return document, data[at + 8:at + 8 + bin_length]
+
+
+def texture_sources(document):
+    """Image index to the name of the material that uses it, from each material's base colour texture."""
+    names = {}
+    for material in document.get("materials", []):
+        texture = (material.get("pbrMetallicRoughness") or {}).get("baseColorTexture")
+        if texture is not None:
+            image = document["textures"][texture["index"]]["source"]
+            if names.setdefault(image, material.get("name")) != material.get("name"):
+                raise ValueError("Two mesh materials share one texture image")
+    return names
+
+
+def image_type(data):
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    raise ValueError("Unsupported mesh texture format")
+
+
+def embed_textures(glb, sources):
+    """
+    The GLB with each texture image replaced by the bytes of the file it was decoded from. trimesh encodes images
+    again when it writes a GLB, as PNG for decoded bitmaps, which made the dollhouse of a space with hundreds of
+    photos six times the size of Matterport's own JPEG textures. `sources` maps a material name to its file.
+    """
+    document, blob = read_glb(glb)
+    names = texture_sources(document)
+    if set(names) != set(range(len(document.get("images", [])))):
+        raise ValueError("A mesh texture image is not used by any material")
+    replaced = {}
+    for index, name in names.items():
+        if name not in sources:
+            raise ValueError(f"No source texture for mesh material {name}")
+        data = Path(sources[name]).read_bytes()
+        image = document["images"][index]
+        image["mimeType"] = image_type(data)
+        replaced[image["bufferView"]] = data
+    packed = bytearray()
+    for index, view in enumerate(document["bufferViews"]):
+        if view.get("buffer", 0) != 0:
+            raise ValueError("GLB uses more than one buffer")
+        start = view.get("byteOffset", 0)
+        data = replaced.get(index, blob[start:start + view["byteLength"]])
+        packed += b"\0" * (-len(packed) % 4)
+        view["byteOffset"], view["byteLength"] = len(packed), len(data)
+        packed += data
+    packed += b"\0" * (-len(packed) % 4)
+    document["buffers"][0]["byteLength"] = len(packed)
+    text = json.dumps(document, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    return (struct.pack("<4sII", GLB_MAGIC, 2, 28 + len(text) + len(packed)) + struct.pack("<II", len(text), GLB_JSON) + text
+            + struct.pack("<II", len(packed), GLB_BIN) + bytes(packed))
+
+
 def export_mesh(archive, model, target):
     candidates = [asset for asset in model["assets"]["meshes"]
                   if asset.get("status") == "available" and asset.get("format") == "dam"
@@ -199,6 +276,7 @@ def export_mesh(archive, model, target):
         raise ValueError("Expected one high-quality mesh texture template")
     scene = trimesh.Scene()
     source_assets = {source}
+    by_material = {}
     for index, chunk in enumerate(chunks):
         match = re.search(r"_(\d+)\.[^.]+$", chunk["material"])
         if not match:
@@ -207,6 +285,7 @@ def export_mesh(archive, model, target):
         if texture.name != chunk["material"]:
             raise ValueError("Texture template does not match the DAM material")
         source_assets.add(texture)
+        by_material[chunk["material"]] = texture
         with Image.open(texture) as image:
             bitmap = image.convert("RGB")
         material = trimesh.visual.material.PBRMaterial(
@@ -218,7 +297,7 @@ def export_mesh(archive, model, target):
         scene.add_geometry(mesh, node_name=f"chunk-{index}", geom_name=f"chunk-{index}")
         chunk["texture"] = texture
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(scene.export(file_type="glb"))
+    target.write_bytes(embed_textures(scene.export(file_type="glb"), by_material))
     reread = trimesh.load(target, force="scene", process=False)
     triangles = sum(len(mesh.faces) for mesh in reread.geometry.values())
     if triangles != sum(len(chunk["faces"]) for chunk in chunks):
@@ -254,7 +333,7 @@ def convert_tags(archive, stage, dataset_url):
     source = archive / TAGS
     if not source.is_file():
         return [], set(), []
-    records = (json.loads(source.read_text()).get("data") or {}).get("model", {}).get("mattertags") or []
+    records = ((json.loads(source.read_text()).get("data") or {}).get("model") or {}).get("mattertags") or []
     tags, sources, media_files = [], {source}, []
     for record in records:
         anchor = record.get("anchorPosition")
@@ -391,6 +470,15 @@ def validate_package(folder, archive=None):
         original_chunks = load_dam(local_asset(archive, dam["url"]))
         if len(original_chunks) != len(mesh.geometry):
             raise ValueError("Source mesh chunk count mismatch")
+        texture_template = next(t["urlTemplate"] for t in model["assets"]["textures"]
+                                if t["status"] == "available" and t["quality"] == "high" and t["resolution"] == dam["resolution"])
+        document, blob = read_glb(mesh_path.read_bytes())
+        for image, name in texture_sources(document).items():
+            view = document["bufferViews"][document["images"][image]["bufferView"]]
+            embedded = blob[view.get("byteOffset", 0):view.get("byteOffset", 0) + view["byteLength"]]
+            texture = local_asset(archive, texture_template.replace("<texture>", re.search(r"_(\d+)\.[^.]+$", name)[1]))
+            if hashlib.sha256(embedded).hexdigest() != digest(texture):
+                raise ValueError("GLB textures differ from the source textures")
         for index, chunk in enumerate(original_chunks):
             geometry = mesh.geometry[f"chunk-{index}"]
             if (not np.allclose(geometry.vertices, chunk["vertices"] @ C.T, atol=1e-7)
@@ -426,9 +514,6 @@ def validate_package(folder, archive=None):
 
 
 def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False):
-    # Reuse the established exploration/transition envelope, with no runtime fork.
-    from converter import build_bootstrap
-
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
         raise ValueError("Invalid storage slug")
     source, model, root = load_source(archive)
@@ -443,8 +528,19 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
     directory.mkdir(parents=True, exist_ok=True)
     final = directory / slug
     stage = directory / f".{slug}.web-staging"
-    # Never share or overwrite an in-progress staging directory.
+    # Never share or overwrite an in-progress staging directory; this run's own is removed if it fails, so a retry can start.
     stage.mkdir()
+    try:
+        return build_package(archive, slug, title, source, model, root, locations, navigation, directory, final, stage)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+
+
+def build_package(archive, slug, title, source, model, root, locations, navigation, directory, final, stage):
+    # Reuse the established exploration/transition envelope, with no runtime fork.
+    from converter import build_bootstrap
+
     dataset_url = f"/datasets/matterport/{slug}"
     nodes, source_assets = [], {source}
     for loc in locations:
@@ -473,7 +569,7 @@ def convert(archive, slug, title, public_root, allow_unavailable_neighbors=False
                       "neighbors": navigation[loc['id']][0], "faces": faces,
                       **({'unavailableNeighborIds': navigation[loc['id']][1]} if navigation[loc['id']][1] else {}),
                       "resolution": box["resolution"], "sourceDimensions": list(dimensions),
-                      "sourceLocationId": loc["id"], "sourceFloorId": loc.get("floor", {}).get("id")})
+                      "sourceLocationId": loc["id"], "sourceFloorId": (loc.get("floor") or {}).get("id")})
     mesh_path = f"mesh/{slug}-50k.glb"
     mesh, mesh_sources = export_mesh(archive, model, stage / mesh_path)
     source_assets.update(mesh_sources)

@@ -13,17 +13,17 @@ from scipy.spatial.transform import Rotation
 from catalog import write_matterport_index
 from geometry import C
 from publish import stage_scene
-from web_archive import TAGS, convert, fields, load_dam, local_asset, pano_quaternion, plain_text, select_skybox, source_neighbors
+from web_archive import TAGS, convert, fields, load_dam, local_asset, pano_quaternion, plain_text, read_glb, select_skybox, source_neighbors
 
 
 def field(tag, value):
     return bytes([tag * 8 + 2, len(value)]) + value
 
 
-def tiny_archive(root, tags):
+def tiny_archive(root, tags, floor={"id": "f1"}):
     """One sweep of 512 px faces, a one-triangle DAM with its texture, and the Mattertags the runner saves."""
     template = "https://cdn-2.matterport.com/models/m/assets/pan/512/~/s1_skybox<face>.jpg?t=signed"
-    location = {"id": "l1", "index": 0, "neighbors": [], "floor": {"id": "f1"}, "position": {"x": 1, "y": 2, "z": 0},
+    location = {"id": "l1", "index": 0, "neighbors": [], "floor": floor, "position": {"x": 1, "y": 2, "z": 0},
                 "pano": {"sweepUuid": "s1", "label": "1", "position": {"x": 1, "y": 2, "z": 1.5}, "rotation": {"x": 0, "y": 0, "z": 0, "w": 1},
                          "skyboxes": [{"resolution": "512", "status": "available", "urlTemplate": template}, {"resolution": "4k", "status": "locked"}]}}
     model = {"id": "Model000001", "locations": [location], "assets": {
@@ -41,7 +41,7 @@ def tiny_archive(root, tags):
     (root / "models/m/assets/m_50k.dam").write_bytes(field(1, field(1, vertices) + field(2, field(1, bytes([0, 1, 2]))) + field(4, b"m_50k_000.jpg")))
     texture = root / "models/m/assets/~/tex/m_50k_000.jpg"
     texture.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (64, 64), "gray").save(texture)
+    Image.fromarray(rng.integers(0, 255, (64, 64, 3), dtype=np.uint8)).save(texture, quality=80)
     photo = root / "apifs/models/Model000001/images/kiln.jpg"
     photo.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32), "red").save(photo)
@@ -136,7 +136,12 @@ class WebArchiveTests(unittest.TestCase):
             self.assertEqual([result["nodes"], result["tags"]], [1, 3], "disabled tags are left out")
             manifest = json.loads((package / "manifest.json").read_text())
             self.assertEqual(json.loads((package / "validation.json").read_text())["passed"], True)
-            self.assertTrue((package / "mesh/customer-test01-50k.glb").is_file())
+            # The dollhouse carries Matterport's own texture file, not an image encoded again.
+            document, blob = read_glb((package / "mesh/customer-test01-50k.glb").read_bytes())
+            [image] = document["images"]
+            view = document["bufferViews"][image["bufferView"]]
+            self.assertEqual(image["mimeType"], "image/jpeg")
+            self.assertEqual(blob[view["byteOffset"]:view["byteOffset"] + view["byteLength"]], (archive / "models/m/assets/~/tex/m_50k_000.jpg").read_bytes())
             faces = manifest["imageManifest"]["groups"]["s1"]["sourceFaces"]
             self.assertEqual([face["sphrFace"] for face in faces], list(range(6)))
             bootstrap = json.loads((package / "bootstrap.json").read_text())
@@ -154,6 +159,23 @@ class WebArchiveTests(unittest.TestCase):
             staged, relative = stage_scene(package, entry, "https://assets.example", stage)
             shipped = {path.relative_to(stage / relative).as_posix() for path in (stage / relative).rglob("*") if path.is_file()}
             self.assertEqual(shipped, {"bootstrap.json", "preview.jpg", "mesh/customer-test01-50k.glb", "tags/kiln.jpg", *(f"faces/s1/face{face}.jpg" for face in range(6))})
+
+    def test_a_photo_without_a_floor_converts_and_a_failed_conversion_leaves_no_staging(self):
+        with tempfile.TemporaryDirectory() as folder:
+            archive, public = Path(folder).resolve() / "archive", Path(folder).resolve() / "public"
+            archive.mkdir()
+            tiny_archive(archive, [], floor=None)
+            texture = archive / "models/m/assets/~/tex/m_50k_000.jpg"
+            kept = texture.read_bytes()
+            texture.unlink()
+            with mock.patch.dict(os.environ, {"SPHR_SCENE_ID": "0123456789ab"}), self.assertRaises(FileNotFoundError):
+                convert(archive, "customer-test02", "No floor", public)
+            self.assertEqual(list((public / "datasets/matterport").iterdir()), [], "a failed run removes its own staging directory")
+            texture.write_bytes(kept)
+            with mock.patch.dict(os.environ, {"SPHR_SCENE_ID": "0123456789ab"}):
+                convert(archive, "customer-test02", "No floor", public)
+            bootstrap = json.loads((public / "datasets/matterport/customer-test02/bootstrap.json").read_text())
+            self.assertIsNone(bootstrap["space"]["space_data"]["nodes"][0]["sourceFloorId"])
 
 
 if __name__ == "__main__":
