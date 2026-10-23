@@ -18,6 +18,7 @@ import type {
 } from "@/lib/types";
 import { readableTags, type SpaceTag } from "@/lib/space-tags";
 import { TextureCache } from "@/lib/three/TextureCache";
+import { PointerSafeOrbitControls } from "@/lib/three/PointerSafeOrbitControls";
 import { prefersLight } from "@/lib/three/light";
 import { ktx2Loader } from "@/lib/three/ktx2";
 import { modelTextureLimit } from "@/lib/three/textureLimit";
@@ -273,7 +274,7 @@ export class SphrRuntime {
     this.gpu = gpuName(this.renderer.getContext());
     this.textureCache = new TextureCache(this.manager, (this.light ? 64 : 320) * 1024 * 1024, !this.light);
     this.looks = new LookPass(this.renderer, this.lookHost(), typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls = new PointerSafeOrbitControls(this.camera, this.renderer.domElement);
     this.audio = new AudioController(this.tour.audio);
 
     this.state = {
