@@ -264,6 +264,32 @@ a website and credits). Details are kept by scene ID in `space_info` (`PUT
 /api/admin/scenes/<id>/details` with the revision last read) and appear in the viewer's panel under
 the space's title; the description also becomes the page's description for search and sharing.
 
+## Downloading a space
+
+A space's page (`/account/spaces/<id>`) has *Download everything*, for its owner and team; the
+operator's space list has the same link. `GET /api/admin/scenes/<id>/download` (with
+`canManageScene`) returns one zip, in a folder named after the space:
+
+- the published capture exactly as stored: panorama faces (`faces/<uuid>/face0…5.jpg`) or 360
+  photos (`pano/`), the capture mesh (`mesh/`), splats or point cloud (`splat/`), a model
+  (`model/`) and `preview.jpg`;
+- `bootstrap.json`, the scene file with the owner's title, start view and tags applied and every
+  address of a file in the download replaced by its path there;
+- `tags.json`, `details.json` (title, link, visibility and `space_info`), the team's tours and hunts
+  on the space (`tours/<id>.json`) with the models and skies uploaded to them (`tour-files/`);
+- a `README.txt` that says what each file is and lists the files tags and tours show from other
+  websites, which are named, not fetched.
+
+The zip is written as it is sent: files are stored uncompressed with data descriptors, read one at a
+time from storage (`SPHR_CUSTOMER_ASSET_BUCKET`, listed with the application's credentials, which
+gives the exact length up front) or from the scene file's own folder, so a download of any size
+holds only a few chunks in memory, and a slow browser reads storage slowly. Files over 4 GB and
+archives with more than 65,535 files get zip64 records. `HEAD` answers with the length (or the
+refusal) without starting it, and the page asks that first. A free preview downloads once it is
+hosted; a space whose billing lapsed after it was paid for still downloads. Four downloads run at
+a time on the site and two per account; responses carry `X-Accel-Buffering: no` so a proxy passes
+them on as they come.
+
 ## Profiles, follows and hearts
 
 Every account has a public profile at `/u/<handle>`, edited at `/account/profile`: a name, a handle,
@@ -366,7 +392,7 @@ SPHR_UPLOAD_MAX_GB=50                         # per space
 SPHR_WORKER_TOKEN=...
 
 # Published customer spaces: their public, non-listable asset host, and the bucket the
-# application may delete from when a customer deletes a space.
+# application lists and reads for downloads and deletes from when a customer deletes a space.
 SPHR_CUSTOMER_ASSET_BASE_URL=https://storage.googleapis.com/example-customer-assets/sphr
 SPHR_CUSTOMER_ASSET_BUCKET=example-customer-assets
 # SPHR_CUSTOMER_ASSET_PREFIX=sphr
@@ -701,6 +727,7 @@ All requests carry `Authorization: Bearer $SPHR_WORKER_TOKEN`.
 
 ```sh
 npm run test:accounts
+npm run test:zip
 npm run test:accounts-routes
 npm run typecheck
 npm run build
@@ -712,7 +739,7 @@ stand-in for the Stripe API. `test:accounts-routes` starts a development server 
 stand-ins for Stripe, the three identity providers and an SMTP server, then exercises
 sign-up, verification, every sign-in method, the free preview and its limits, Checkout on each plan and webhooks, full plans
 and plan changes, pausing and resuming hosting, resumable
-uploads, customer isolation, private viewing and editing, and the agent runner. Run it
+uploads, customer isolation, private viewing and editing, downloading a space, and the agent runner. Run it
 in a checkout without local capture packages, because it installs a test package into
 `public/datasets` and removes it afterwards. Test live providers and Stripe test mode on
 a staging origin before enabling production keys.

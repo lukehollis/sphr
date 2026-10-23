@@ -118,6 +118,7 @@ export default function AdminPanel({ scenes: initial, brand }: { scenes: Managed
                 <button key={label} type="button" role="radio" aria-checked={scene.public === value} disabled={Boolean(busy)} onClick={() => visibility(scene, value)}>{label}</button>)}
             </div>
             <a className="site-link" href={`/admin/scenes/${scene.sceneId}`}>Edit space</a>
+            <a className="site-link" href={`/api/admin/scenes/${scene.sceneId}/download`} download>Download everything</a>
           </div>
           {scene.builders !== undefined && <label className="site-check site-card-check">
             <input type="checkbox" checked={scene.builders} disabled={Boolean(busy)} onChange={event => void building(scene, event.target.checked)} />

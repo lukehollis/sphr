@@ -77,6 +77,7 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
   const [error, setError] = useState("");
   const [message, setMessage] = useState(notice ?? "");
   const [modal, setModal] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [batchKey, setBatchKey] = useState<string | null>(null);
   const notes = useRef<HTMLTextAreaElement>(null);
   // A free preview is private to its owner, and usable until its window ends.
@@ -172,6 +173,24 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
     : space.hosted || space.status === "unpaid" || previewing ? (link ? describeLink : describe)[space.status] : "This space is offline because billing ended.";
   const status = spaceStatus(space);
   const gate = previewing && space.status === "ready" && space.scene ? <PublishGate space={space} plans={plans} /> : null;
+  // A free preview is kept by hosting it, so it downloads once hosted.
+  const downloadable = space.hosted || !space.previewed;
+  async function downloadEverything() {
+    const url = `/api/admin/scenes/${space.scene!.sceneId}/download`;
+    setDownloading(true); setError(""); setMessage("");
+    try {
+      // Asked first, so a refusal shows here instead of as a failed download.
+      const check = await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
+      if (!check.ok) throw new Error(check.status === 402 ? "Start hosting this space to download everything."
+        : check.status === 401 ? "Sign in again to download this space."
+        : check.status === 429 ? "Other downloads are still running. Try again when they finish."
+        : "This space's files are unavailable right now. Try again in a few minutes.");
+      const bytes = Number(check.headers.get("content-length"));
+      window.location.assign(url);
+      setMessage(bytes > 0 ? `Your download has started. It is ${formatBytes(bytes)}.` : "Your download has started.");
+    } catch (failure) { setError((failure as Error).message); }
+    finally { setDownloading(false); }
+  }
   async function startPreview() {
     setBusy(true); setError(""); setMessage("");
     try {
@@ -276,6 +295,14 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
               : ""}People who open it can make their own guided tours and scavenger hunts on it, with their own effects, models and sound. Your space itself never changes.</p>}
             {(usable || !space.previewed) && <a className="site-button site-button-secondary site-button-block" href={`/account/spaces/${space.id}/edit`}>Edit title and start view</a>}
             {space.hosted && <a className="site-button site-button-secondary site-button-block" href={`/account/tours/new?scene=${space.scene.sceneId}`}>Make a tour or scavenger hunt</a>}
+          </div>}
+          {space.scene && <div className="site-aside-block">
+            <h3>Keep a copy</h3>
+            <p className="site-hint">Download everything in this space as one zip file. Its photos, mesh or splats come as they are stored, with its tours, tags and details
+              and a README that says what each file is.</p>
+            <button type="button" className="site-button site-button-secondary site-button-block" disabled={downloading || !downloadable}
+              onClick={() => void downloadEverything()}>{downloading ? "Preparing…" : "Download everything"}<span aria-hidden="true">↓</span></button>
+            {!downloadable && <p className="site-hint">Downloads come with hosting.</p>}
           </div>}
           <div className="site-aside-block">
             <h3>Settings</h3>

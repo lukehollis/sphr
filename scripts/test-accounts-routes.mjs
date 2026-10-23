@@ -2,7 +2,7 @@
 // against local stand-ins for Stripe, Google/Apple/LinkedIn and email. Nothing leaves this machine.
 //   node scripts/test-accounts-routes.mjs
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, scryptSync } from 'node:crypto';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -127,6 +127,15 @@ const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.
 const beacon = (browser, events, extra = {}, { origin = base, agent = safari } = {}) => browser.request('/api/steps', { method: 'POST',
   headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8', 'User-Agent': agent }, body: JSON.stringify({ events, ...extra }) });
 const database = () => new DatabaseSync(path.join(state, 'admin.sqlite'));
+/** The files in a zip, by name, after Python's zipfile has checked every checksum. */
+function unzip(bytes) {
+  const script = `import base64, io, json, sys, zipfile
+z = zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()))
+assert z.testzip() is None
+print(json.dumps({i.filename: base64.b64encode(z.read(i)).decode() for i in z.infolist()}))`;
+  const files = JSON.parse(execFileSync('python3', ['-I', '-c', script], { input: bytes, maxBuffer: 64 << 20 }).toString());
+  return Object.fromEntries(Object.entries(files).map(([name, data]) => [name, Buffer.from(data, 'base64')]));
+}
 
 async function signInWith(browser, provider, claims, options = {}) {
   const start = await browser.get(`/api/auth/${provider}${options.next ? `?next=${encodeURIComponent(options.next)}` : ''}`);
@@ -395,6 +404,15 @@ try {
   assert.deepEqual(await response.json(), { ok: true, revision: 2, tags: null }, "restoring goes back to the capture's own tags");
   assert.doesNotMatch(await (await alice.get(renamedPath)).text(), /Built 1902/);
 
+  // ---- Downloading everything is for the space's owner and team, and a free preview is kept by hosting it ----
+  const downloadRoute = `/api/admin/scenes/${reserved}/download`;
+  assert.equal((await anonymous.get(downloadRoute)).status, 401);
+  assert.equal((await bob.get(downloadRoute)).status, 401, "only the space's owner and team download it");
+  response = await alice.get(downloadRoute);
+  assert.equal(response.status, 402, 'a free preview downloads once it is hosted');
+  assert.deepEqual(await response.json(), { error: 'Start hosting this space to download everything.', gate: 'publish', plan: `/account/plan?space=${studio.id}` });
+  assert.equal((await alice.request(downloadRoute, { method: 'HEAD' })).status, 402, 'the page asks before it starts a download');
+
   // ---- The result screen asks for payment to publish: a preview stays private until hosting starts ----
   const patchSpace = json => alice.request(`/api/account/spaces/${studio.id}`, { method: 'PATCH', json });
   response = await patchSpace({ public: true });
@@ -415,7 +433,7 @@ try {
   const until = new Date(windowEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
   let resultPage = (await (await alice.get(`/account/spaces/${studio.id}`)).text()).replaceAll('<!-- -->', '');
   for (const text of ['Your preview is ready', `Only you can open it, until ${until} (7 days left)`, 'Host it for $1 a month', 'See all plans', `/account/plan?space=${studio.id}`,
-    'Private preview', 'A free preview stays private. Public links and embeds come with hosting.']) assert.ok(resultPage.includes(text), text);
+    'Private preview', 'A free preview stays private. Public links and embeds come with hosting.', 'Downloads come with hosting.']) assert.ok(resultPage.includes(text), text);
   assert.ok(!resultPage.includes('Make a tour or scavenger hunt'), 'tours on a preview start once it is hosted');
   // The result screen's own steps arrive from the page; the steps only the server may report are refused.
   await beacon(alice, [{ name: 'publish_gate_shown', path: `127.0.0.1/account/spaces/${studio.id}`, props: { surface: 'space', left: 7 } },
@@ -445,6 +463,7 @@ try {
   resultPage = (await (await alice.get(`/account/spaces/${studio.id}?checkout=${previewSession.id}`)).text()).replaceAll('<!-- -->', '');
   assert.ok(resultPage.includes('Payment received. This space is hosted now.'), 'back from Checkout, the payment is applied');
   assert.ok(!resultPage.includes('Your preview is ready'), 'and the prompt is gone');
+  assert.ok(resultPage.includes('Download everything') && !resultPage.includes('Downloads come with hosting.'), 'and the space can be downloaded');
   body = await (await alice.get(`/api/account/spaces/${studio.id}`)).json();
   assert.deepEqual([body.space.hosted, body.space.preview, body.space.previewed, body.space.status], [true, null, true, 'ready']);
   assert.equal(subscription.items.data[0].quantity, 1);
@@ -775,6 +794,59 @@ try {
   assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'DELETE', json: {} })).status, 200);
   assert.equal((await anonymous.get(tourLink)).status, 404);
   console.log("Passed: customers' tours and scavenger hunts on their own spaces and the operator's public spaces, saving, sharing, the agent's owner check and spaces taken away.");
+
+  // ---- Downloading everything: the published files as stored, with the owner's tags, details and tours ----
+  response = await alice.request(`/api/account/tours/${ownTour.id}/models`, { method: 'POST', body: tripod, headers: { 'Content-Type': 'model/gltf-binary' } });
+  assert.equal(response.status, 200);
+  const ownModel = (await response.json()).url;
+  const ownExperience = { version: 1, kind: 'tour', effects: [], objects: [
+    { id: 'tripod', name: 'Bronze tripod', source: { kind: 'model', url: ownModel }, position: [0, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    { id: 'amphora', name: 'Red-figure amphora', source: { kind: 'model', url: 'https://models.example/amphora.glb' }, position: [1, 0, -3], rotation: [0, 0, 0], scale: [1, 1, 1] }],
+    stops: [{ id: 'one', title: 'The desk', text: 'Where the river light comes in.', view: { nodeId: node, rotation: { azimuth: 0, polar: 0 } }, objects: ['tripod', 'amphora'], effects: [] }] };
+  response = await alice.request(`/api/account/tours/${ownTour.id}`, { method: 'PUT', json: { revision: 0, title: 'Studio walk', public: false, experience: ownExperience } });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await putTags(alice, [doorTag], 2)).status, 200);
+  assert.equal((await alice.request(`/api/admin/scenes/${reserved}/details`, { method: 'PUT', json: { revision: 0,
+    info: { description: 'A recording studio by the river.', location: 'Riverside', capturedBy: 'Alice' } } })).status, 200);
+  assert.equal((await bob.get(downloadRoute)).status, 401, 'a public space is still downloaded by its owner alone');
+  response = await alice.request(downloadRoute, { method: 'HEAD' });
+  assert.equal(response.status, 200);
+  const announced = Number(response.headers.get('content-length'));
+  assert.ok(announced > 0, 'the page learns the size before the download starts');
+  response = await alice.get(downloadRoute);
+  assert.deepEqual([response.status, response.headers.get('content-type'), response.headers.get('content-disposition'), response.headers.get('cache-control'), response.headers.get('x-accel-buffering')],
+    [200, 'application/zip', 'attachment; filename="riverside-studio-2nd-floor.zip"', 'private, no-store', 'no']);
+  const zipped = Buffer.from(await response.arrayBuffer());
+  assert.equal(zipped.length, announced, 'the download is as long as announced');
+  const download = unzip(zipped);
+  const inFolder = name => download[`riverside-studio-2nd-floor/${name}`];
+  const modelPath = `tour-files/${ownTour.id}/${ownModel.split('/').pop()}`;
+  assert.deepEqual(Object.keys(download).map(name => name.replace('riverside-studio-2nd-floor/', '')),
+    ['README.txt', 'details.json', 'tags.json', `tours/${ownTour.id}.json`, 'bootstrap.json', 'preview.jpg', 'pano/001.jpg', modelPath], 'everything, in one folder, descriptions first');
+  for (const name of ['preview.jpg', 'pano/001.jpg']) assert.ok(inFolder(name).equals(readFileSync(path.join(installed, name))), `${name} comes as it is stored`);
+  assert.ok(inFolder(modelPath).equals(tripod), 'and so do models uploaded to the tour');
+  const exported = JSON.parse(inFolder('bootstrap.json'));
+  assert.doesNotMatch(inFolder('bootstrap.json').toString(), /\/datasets\//, 'the scene file names its files by their paths in the download');
+  assert.ok(inFolder('bootstrap.json').toString().includes('"pano/001.jpg"'));
+  assert.equal(exported.space.title, 'Riverside studio, 2nd floor');
+  assert.deepEqual(exported.space.space_data.tags.map(tag => tag.title), ['Front door'], "with the owner's tags");
+  assert.deepEqual(JSON.parse(inFolder('tags.json')).map(tag => [tag.id, tag.title, tag.media.url]), [['tag-door', 'Front door', 'https://example.org/door.jpg']]);
+  assert.deepEqual(JSON.parse(inFolder('details.json')), { title: 'Riverside studio, 2nd floor', link: `${base}${publicPath}`, visibility: 'public', added: JSON.parse(inFolder('details.json')).added,
+    downloaded: JSON.parse(inFolder('details.json')).downloaded, description: 'A recording studio by the river.', location: 'Riverside', capturedBy: 'Alice' });
+  const exportedTour = JSON.parse(inFolder(`tours/${ownTour.id}.json`));
+  assert.deepEqual([exportedTour.title, exportedTour.kind, exportedTour.link, exportedTour.experience.objects.map(object => object.source.url)],
+    ['Studio walk', 'tour', `${base}/t/${ownTour.id}/studio-walk`, [modelPath, 'https://models.example/amphora.glb']]);
+  assert.ok(!Object.keys(download).some(name => name.includes(guestTour.id)), "tours other people made on the space are theirs, not in the owner's download");
+  const readmeText = inFolder('README.txt').toString();
+  for (const text of ['Riverside studio, 2nd floor', `downloaded on`, `from ${base}${publicPath}`, 'What each file is', 'pano/', 'One equirectangular JPEG image', 'tours/', 'tour-files/',
+    'Files on other websites', 'https://example.org/door.jpg', 'https://models.example/amphora.glb', 'open source, at https://source.example/sphr']) assert.ok(readmeText.toLowerCase().includes(text.toLowerCase()), text);
+  // Downloads that finished leave room for the next.
+  for (let index = 0; index < 3; index++) {
+    response = await aliceLaptop.get(downloadRoute);
+    assert.equal(response.status, 200);
+    assert.equal((await response.arrayBuffer()).byteLength, announced);
+  }
+  console.log('Passed: downloading everything (owner only, after hosting, exact length, files as stored, paths in the scene file, tags, details, tours and their models, README).');
 
   // A job the agent cannot finish waits for an operator instead of guessing.
   body = await (await aliceLaptop.post('/api/account/spaces', { title: 'Odd capture' })).json();
