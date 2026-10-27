@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Footprints, Heart, Menu, Tag, Volume2, VolumeX, X } from "lucide-react";
+import { Box, Footprints, Heart, Menu, Share2, Tag, Volume2, VolumeX, X } from "lucide-react";
 import type { RuntimeState } from "@/lib/types";
 import { contactHref, formatCapturedOn } from "@/lib/space-info";
 import { defaultTagColor, type SpaceTag } from "@/lib/space-tags";
+import { embedCode, shareUrl, type ShareView } from "@/lib/share-link";
+import { track } from "@/components/Analytics";
 import type { ProfileCard } from "@/lib/server/profiles";
 import { pixelFont } from "@/app/design-system/fonts";
 import { hostHref, trackBuildClick, trackHostClick, type ViewerHost } from "@/lib/host-link";
@@ -34,6 +36,9 @@ export type TourHeart = { tourId: string; count: number; hearted: boolean; signe
 /** The space's tags, listed to open from the controls, with a switch to hide them in the space. */
 export type TagsControl = { list: SpaceTag[]; shown: boolean; onShown: (shown: boolean) => void; onOpen: (id: string) => void };
 
+/** Sharing the page: its address, whether others can open it, and the view a link opens at (read when the panel opens). */
+export type ShareControl = { url: string; public: boolean; title: string; tags: boolean; view: () => ShareView | null };
+
 type Props = {
   title?: string;
   details?: SpaceDetails;
@@ -52,6 +57,7 @@ type Props = {
   /** Offered where the browser can show the space in a VR headset. */
   onEnterVr?: () => void;
   tags?: TagsControl;
+  share?: ShareControl;
 };
 
 export default function HudControls({
@@ -70,7 +76,8 @@ export default function HudControls({
   onToggleReconstruction,
   onSelectReconstructionVariant,
   onEnterVr,
-  tags
+  tags,
+  share
 }: Props) {
   const reconstruction = state.reconstruction?.available && onToggleReconstruction ? state.reconstruction : null;
   return (
@@ -82,8 +89,9 @@ export default function HudControls({
       </div>}
       <header className="viewer-header">
         <SceneHeading title={title} details={details} />
-        {(hasGuidedTour || hasAudio || heart || reconstruction || onEnterVr || tags) && <div className="hud-right" aria-label="Viewer settings">
+        {(hasGuidedTour || hasAudio || heart || reconstruction || onEnterVr || tags || share) && <div className="hud-right" aria-label="Viewer settings">
           {heart && <HeartButton heart={heart} />}
+          {share && <ShareMenu share={share} orbit={state.viewMode === "ORBIT"} />}
           {tags && <TagsMenu tags={tags} />}
           {/* Guided tours set it per stop; the visitor can still compare the site then and now. */}
           {reconstruction && <ControlButton label={reconstruction.visible ? "Show the capture" : "Show the reconstruction"} active={reconstruction.visible} onClick={onToggleReconstruction!}>
@@ -201,6 +209,76 @@ function SceneHeading({ title, details }: { title?: string; details?: SpaceDetai
           {links.map(([label, text, href]) => <div key={label}><dt>{label}</dt><dd><a href={href} target="_blank" rel="noopener nofollow">{text}</a></dd></div>)}
         </dl>}
         {details.credits && <p className="scene-credits">{details.credits}</p>}
+      </div>}
+    </div>
+  );
+}
+
+/**
+ * The share button: a link and an embed code for the page, opening at the view on screen when it was
+ * opened (the tour stop, or the spot and the way the visitor faces), with tags hidden if asked.
+ */
+function ShareMenu({ share, orbit }: { share: ShareControl; orbit: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<ShareView | null>(null);
+  const [atView, setAtView] = useState(true);
+  const [showTags, setShowTags] = useState(true);
+  const [copied, setCopied] = useState<"link" | "embed" | null>(null);
+  const root = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerdown", outside); window.removeEventListener("keydown", escape); };
+  }, [open]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(null), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const chosen = atView ? view : null;
+  const url = shareUrl(share.url, chosen, { tags: share.tags && !showTags ? false : undefined });
+  const code = embedCode(url, share.title);
+  function toggle() {
+    if (!open) { setView(share.view()); setCopied(null); }
+    setOpen(value => !value);
+  }
+  async function copy(kind: "link" | "embed", text: string, field: HTMLInputElement | HTMLTextAreaElement | null) {
+    try { await navigator.clipboard.writeText(text); }
+    catch { field?.select(); document.execCommand?.("copy"); }
+    setCopied(kind);
+    track("share_copy", { kind, view: chosen ? ("stop" in chosen ? "stop" : "spot") : "space" });
+  }
+  const linkField = useRef<HTMLInputElement | null>(null);
+  const codeField = useRef<HTMLTextAreaElement | null>(null);
+  return (
+    <div className="share-menu" ref={root}>
+      <button className={open ? "viewer-button active" : "viewer-button"} type="button" aria-expanded={open} aria-controls="share-panel"
+        aria-label="Share or embed" title="Share or embed this space" onClick={toggle}>
+        <Share2 size={20} aria-hidden="true" />
+      </button>
+      {open && <div className="share-panel" id="share-panel" role="dialog" aria-label="Share this space">
+        {view ? <label className="share-check">
+          <input type="checkbox" checked={atView} onChange={event => setAtView(event.target.checked)} />
+          <span>{"stop" in view ? `Open at stop ${view.stop + 1}` : "Open at this view"}</span>
+        </label> : orbit && <p className="share-hint">Step inside the space to share the view from where you stand.</p>}
+        {share.tags && <label className="share-check">
+          <input type="checkbox" checked={showTags} onChange={event => setShowTags(event.target.checked)} />
+          <span>Show tags</span>
+        </label>}
+        <label className="share-label" htmlFor="share-link">Link</label>
+        <div className="share-row">
+          <input ref={linkField} id="share-link" className="share-field" readOnly value={url} onFocus={event => event.currentTarget.select()} />
+          <button type="button" className="share-copy" onClick={() => void copy("link", url, linkField.current)}>{copied === "link" ? "Copied" : "Copy"}</button>
+        </div>
+        <label className="share-label" htmlFor="share-embed">Embed code</label>
+        <div className="share-row share-row--code">
+          <textarea ref={codeField} id="share-embed" className="share-field" readOnly rows={3} value={code} onFocus={event => event.currentTarget.select()} />
+          <button type="button" className="share-copy" onClick={() => void copy("embed", code, codeField.current)}>{copied === "embed" ? "Copied" : "Copy"}</button>
+        </div>
+        {!share.public && <p className="share-hint">This space is private, so the link opens only for you and your team.</p>}
       </div>}
     </div>
   );

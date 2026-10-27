@@ -283,7 +283,8 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
                 {value === "public" ? "Public" : "Private"}</button>)}
             </div>
             <p className="site-hint">{previewing ? "A free preview stays private. Public links and embeds come with hosting."
-              : space.scene.public ? "Anyone with the link can open it." : "Only you can open it while it is private."}</p>
+              : space.scene.public ? "Anyone with the link can open it. To put it on a website, open the space and choose Share for a link or embed code that starts at the view you pick."
+              : "Only you can open it while it is private."}</p>
             {!previewing && <label className="site-check">
               <input type="checkbox" checked={space.scene.builders} disabled={busy || !space.hosted}
                 onChange={event => void patch({ builders: event.target.checked }, event.target.checked

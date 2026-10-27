@@ -124,6 +124,19 @@ h1, h2, h3, strong { font-weight: var(--weight-bold); color: var(--text-heading)
 .tag-card-text p { margin: 0 0 12px; overflow-wrap: anywhere; }
 .tag-card-text a, .tag-card-link { color: var(--text-heading); }
 .tag-card-link { display: inline-flex; align-items: center; gap: 6px; margin: 6px 16px 12px; font-size: var(--size-caption); }
+/* Sharing: a link and an embed code that open at the view on screen. */
+.share-menu { position: relative; display: flex; pointer-events: auto; }
+.share-panel { position: absolute; top: calc(100% + 4px); right: 0; width: 340px; max-width: calc(100vw - 2 * var(--space-3)); display: grid; gap: 10px; padding: 16px; background: rgba(0, 0, 0, .96); color: var(--text-heading); font-size: var(--size-caption); line-height: 1.35; }
+.share-check { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
+.share-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.share-label { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+.share-row { display: flex; gap: 6px; align-items: stretch; }
+.share-field { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: 0; background: rgba(255, 255, 255, .06); color: var(--text-heading); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+textarea.share-field { resize: none; }
+.share-field:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.share-copy { flex: none; min-width: 76px; padding: 0 12px; border: 0; border-radius: 0; background: var(--always-paper); color: #000000; font-weight: 700; cursor: pointer; }
+.share-copy:hover { background: #dddddd; }
+.share-hint { margin: 0; color: var(--text-muted); }
 /* The player's name before a shared tour or hunt, for its class results: over the loading screen and the space. */
 .player-name { position: absolute; inset: 0; z-index: 45; display: grid; place-items: center; padding: var(--space-3); background: rgba(0, 0, 0, .55); }
 .player-name-panel { display: grid; gap: var(--space-2); width: min(360px, 100%); padding: var(--space-4); background: var(--surface-page); color: var(--text-body); }
@@ -223,6 +236,9 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
   .tags-panel li button, .tags-shown { font-size: 16px; }
   .tag-card { top: auto; left: var(--space-2); right: var(--space-2); bottom: calc(var(--space-2) + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: 55dvh; }
   .tag-card-text { font-size: 16px; }
+  .share-panel { position: fixed; top: calc(68px + env(safe-area-inset-top)); left: var(--space-2); right: var(--space-2); width: auto; max-width: none; }
+  /* 16 px keeps phones from zooming into a field when it is tapped. */
+  .share-field { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   button, a { transition: none; }

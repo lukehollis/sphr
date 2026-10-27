@@ -19,6 +19,7 @@ import { applySceneEdits, editorBootstrap, openingSpace, startViewEditingIssue, 
 import { vrAvailable, xrPanelFor } from "@/lib/xr-panel";
 import { readableTags, type SpaceTag } from "@/lib/space-tags";
 import TagCard from "@/components/TagCard";
+import { readLinkEntry, type ShareView } from "@/lib/share-link";
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -51,6 +52,8 @@ type Props = { configUrl?: string; preview?: { title: string; image: string; add
   build?: string;
   /** A shared customer tour that keeps class results: the player's name is asked, and their progress kept. */
   play?: { tourId: string; kind: "tour" | "hunt" };
+  /** The page's own address, for links and embed codes that open at a view, and whether others can open it. */
+  share?: { url: string; public: boolean };
   edits?: ViewerEdits;
   editor?: {
     onReady: (session: ViewerSession | null, issue: string | null) => void;
@@ -105,27 +108,18 @@ function activePointOf(tour: NonNullable<ReturnType<typeof normalizeTour>>, stat
 }
 
 /**
- * Where the page's link asks to open: ?stop=3 for the third tour stop, or ?at=pano-024&look=95,-19
- * (heading and tilt in degrees, optionally &fov=60) to stand at a panorama looking that way.
+ * Where the page's link asks to open: ?stop=3 for the third tour stop, ?at=pano-024&look=95,-19
+ * (heading and tilt in degrees, optionally &fov=60) to stand at a panorama looking that way, or
+ * ?pos=x,y,z&look=… in a space without panoramas (see lib/share-link.ts).
  */
 function linkEntry(data: SphrBootstrap): ViewerEntry {
   if (typeof window === "undefined") return {};
-  const params = new URLSearchParams(window.location.search);
-  const at = params.get("at");
   const nodes = data.space.space_data.nodes ?? data.space.space_data.navPoints ?? [];
-  if (at && nodes.some((node) => node.uuid === at)) {
-    const [azimuth, polar] = (params.get("look") ?? "").split(",").map(Number);
-    const fov = Number(params.get("fov"));
-    return { view: { nodeId: at,
-      rotation: { azimuth: Number.isFinite(azimuth) ? azimuth : 0, polar: Number.isFinite(polar) ? Math.max(-89, Math.min(89, polar)) : 0 },
-      ...(Number.isFinite(fov) && fov >= 30 && fov <= 110 ? { fov } : {}) } };
-  }
-  const stop = Number(params.get("stop"));
-  const stops = normalizeTour(data).spaces[0]?.tourpoints.length ?? 0;
-  return Number.isInteger(stop) && stop >= 1 && stop <= stops ? { stop: stop - 1 } : {};
+  return readLinkEntry(new URLSearchParams(window.location.search), { nodes: nodes.map((node) => node.uuid),
+    stops: normalizeTour(data).spaces[0]?.tourpoints.length ?? 0, free: Boolean(data.space.space_data.noPanos) || nodes.length === 0 });
 }
 
-export default function SphrApp({ configUrl, preview, host, info, social, build, play, edits, editor, chrome: withChrome = !editor, revision = 0 }: Props) {
+export default function SphrApp({ configUrl, preview, host, info, social, build, play, share, edits, editor, chrome: withChrome = !editor, revision = 0 }: Props) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ViewerSession | null>(null);
   const [bootstrap, setBootstrap] = useState<SphrBootstrap | null>(null);
@@ -134,6 +128,9 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
   // The tag whose card is open, and whether tags show at all (an embed can hide them with ?tags=0, or Matterport's ?mt=0).
   const [openTag, setOpenTag] = useState<string | null>(null);
   const [tagsShown, setTagsShown] = useState(true);
+  // In another site's frame the page that frames it does the sharing.
+  const [framed, setFramed] = useState(false);
+  useEffect(() => { setFramed(window.self !== window.top); }, []);
   // A frame for a thumbnail (?frame): the view alone, without controls or the tour's text.
   const [frame, setFrame] = useState(false);
   useEffect(() => { setFrame(new URLSearchParams(window.location.search).has("frame")); }, []);
@@ -408,6 +405,16 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
 
   // In a headset the tour's text and buttons show on a panel in the space instead of over the screen.
   const inVr = Boolean(runtimeState.xr);
+  /** The view a shared link opens at: the guided stop on screen, or where the visitor stands in the opening space. */
+  const shareView = (): ShareView | null => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !tour || runtimeState.activeSpaceIndex !== 0) return null;
+    if (runtimeState.guided && tour.hasGuidedTour) return { stop: runtimeState.activePointIndex };
+    const view = runtime.cameraView();
+    if (!view || view.viewMode === "ORBIT") return null;
+    if (view.nodeId) return { nodeId: view.nodeId, rotation: view.rotation, fov: view.fov };
+    return view.position ? { position: view.position, rotation: view.rotation, fov: view.fov } : null;
+  };
   const xrPanel = useMemo(() => !inVr || !tour ? null : xrPanelFor({
     state: runtimeState,
     point: activePoint,
@@ -486,6 +493,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
                 track("tag_open", { from: "list" });
               }
             } : undefined}
+            share={share && !framed && !inVr ? { ...share, title: preview?.title ?? bootstrap?.space.title ?? "Space", tags: tags.length > 0, view: shareView } : undefined}
           />
           {tagCard && tagsShown && !inVr && <TagCard tag={tagCard} onClose={closeTag} />}
           {tour?.hasGuidedTour && <TourOverlay

@@ -6,7 +6,7 @@ import { readSceneTour } from "@/lib/server/tours";
 import { findScene, readAllScenes } from "@/lib/scene-catalog";
 import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath, sceneAccess } from "@/lib/server/accounts";
-import { siteBrand, viewerHost } from "@/lib/server/brand";
+import { siteBrand, siteOrigin, viewerHost } from "@/lib/server/brand";
 import { existingVariantsUrl } from "@/lib/server/variants";
 import { existingLightCopies } from "@/lib/server/light";
 import { loadingPlaceholder } from "@/lib/server/placeholder";
@@ -53,5 +53,6 @@ export default async function ScenePage({ params, searchParams }: Props) {
   // The scene file starts with the page rather than after the viewer's code (it is what the viewer asks for first).
   preload(scene.bootstrapUrl, { as: "fetch", crossOrigin: "anonymous" });
   const [variants, reconstruction, light, placeholder] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id), existingLightCopies(id), loadingPlaceholder(scene.thumbnail)]);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction, light, tags: readSpaceTags(id).tags }} preview={{ title: scene.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)} />;
+  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction, light, tags: readSpaceTags(id).tags }} preview={{ title: scene.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)}
+    share={{ url: `${siteOrigin()}${scene.scenePath}`, public: isScenePublic(id) }} />;
 }
