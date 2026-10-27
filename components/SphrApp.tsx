@@ -36,6 +36,10 @@ const initialRuntimeState: RuntimeState = {
   navigating: false
 };
 
+// A few recovered contexts a page are enough to count; one caught in a loop sent one a frame.
+const MAX_RESTORED_REPORTS = 3;
+let restoredReports = 0;
+
 type Props = { configUrl?: string; preview?: { title: string; image: string; added?: string };
   /** The operator's site, credited in a corner. */
   host?: ViewerHost;
@@ -182,7 +186,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
           onXrAction: (id) => xrAction.current(id),
           // Recovered, so not an error: kept with the analytics to show how often it happens.
-          onContextRestored: (details) => track("graphics_restored", { details }),
+          onContextRestored: (details) => { if (restoredReports++ < MAX_RESTORED_REPORTS) track("graphics_restored", { details }); },
           onTagSelect: editor ? editor.onTagSelect : (id) => { setOpenTag(id); if (id) track("tag_open", { from: "space" }); },
           onTagPlace: editor?.onTagPlace
         });

@@ -115,6 +115,10 @@ const XR_MOVE_MS = 320;
 // What the headset asks for besides the basics: three.js draws to a projection layer where it can,
 // and hands point and pinch on headsets that track them.
 const XR_FEATURES = ["layers", "hand-tracking"];
+// Safari can take the context and hand it back within a frame, again and again (a Mac class on 2026-10-26 did it
+// about 13 times a second). This many losses inside the window is a loop, and the view stops instead of redrawing.
+const LOOP_LOSSES = 3;
+const LOOP_WINDOW_MS = 10000;
 
 function isTypingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
@@ -164,6 +168,10 @@ export class SphrRuntime {
   private contextLostTimer: ReturnType<typeof setTimeout> | null = null;
   private contextLostAt = 0;
   private contextLostDetails = "";
+  /** When the context was taken lately, to tell a loop from a single loss. */
+  private contextLosses: number[] = [];
+  /** The context kept coming and going, so the view stopped for good (Retry opens the page again). */
+  private contextLooping = false;
   private readonly gpu: string;
   private controls: OrbitControls;
   private audio: AudioController;
@@ -1135,13 +1143,32 @@ export class SphrRuntime {
   }
 
   private handleContextLost = () => {
-    if (this.disposed) return;
+    if (this.disposed || this.contextLooping) return;
     this.contextLost = true;
     this.contextLostAt = performance.now();
     const { textures, geometries } = this.renderer.info.memory;
     this.contextLostDetails = `${textures} textures, ${geometries} geometries, open ${Math.round(this.contextLostAt / 60000)} min${this.gpu ? `, ${this.gpu}` : ""}`;
-    this.waitForContext();
+    this.contextLosses = [...this.contextLosses.filter(at => this.contextLostAt - at < LOOP_WINDOW_MS), this.contextLostAt];
+    if (this.contextLosses.length >= LOOP_LOSSES) this.stopLooping();
+    else this.waitForContext();
   };
+
+  /**
+   * The context keeps coming back and going again. Each return used to redraw everything, which can be what loses it
+   * the next time, and to clear the wait that shows "The view stopped", so the visitor sat on a still picture while
+   * the page reported every return. Now drawing stops, later returns are ignored, and the loss is reported once.
+   */
+  private stopLooping() {
+    this.contextLooping = true;
+    if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
+    this.contextLostTimer = null;
+    document.removeEventListener("visibilitychange", this.handleShownWhileLost);
+    this.renderer.setAnimationLoop(null);
+    this.state.graphicsLost = true;
+    this.emitState();
+    const seconds = ((this.contextLostAt - this.contextLosses[0]) / 1000).toFixed(1);
+    this.callbacks.onContextLost?.(`${this.contextLostDetails}, lost ${this.contextLosses.length} times in ${seconds} s`);
+  }
 
   /**
    * It usually comes back within a moment: Safari takes a phone's background tab's context and returns it when the
@@ -1172,6 +1199,7 @@ export class SphrRuntime {
   };
 
   private handleContextRestored = () => {
+    if (this.contextLooping) return;
     this.contextLost = false;
     if (this.contextLostTimer) clearTimeout(this.contextLostTimer);
     this.contextLostTimer = null;
