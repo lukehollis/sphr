@@ -153,8 +153,10 @@ A public space's page is the same for every visitor, so the app sends it as
 `Cache-Control: public, max-age=0, s-maxage=300, stale-while-revalidate=600` to
 visitors without a session (`proxy.ts`); everything else stays `private, no-store`.
 A CDN that caches only static files by default needs a rule for this: for example
-a Cloudflare cache rule on `/s/*` that makes requests eligible for cache and uses the
-origin's `Cache-Control` for the edge TTL. A space made private can stay in such a
+a Cloudflare cache rule on `/s/*` that makes requests eligible for cache, uses the
+origin's `Cache-Control` for the edge TTL and sets the browser TTL to respect the origin
+(otherwise the zone's Browser Cache TTL, four hours by default, replaces `max-age=0`
+and browsers keep the page that long). A space made private can stay in such a
 cache for about five minutes, and be served once more while the CDN fetches it again.
 
 ## Optional Google Analytics
