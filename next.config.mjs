@@ -31,6 +31,9 @@ const nextConfig = {
   outputFileTracingIncludes: { "/api/account/tours/**": ["./node_modules/draco3dgltf/draco_decoder_gltf.wasm"] },
   reactStrictMode: true,
   devIndicators: false,
+  // proxy.ts sees requests as they came, with the router's own headers and `_rsc`, so it never lets a CDN keep a
+  // navigation payload under a page's address.
+  skipProxyUrlNormalize: true,
   allowedDevOrigins: ["local-origin.dev", "*.local-origin.dev"],
   async headers() {
     const privatePage = [

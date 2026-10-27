@@ -12,7 +12,7 @@ import { FREE_AGENT_DRAFTS } from "@/lib/server/user-tours";
 export const dynamic = "force-dynamic";
 
 const title = "Make your own tours and scavenger hunts";
-const description = "A walkthrough for teachers and students. Make an account, choose a tomb, temple or museum, describe a guided tour or scavenger hunt, and share it with your class as one link.";
+const description = "A walkthrough for teachers and students. Choose a tomb, temple or museum, describe a tour or scavenger hunt, and share it with your class as one link.";
 
 export const metadata: Metadata = {
   title, description, alternates: { canonical: "/learn" },

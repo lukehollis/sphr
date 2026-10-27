@@ -6,7 +6,7 @@ import { readSceneTour } from "@/lib/server/tours";
 import { findScene, readAllScenes } from "@/lib/scene-catalog";
 import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath, sceneAccess } from "@/lib/server/accounts";
-import { siteBrand, siteOrigin, viewerHost } from "@/lib/server/brand";
+import { siteOrigin, viewerHost } from "@/lib/server/brand";
 import { existingVariantsUrl } from "@/lib/server/variants";
 import { existingLightCopies } from "@/lib/server/light";
 import { loadingPlaceholder } from "@/lib/server/placeholder";
@@ -14,6 +14,8 @@ import { buildOnPath } from "@/lib/server/user-tours";
 import { readSpaceInfo } from "@/lib/server/space-info";
 import { readSpaceTags } from "@/lib/server/space-tags";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
+import { searchMetadata, spaceSearchPage } from "@/lib/server/search-pages";
+import PageText from "@/components/PageText";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ id: string; slug?: string[] }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -28,16 +30,9 @@ function withQuery(path: string, query: Record<string, string | string[] | undef
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const scene = await findScene((await params).id);
-  if (!scene) return { title: "Space not found", robots: { index: false, follow: false } };
-  const description = readSpaceInfo(scene.sceneId).info.description?.slice(0, 300) || (scene.legacy?.kind === 'tour' ? `Take a guided tour of ${scene.title}.`
-    : `Explore ${scene.title} in an interactive spatial viewer.`);
-  return {
-    title: `${scene.title} · ${siteBrand()}`, description,
-    ...(!isScenePublic(scene.sceneId) ? { robots: { index: false, follow: false } } : {}),
-    alternates: { canonical: scene.scenePath },
-    openGraph: { type: "website", title: scene.title, description, url: scene.scenePath, images: [{ url: scene.thumbnail, alt: scene.title }] },
-    twitter: { card: "summary_large_image", title: scene.title, description, images: [scene.thumbnail] }
-  };
+  const page = scene && await spaceSearchPage(scene.sceneId);
+  if (!page) return { title: "Space not found", robots: { index: false, follow: false } };
+  return searchMetadata(page);
 }
 
 export default async function ScenePage({ params, searchParams }: Props) {
@@ -52,7 +47,8 @@ export default async function ScenePage({ params, searchParams }: Props) {
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(withQuery(scene.scenePath, await searchParams));
   // The scene file starts with the page rather than after the viewer's code (it is what the viewer asks for first).
   preload(scene.bootstrapUrl, { as: "fetch", crossOrigin: "anonymous" });
-  const [variants, reconstruction, light, placeholder] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id), existingLightCopies(id), loadingPlaceholder(scene.thumbnail)]);
-  return <SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction, light, tags: readSpaceTags(id).tags }} preview={{ title: scene.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)}
-    share={{ url: `${siteOrigin()}${scene.scenePath}`, public: isScenePublic(id) }} />;
+  const [variants, reconstruction, light, placeholder, page] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id), existingLightCopies(id), loadingPlaceholder(scene.thumbnail), spaceSearchPage(id)]);
+  return <><SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction, light, tags: readSpaceTags(id).tags }} preview={{ title: scene.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)}
+    share={{ url: `${siteOrigin()}${scene.scenePath}`, public: isScenePublic(id) }} />
+    {page && <PageText page={page} />}</>;
 }

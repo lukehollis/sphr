@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = profile.bio?.slice(0, 200) || `Tours and captures by ${name}.`;
   const image = profile.cover || profile.avatar;
   return {
-    title: `${name} (@${profile.handle}) · ${siteBrand()}`, description,
+    title: { absolute: `${name} (@${profile.handle}) · ${siteBrand()}` }, description,
     alternates: { canonical: `/u/${profile.handle}` },
     // A profile that has shared nothing stays out of search results.
     ...(shared ? {} : { robots: { index: false, follow: true } }),

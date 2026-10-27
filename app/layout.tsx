@@ -5,12 +5,12 @@ import { siteBrand } from "@/lib/server/brand";
 import { missingPartScript } from "@/lib/missing-part";
 import "./globals.css";
 
-// The site's own name (a deployment's brand) in the browser tab, read when the page is served.
+// The site's own name (a deployment's brand) in the browser tab, after each page's own title, read when the page is served.
 export function generateMetadata(): Metadata {
   return {
     metadataBase: new URL(process.env.SPHR_PUBLIC_URL || "http://localhost:3002"),
-    title: siteBrand(),
-    description: "Animated 3D Gaussian splat, 360 panorama, and IIIF tour viewer"
+    title: { default: siteBrand(), template: `%s · ${siteBrand()}` },
+    description: "Walk through 3D scans, 360 photos and splats of real places in your browser, take guided tours and scavenger hunts in them, or host your own."
   };
 }
 

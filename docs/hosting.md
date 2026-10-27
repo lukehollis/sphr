@@ -140,6 +140,23 @@ host, run `nginx -t`, then reload Nginx. The optional `sphr-reload-nginx.sh` Cer
 hook validates and reloads Nginx after renewal. Domain redirect rules belong to the
 deployment's DNS/proxy configuration, not the viewer code.
 
+### Search engines and a CDN
+
+`/robots.txt` and `/sitemap.xml` are served by the app. The sitemap lists the public
+spaces, the tours and hunts customers share on public spaces, and the guides; work
+titled as a test stays out. Each listed page carries its title, the tour's stops as
+text, its links onward and JSON-LD for the place, read from the published scene file.
+`SPHR_OPERATOR_URL` is named as the publisher (`<url>/#organization`). Private and
+preview spaces carry none of their text and say `noindex`.
+
+A public space's page is the same for every visitor, so the app sends it as
+`Cache-Control: public, max-age=0, s-maxage=300, stale-while-revalidate=600` to
+visitors without a session (`proxy.ts`); everything else stays `private, no-store`.
+A CDN that caches only static files by default needs a rule for this: for example
+a Cloudflare cache rule on `/s/*` that makes requests eligible for cache and uses the
+origin's `Cache-Control` for the edge TTL. A space made private can stay in such a
+cache for about five minutes, and be served once more while the CDN fetches it again.
+
 ## Optional Google Analytics
 
 To send collection and viewer traffic to your own GA4 property, add its web-stream

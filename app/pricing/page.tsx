@@ -15,9 +15,11 @@ import { FREE_AGENT_DRAFTS } from "@/lib/server/user-tours";
 import { formatMoney, formatPeriod } from "@/lib/price";
 
 export const dynamic = "force-dynamic";
+const title = "Pricing for hosting, tours and hunts";
+const description = "Building tours and scavenger hunts is free. A hosting plan puts 3D spaces of your own online and shows every player in your results.";
 export const metadata = {
-  title: "Pricing",
-  description: "Building tours and scavenger hunts is free. A hosting plan puts 3D spaces of your own online and shows every player in your results."
+  title, description, alternates: { canonical: "/pricing" },
+  openGraph: { title, description, url: "/pricing" }
 };
 
 /** One plan as a card: its prices (monthly and yearly of the same Stripe product) and what it gives. */

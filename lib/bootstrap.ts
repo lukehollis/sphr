@@ -324,7 +324,7 @@ export function normalizeTour(bootstrap: SphrBootstrap): NormalizedTour {
 }
 
 /** A tour's onward link: a path on this site or an https address, with a short button label. */
-function tourContinue(value: unknown): TourContinue | undefined {
+export function tourContinue(value: unknown): TourContinue | undefined {
   const input = value as Partial<TourContinue> | null | undefined;
   if (!input || typeof input !== "object" || typeof input.url !== "string" || typeof input.label !== "string") return undefined;
   const label = input.label.trim().slice(0, 80);

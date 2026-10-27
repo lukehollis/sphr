@@ -376,6 +376,10 @@ try {
   // ---- Viewer access follows ownership, visibility and billing ----
   assert.equal(location(await anonymous.get(scenePath)), `/account/login?next=${encodeURIComponent(scenePath)}`);
   assert.equal((await alice.get(scenePath)).status, 200, 'owners preview private spaces');
+  const privatePage = await (await alice.get(scenePath)).text();
+  assert.ok(privatePage.includes('noindex') && !privatePage.includes('<h1') && !privatePage.includes('application/ld+json'),
+    "a private space's page carries none of its text for search engines");
+  assert.ok(!(await (await anonymous.get('/sitemap.xml')).text()).includes(reserved), 'and stays out of the sitemap');
   assert.equal((await bob.get(scenePath)).status, 404, 'other customers do not loop through sign-in');
   assert.equal((await bob.request(`/api/admin/scenes/${reserved}/edit`, { method: 'PUT', json: { title: 'Taken', revision: 0 } })).status, 401);
   response = await alice.request(`/api/admin/scenes/${reserved}/edit`, { method: 'PUT', json: { title: 'Riverside studio, 2nd floor', revision: 0 } });
@@ -471,6 +475,10 @@ try {
   const publicPath = (await (await alice.get(`/api/account/spaces/${studio.id}`)).json()).space.scene.path;
   assert.equal(publicPath, renamedPath, 'with the same link');
   assert.equal((await anonymous.get(publicPath)).status, 200, 'public spaces open for anyone');
+  const publicPage = (await (await anonymous.get(publicPath)).text()).replaceAll('<!-- -->', '');
+  assert.ok(publicPage.includes('<h1>Riverside studio, 2nd floor</h1>') && publicPage.includes('application/ld+json') && !publicPage.includes('noindex'),
+    'and search engines read them');
+  assert.ok((await (await anonymous.get('/sitemap.xml')).text()).includes(`${base}${publicPath}`), 'they are listed in the sitemap');
 
   // A second space joins the subscription immediately.
   body = await (await alice.post('/api/account/spaces', { title: 'Gallery' })).json();
@@ -609,10 +617,23 @@ try {
   assert.equal((await bob.get(tourLink)).status, 404);
   tourPage = await (await alice.get(tourLink)).text();
   assert.ok(tourPage.includes('Under the window') && tourPage.includes('noindex'), 'the owner previews a private tour, never indexed');
+  assert.ok(!tourPage.includes('<h1') && !tourPage.includes('application/ld+json'), 'nor written out for search engines');
   assert.equal(location(await alice.get(`/t/${hunt.id}/old-title`)), tourLink, 'old titles lead to the current link');
   assert.equal((await alice.request(`/api/account/tours/${hunt.id}`, { method: 'PUT', json: huntBody(1, { public: true }) })).status, 200);
   tourPage = await (await anonymous.get(tourLink)).text();
   assert.ok(tourPage.includes('Find the lamps') && tourPage.includes('Under the window'), 'shared tours open for anyone');
+  tourPage = tourPage.replaceAll('<!-- -->', '');
+  assert.ok(tourPage.includes('<title>Find the lamps, a hunt in Operator hall · SPHR</title>'), 'a hunt is titled by its own name and its space');
+  assert.ok(tourPage.includes('<h1>Find the lamps</h1>') && tourPage.includes('<h2>Under the window</h2>') && tourPage.includes('<p>Look where the light comes in.</p>')
+    && !tourPage.includes('noindex') && tourPage.includes(`<link rel="canonical" href="${base}${tourLink}"/>`), 'its clues are text in the page, for search engines');
+  const tourData = JSON.parse(tourPage.match(/<script type="application\/ld\+json">(.*?)<\/script>/)[1]);
+  assert.deepEqual([tourData['@type'], tourData.name, tourData.about['@type'], tourData.about.name], ['WebPage', 'Find the lamps', 'Place', 'Operator hall']);
+  assert.ok(tourData.author.url.startsWith(`${base}/u/`) && tourPage.includes(`Made by <a href="/u/`), 'with its maker');
+  const sitemap = await (await anonymous.get('/sitemap.xml')).text();
+  assert.ok(sitemap.includes(`${base}${tourLink}`) && sitemap.includes(`${base}/s/0a0a0a0a0a01/operator-hall`), 'the sitemap lists shared hunts and public spaces');
+  assert.ok(!sitemap.includes('0a0a0a0a0a02') && !sitemap.includes(ownTour.id), 'and nothing private');
+  const robots = await (await anonymous.get('/robots.txt')).text();
+  assert.ok(robots.includes(`Sitemap: ${base}/sitemap.xml`) && robots.includes('Disallow: /admin') && robots.includes('Allow: /api/scenes/'), robots);
   assert.ok(!(await (await anonymous.get('/s/0a0a0a0a0a01/operator-hall')).text()).includes('Under the window'), "the operator's space itself is unchanged");
   // ---- Class results: players of a shared tour give a name, and its owner sees how far each got ----
   response = await anonymous.post(`/api/tours/${hunt.id}/plays`, { name: '  Ana\u202eR.  ' });

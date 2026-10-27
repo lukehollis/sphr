@@ -62,6 +62,11 @@ export function listUserTours(userId: string) {
   return (store().prepare(`SELECT * FROM user_tours WHERE user_id IN (${marks}) ORDER BY updated DESC`).all(...users) as TourRow[]).map(toTour);
 }
 
+/** Every tour and hunt shared with anyone who has its link, newest first. */
+export function listSharedTours() {
+  return (store().prepare("SELECT * FROM user_tours WHERE public=1 ORDER BY updated DESC").all() as TourRow[]).map(toTour);
+}
+
 export function findEmptyUserTour(userId: string, sceneId: string, kind: ExperienceKind) {
   const connection = store();
   const row = connection.prepare(

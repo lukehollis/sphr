@@ -209,8 +209,8 @@ export function operatorAccount() {
   return user?.emailVerified ? user.id : undefined;
 }
 
-/** Work titled as a test ("[test] …", "(E57 test)") stays off profiles, though its link still opens. */
-const testTitle = (title: string) => /\[test\]|\btest\)/i.test(title);
+/** Work titled as a test ("[test] …", "(E57 test)") stays off profiles and out of search, though its link still opens. */
+export const testTitle = (title: string) => /\[test\]|\btest\)/i.test(title);
 
 /** The site's own public spaces that open in the viewer (Matterport embeds without a capture do not). */
 async function operatorScenes() {

@@ -131,6 +131,16 @@ export async function sceneAccess(sceneId: string): Promise<"allowed" | "login" 
   return user ? "unavailable" : "login";
 }
 
+/**
+ * Whether anyone opens a space, signed in or not: what `sceneAccess` allows a visitor without an
+ * account. Such a page is the same for everyone, so search engines and shared caches may keep it.
+ */
+export function openToEveryone(sceneId: string) {
+  if (!isScenePublic(sceneId)) return false;
+  const space = accountsEnabled() ? spaceForScene(sceneId) : undefined;
+  return !space || spaceHosted(space);
+}
+
 /** Title, start view, thumbnail and visibility belong to the operator and the space's owner. */
 export async function canManageScene(sceneId: string) {
   if (await isAdmin()) return true;
