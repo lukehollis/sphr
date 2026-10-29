@@ -13,6 +13,9 @@ type PanoObject = {
   sharpening?: string[];
 };
 
+/** Faces a move to `node` has asked for, pinned until that location shows. */
+type Hold = { node: string; urls: string[] };
+
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const FACE_ROTATIONS: [number, number, number][] = [
@@ -236,6 +239,8 @@ export class PanoramaLayer {
   private fade: { start: number; duration: number; fadeStart: number } | null = null;
 
   private readonly lightNodes: Set<string>;
+  /** The move under way, if any (see `hold`). */
+  private arriving: Hold | null = null;
 
   /**
    * @param light smaller copies of the faces: the smallest shows first, and `phone` keeps to the
@@ -304,29 +309,60 @@ export class PanoramaLayer {
    * else the small ones, which sharpen in place once the rest arrive.
    */
   async prepareQuick(node: NodeData, graceMs = 0, limitMs = 0) {
-    const ready = this.prepareSoon(node, graceMs);
-    if (!limitMs) return ready;
+    const hold = this.hold(node);
+    const ready = this.prepareSoon(node, graceMs, hold);
     // A request that never answers (a dropped phone connection) would otherwise hold the move forever;
     // the downloads carry on, so trying again is quick.
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([ready, new Promise<never>((_, reject) => {
+      await (limitMs ? Promise.race([ready, new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("This view is taking too long to load. Try again.")), limitMs);
-      })]);
+      })]) : ready);
+    } catch (error) {
+      // The move is not happening, so its faces go back to the cache.
+      if (this.arriving === hold) this.letGo();
+      throw error;
     } finally { clearTimeout(timer); }
   }
 
-  private async prepareSoon(node: NodeData, graceMs: number) {
+  private async prepareSoon(node: NodeData, graceMs: number, hold: Hold) {
     const sharp = this.urls(node);
     const preview = this.previewUrls(node);
-    if (!preview || this.loaded(sharp)) { await this.prepare(node); return; }
+    if (!preview || this.loaded(sharp)) { this.pin(hold, sharp); await this.prepare(node); return; }
+    const prepareSharp = () => { this.pin(hold, sharp); return this.prepare(node).then(() => true, () => false); };
     // A phone's connection is usually what limits it, so the small faces get it to themselves first.
-    let sharpReady = this.phone ? null : this.prepare(node).then(() => true, () => false);
+    let sharpReady = this.phone ? null : prepareSharp();
+    this.pin(hold, preview);
     const shown = await this.load(preview).then(() => true, () => false);
-    sharpReady ??= this.prepare(node).then(() => true, () => false);
+    sharpReady ??= prepareSharp();
     if (!shown) await sharpReady;
     if (graceMs > 0 && !this.loaded(sharp)) await Promise.race([sharpReady, wait(graceMs)]);
     if (!this.loaded(preview) && !this.loaded(sharp)) throw new Error(`Unable to load the panorama at ${node.uuid}`);
+  }
+
+  /**
+   * Keeps the faces a move asks for until `navigate` shows its location. Loaded faces are
+   * otherwise free to go, and while the location being left and the prefetched ones fill the
+   * cache past its budget, a trim would take them before they are shown.
+   */
+  private hold(node: NodeData) {
+    this.letGo();
+    this.arriving = { node: node.uuid, urls: [] };
+    return this.arriving;
+  }
+
+  /** Pins faces as the move asks for them; one given up or replaced pins nothing more. */
+  private pin(hold: Hold, urls: string[]) {
+    if (this.arriving !== hold) return;
+    this.textureCache.retain(urls);
+    hold.urls.push(...urls);
+  }
+
+  /** Releases the faces held for a move (only a move to `node` when given). */
+  private letGo(node?: NodeData) {
+    if (!this.arriving || (node && this.arriving.node !== node.uuid)) return;
+    this.textureCache.release(this.arriving.urls, false);
+    this.arriving = null;
   }
 
   async loadInitial(node?: NodeData | null) {
@@ -334,6 +370,7 @@ export class PanoramaLayer {
     await this.prepareQuick(node);
     if (this.disposed) return;
     this.active = this.createPano(node, 1);
+    this.letGo(node);
     this.scene.add(this.active.group);
   }
 
@@ -345,7 +382,7 @@ export class PanoramaLayer {
   }
 
   navigate(node: NodeData, duration = 700, options: { replaceImmediately?: boolean; fadeStart?: number } = {}) {
-    if (this.disposed || this.active?.node.uuid === node.uuid) return;
+    if (this.disposed || this.active?.node.uuid === node.uuid) { this.letGo(node); return; }
     if (this.outgoing) { this.scene.remove(this.outgoing.group); this.disposeObject(this.outgoing); }
     this.outgoing = this.active;
     if (this.outgoing) {
@@ -358,6 +395,8 @@ export class PanoramaLayer {
       this.outgoing = null;
     }
     this.active = this.createPano(node, options.replaceImmediately ? 1 : 0);
+    // The new view pins the faces it shows; the move's own hold is done.
+    this.letGo(node);
     this.active.group.visible = this.shown();
     this.scene.add(this.active.group);
     this.fade = options.replaceImmediately ? null : {
@@ -445,6 +484,7 @@ export class PanoramaLayer {
   dispose() {
     this.disposed = true;
     this.fade = null;
+    this.letGo();
     this.clearTransitionCapture();
     [this.active, this.outgoing].forEach((object) => {
       if (!object) return;

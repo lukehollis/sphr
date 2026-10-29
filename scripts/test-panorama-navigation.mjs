@@ -20,6 +20,7 @@ registerHooks({
 });
 const { NavigationLayer } = await import('../lib/three/layers/NavigationLayer.ts');
 const { PanoramaLayer } = await import('../lib/three/renderers/PanoramaLayer.ts');
+const { TextureCache } = await import('../lib/three/TextureCache.ts');
 const { SphrRuntime } = await import('../lib/three/SphrRuntime.ts');
 
 const scan = (uuid, x, neighbors) => ({
@@ -201,6 +202,58 @@ test('nonprojected travel crossfades immediately and overview entry uses present
   assert.equal(opacity(scene, 'side'), .75);
   pano.dispose(); cache.dispose();
   assert.ok([...cache.pins.values()].every(count => count === 0));
+});
+
+test('a move keeps the faces it has loaded while a full cache trims around it', async t => {
+  // The real cache loads through <img> elements; these arrive (or fail) when the test says.
+  const pending = [];
+  const previous = globalThis.document;
+  globalThis.document = { createElementNS: () => {
+    const listeners = {};
+    return {
+      addEventListener(type, listener) { listeners[type] = listener; },
+      removeEventListener(type) { delete listeners[type]; },
+      set src(url) { pending.push({ url, image: this, listeners }); }
+    };
+  } };
+  t.after(() => { globalThis.document = previous; });
+  const settle = (prefix, outcome = 'load') => {
+    for (const request of pending.filter(request => request.url.startsWith(prefix))) {
+      pending.splice(pending.indexOf(request), 1);
+      request.image.width = request.image.height = request.url.startsWith('/light/') ? 512 : 2048;
+      request.listeners[outcome]({});
+    }
+  };
+  const later = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+  const light = { template: '/light/{size}/{uuid}/{face}.jpg', sizes: [512, 1024], nodes: nodes.map(node => node.uuid) };
+  // Past its budget, as when the location being left and the prefetched ones fill it: a trim takes every face not pinned.
+  const cache = new TextureCache(undefined, 1);
+  const scene = new THREE.Scene();
+  const pano = new PanoramaLayer(scene, cache, null, light);
+  const initial = pano.loadInitial(nodes[0]);
+  settle('/');
+  await initial;
+
+  // The small faces arrive, the sharp ones are still on their way, and a prefetch elsewhere trims.
+  const moving = pano.prepareQuick(nodes[1], 50);
+  settle('/light/512/middle/');
+  await later(10);
+  cache.trim();
+  await moving;
+  pano.navigate(nodes[1]);
+  const shown = () => scene.getObjectByName('panorama-middle').children[0].material.map.image;
+  assert.equal(shown().width, 512, 'the small faces show');
+  settle('/panos/middle/');
+  await later();
+  assert.equal(shown().width, 2048, 'and sharpen in place');
+
+  const failing = pano.prepareQuick(nodes[2], 50);
+  settle('/light/512/side/', 'error');
+  settle('/panos/side/', 'error');
+  await assert.rejects(failing, /Unable to load the panorama at side/);
+  pano.dispose();
+  assert.equal(cache.getStats().pinned, 0, 'a move that fails, and the views, leave nothing pinned');
+  cache.dispose();
 });
 
 // Exercise the real navigation and camera tween without constructing a WebGLRenderer.
