@@ -28,6 +28,7 @@ const { parseExperience, ExperienceError } = await import('../lib/experience/val
 const { applyExperience, experienceFromBootstrap } = await import('../lib/experience/apply.ts');
 const { applySceneEdits } = await import('../lib/scene-edits.ts');
 const { normalizeTour } = await import('../lib/bootstrap.ts');
+const { manifestIsCurrent, reconstructionMirror, reconstructionSources } = await import('../lib/reconstruction.ts');
 const { tourSegment } = await import('../lib/viewer/segments.ts');
 const { normalizeAgentDraft, extractJson, pickLibrary, resolveLibraryCodes } = await import('../lib/server/tour-agent.ts');
 const { panoramaPixelDirection } = await import('../lib/three/renderers/PanoramaLayer.ts');
@@ -1001,4 +1002,28 @@ test('a reconstruction environment hides completely with the capture and release
   assert.equal(environment.render({}, camera, []), false, 'captured views do not allocate targets or run atmospheric passes');
   environment.dispose();
   assert.deepEqual(scene.children, [site], 'leaving a viewer removes every atmosphere-owned scene object');
+});
+
+test('a reconstruction on Google Cloud Storage is fetched from the asset host first, then from where it was', () => {
+  const storage = 'https://storage.googleapis.com/spacery-static/sphr/reconstructions/sites/giza/4b507c72a51fb39e/giza.glb';
+  const manifest = 'https://storage.googleapis.com/spacery-static/sphr/reconstructions/619ad80511a1/index.json?v=4b507c72a51fb39e';
+  const base = 'https://static.mused.com/sphr/';
+  assert.equal(reconstructionMirror(storage, base), 'https://static.mused.com/sphr/reconstructions/sites/giza/4b507c72a51fb39e/giza.glb');
+  assert.deepEqual(reconstructionSources(manifest, base),
+    ['https://static.mused.com/sphr/reconstructions/619ad80511a1/index.json?v=4b507c72a51fb39e', manifest]);
+  // Anything else, or no https asset host (a local build), is fetched as it is.
+  assert.deepEqual(reconstructionSources('https://static.mused.com/sphr/light/giza.glb', base), ['https://static.mused.com/sphr/light/giza.glb']);
+  assert.deepEqual(reconstructionSources('https://storage.googleapis.com/spacery-static/sphr/scenes/x.glb', base), ['https://storage.googleapis.com/spacery-static/sphr/scenes/x.glb']);
+  assert.deepEqual(reconstructionSources(storage, ''), [storage]);
+  assert.deepEqual(reconstructionSources(storage, '/datasets'), [storage]);
+});
+
+test('a copied reconstruction manifest is used only while it names the version the space asks for', () => {
+  const url = 'https://storage.googleapis.com/spacery-static/sphr/reconstructions/619ad80511a1/index.json?v=4b507c72a51fb39e';
+  const current = { version: 1, model: 'https://storage.googleapis.com/spacery-static/sphr/reconstructions/sites/giza/4b507c72a51fb39e/giza.glb' };
+  const older = { version: 1, model: 'https://storage.googleapis.com/spacery-static/sphr/reconstructions/sites/giza/0a1b2c3d4e5f/giza.glb' };
+  assert.equal(manifestIsCurrent(current, url), true);
+  assert.equal(manifestIsCurrent(older, url), false, 'a copy made before the model changed goes to the original');
+  assert.equal(manifestIsCurrent(older, url.replace(/\?.*/, '')), true, 'a space that names no version takes any copy');
+  assert.equal(manifestIsCurrent(null, url), false);
 });

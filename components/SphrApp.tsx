@@ -181,6 +181,8 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
             setRuntimeState((current) => ({ ...current, loading }));
           },
           onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
+          // The tour went on without it, so the visitor isn't stuck, but it is counted with the errors.
+          onPartMissing: (part, details) => reportError(part, new Error(`The ${part} did not load`), details),
           onXrAction: (id) => xrAction.current(id),
           // Recovered, so not an error: kept with the analytics to show how often it happens.
           onContextRestored: (details) => { if (restoredReports++ < MAX_RESTORED_REPORTS) track("graphics_restored", { details }); },

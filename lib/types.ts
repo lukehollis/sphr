@@ -519,4 +519,6 @@ export type RuntimeCallbacks = {
    * capture mesh it needs is still on its way.
    */
   onTagPlace?: (spot: TagSpot | null, loading?: boolean) => void;
+  /** A part a stop asked for never came (the site reconstruction, blocked by a school's network, say), so the tour went on without it. */
+  onPartMissing?: (part: "reconstruction", details: string) => void;
 };

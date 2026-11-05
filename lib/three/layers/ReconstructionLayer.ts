@@ -3,7 +3,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { ReconstructionConfig } from "@/lib/types";
-import { parseReconstruction, reconstructionModelUrl } from "@/lib/reconstruction";
+import { manifestIsCurrent, parseReconstruction, reconstructionModelUrl, reconstructionSources } from "@/lib/reconstruction";
 import { ReconstructionEnvironment } from "@/lib/three/layers/ReconstructionEnvironment";
 
 type LoadState = "idle" | "loading" | "ready" | "failed";
@@ -55,6 +55,8 @@ export class ReconstructionLayer {
   get variants() { return this.config?.variants ?? []; }
   get selectedVariant() { return this.variants.some((item) => item.id === this.variant) ? this.variant : this.variants[0]?.id; }
   get environmentOpacity() { return this.environment?.opacity ?? 0; }
+  /** Why the model could not be used, once it has failed. */
+  get problem() { return this.error; }
 
   /** Periods share their surroundings; only the selected sculpture is drawn. */
   setVariant(id?: string) {
@@ -198,9 +200,9 @@ export class ReconstructionLayer {
     this.state = "loading";
     const page = typeof window === "undefined" ? "http://localhost/" : window.location.href;
     if (!this.config && this.manifestUrl) {
-      const response = await fetch(new URL(this.manifestUrl, page), { credentials: "omit" });
-      if (!response.ok) { this.error = `The manifest returned HTTP ${response.status}.`; return false; }
-      this.config = parseReconstruction(await response.json());
+      const answer = await fetchManifest(new URL(this.manifestUrl, page).href);
+      if ("status" in answer) { this.error = `The manifest returned HTTP ${answer.status}.`; return false; }
+      this.config = parseReconstruction(answer.manifest);
       if (!this.config) { this.error = "The manifest is invalid."; return false; }
     }
     if (!this.config || this.disposed) return false;
@@ -212,8 +214,15 @@ export class ReconstructionLayer {
     loader.setDRACOLoader(draco);
     if (this.ktx2) loader.setKTX2Loader(this.ktx2);
     let gltf;
-    try { gltf = await loader.loadAsync(this.lighter[url] ?? url); }
+    try {
+      const sources = this.lighter[url] ? [this.lighter[url]] : reconstructionSources(url);
+      for (const [index, source] of sources.entries()) {
+        try { gltf = await loader.loadAsync(source); break; }
+        catch (error) { if (index === sources.length - 1 || this.disposed) throw error; }
+      }
+    }
     finally { draco.dispose(); }
+    if (!gltf) return false;
     if (this.disposed) {
       gltf.scene.traverse((child) => (child as THREE.Mesh).geometry?.dispose?.());
       return false;
@@ -250,6 +259,28 @@ export class ReconstructionLayer {
     this.group.visible = false;
     return true;
   }
+}
+
+/**
+ * The manifest from the first address that answers with one (reconstructionSources), else the last HTTP status. An
+ * address the network refuses, or answers with something else (a filter's block page), moves on to the next, and so
+ * does a copy older than the version the space asks for.
+ */
+async function fetchManifest(url: string): Promise<{ manifest: unknown } | { status: number }> {
+  const sources = reconstructionSources(url);
+  let status = 0;
+  for (const [index, source] of sources.entries()) {
+    const last = index === sources.length - 1;
+    try {
+      const response = await fetch(source, { credentials: "omit" });
+      if (!response.ok) { status = response.status; continue; }
+      const manifest: unknown = await response.json();
+      if (last || manifestIsCurrent(manifest, url)) return { manifest };
+    } catch (error) {
+      if (last) throw error;
+    }
+  }
+  return { status };
 }
 
 const SKY = { zenith: "#5f95cf", horizon: "#dfe8ef" };
