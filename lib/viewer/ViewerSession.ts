@@ -117,6 +117,7 @@ export class ViewerSession {
         onObjectSelect: id => this.callbacks.onObjectSelect?.(id),
         onObjectTransform: (id, transform) => this.callbacks.onObjectTransform?.(id, transform),
         onContextLost: details => this.callbacks.onContextLost?.(details),
+        onPartMissing: (part, details) => this.callbacks.onPartMissing?.(part, details),
         onXrAction: id => this.callbacks.onXrAction?.(id),
         onContextRestored: details => this.callbacks.onContextRestored?.(details),
         onTagSelect: id => this.callbacks.onTagSelect?.(id),

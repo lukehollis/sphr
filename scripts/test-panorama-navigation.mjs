@@ -474,7 +474,8 @@ for (const outcome of ['ready', 'failed']) test(`a reconstruction overview retai
   t.after(dispose);
   runtime.state.guided = true;
   runtime.state.loading = { label: 'Ready', progress: 1, ready: true };
-  runtime.callbacks = {};
+  const missing = [];
+  runtime.callbacks = { onPartMissing: (...args) => missing.push(args) };
   runtime.tour.spaces[0].tourpoints[1] = { targetType: 'FREE', viewMode: 'ORBIT', reconstruction: true,
     position: { x: 200, y: 50, z: 400 }, rotation: { azimuth: 30, polar: -30 }, distance: 1000 };
   const model = fakeReconstruction();
@@ -484,7 +485,7 @@ for (const outcome of ['ready', 'failed']) test(`a reconstruction overview retai
   const pending = new Promise(resolve => { finish = resolve; });
   model.load = () => pending; // The background prefetch has already started this same download.
   runtime.reconstruction = model;
-  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
+  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, setOverviewReturnBlend() {}, captureReplaced: false };
   runtime.annotations = { show() {} };
   runtime.applyExperienceForPoint = () => {};
   const cameraBefore = runtime.camera.position.clone();
@@ -504,19 +505,78 @@ for (const outcome of ['ready', 'failed']) test(`a reconstruction overview retai
   model.ready = outcome === 'ready'; model.failed = outcome === 'failed'; model.busy = false;
   finish(model.ready); await navigation;
   assert.equal(runtime.state.loading.busy, false);
+  assert.equal(runtime.state.activePointIndex, 1, 'the tour goes on either way');
+  assert.equal(runtime.state.viewMode, 'ORBIT');
+  assert.ok(runtime.cameraTween);
   if (model.ready) {
-    assert.equal(runtime.state.activePointIndex, 1);
-    assert.equal(runtime.state.viewMode, 'ORBIT');
-    assert.ok(runtime.cameraTween, 'the overview flight starts only with a usable model');
+    assert.equal(runtime.state.navigationError, undefined);
+    assert.deepEqual(missing, []);
   } else {
-    assert.equal(runtime.state.activePointIndex, 0);
-    assert.equal(runtime.state.viewMode, 'FPV');
-    assert.equal(runtime.controls.enabled, true);
-    assert.equal(runtime.state.navigating, false);
-    assert.match(runtime.state.navigationError, /reconstruction.*Reload/);
-    assert.ok(runtime.camera.position.equals(cameraBefore));
-    assert.equal(opacity(runtime.scene, 'entry'), 1);
+    // A school network that refuses the model used to leave every student at the stop before, with "Reload".
+    assert.match(runtime.state.navigationError, /didn't load on this network/);
+    assert.deepEqual(missing, [['reconstruction', 'failed: unknown']], 'counted once, with the reason');
+    runtime.cameraTween = null; runtime.isNavigating = false; runtime.state.navigating = false;
+    await runtime.goTo(0, 0);
+    await runtime.goTo(0, 1);
+    assert.equal(missing.length, 1, 'a second visit is not counted again');
   }
+});
+
+test('a tour that opens at a reconstruction stop still fails without the model', async t => {
+  const { runtime, dispose } = await runtimeHarness(true, 75);
+  t.after(dispose);
+  runtime.state.guided = true;
+  runtime.state.loading = { label: 'Loading', progress: 0.5, ready: false };
+  runtime.callbacks = {};
+  runtime.tour.spaces[0].tourpoints[1] = { targetType: 'FREE', viewMode: 'ORBIT', reconstruction: true,
+    position: { x: 200, y: 50, z: 400 }, rotation: { azimuth: 30, polar: -30 }, distance: 1000 };
+  const model = fakeReconstruction();
+  model.ready = false;
+  model.load = async () => { model.failed = true; return false; };
+  runtime.reconstruction = model;
+  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
+  runtime.annotations = { show() {} };
+  runtime.applyExperienceForPoint = () => {};
+  // With nothing on screen yet there is nothing to go on with, so the page fails and a framing page offers help.
+  await assert.rejects(runtime.goTo(0, 1), /reconstruction.*Reload/);
+  assert.equal(runtime.state.activePointIndex, 0);
+  assert.equal(runtime.state.navigating, false);
+});
+
+test('a stop waits 20 s for a reconstruction that never comes, and later stops do not wait again', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { runtime, dispose } = await runtimeHarness(true, 75);
+  t.after(dispose);
+  runtime.state.guided = true;
+  runtime.state.loading = { label: 'Ready', progress: 1, ready: true };
+  const missing = [];
+  runtime.callbacks = { onPartMissing: (...args) => missing.push(args) };
+  for (const index of [1, 2]) runtime.tour.spaces[0].tourpoints[index] = { targetType: 'FREE', viewMode: 'ORBIT', reconstruction: true,
+    position: { x: 200, y: 50, z: 400 }, rotation: { azimuth: 30, polar: -30 }, distance: 1000 };
+  const model = fakeReconstruction();
+  model.ready = false;
+  model.busy = true;
+  model.load = () => new Promise(() => {}); // a network that holds the connection open
+  runtime.reconstruction = model;
+  runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
+  runtime.annotations = { show() {} };
+  runtime.applyExperienceForPoint = () => {};
+  let arrived = false;
+  const navigation = runtime.goTo(0, 1).then(() => { arrived = true; });
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  t.mock.timers.tick(19000);
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(arrived, false, 'still waiting at 19 s');
+  t.mock.timers.tick(1000);
+  await navigation;
+  assert.equal(runtime.state.activePointIndex, 1);
+  assert.match(runtime.state.navigationError, /didn't load on this network/);
+  assert.deepEqual(missing, [['reconstruction', 'still loading after 20 s']]);
+  runtime.cameraTween = null; runtime.isNavigating = false; runtime.state.navigating = false;
+  await runtime.goTo(0, 2);
+  assert.equal(runtime.state.activePointIndex, 2, 'the next stop goes on at once');
+  assert.match(runtime.state.navigationError, /didn't load on this network/);
+  assert.equal(missing.length, 1);
 });
 
 test('an authored free orbit frames its own target and preserves its extent in portrait', async () => {

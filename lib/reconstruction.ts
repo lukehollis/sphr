@@ -72,6 +72,36 @@ export function parseReconstruction(value: unknown): ReconstructionConfig | null
 }
 
 /**
+ * Spacery's reconstructions on Google Cloud Storage. The same files are copied under the site's asset host
+ * (static.mused.com/sphr/reconstructions/), which school networks that let the rest of a scene through let these
+ * through too: on 2026-10-19 every computer in a class stopped at the Great Pyramid's first plateau stop, whose model
+ * came from storage.googleapis.com, while its photographs from static.mused.com loaded.
+ */
+const STORAGE_RECONSTRUCTIONS = "https://storage.googleapis.com/spacery-static/sphr/reconstructions/";
+
+/** The asset host's copy of a reconstruction file on Google Cloud Storage, or null for any other address. */
+export function reconstructionMirror(url: string, assetBase = process.env.NEXT_PUBLIC_SPHR_ASSET_BASE_URL || "") {
+  const base = assetBase.replace(/\/+$/, "");
+  if (!/^https:\/\//.test(base) || !url.startsWith(STORAGE_RECONSTRUCTIONS)) return null;
+  return `${base}/reconstructions/${url.slice(STORAGE_RECONSTRUCTIONS.length)}`;
+}
+
+/**
+ * Whether a copy of a manifest is the one `url` asks for. A space asks with ?v=<its model's hash>, which the model's
+ * address in the manifest carries, so a copy made before the model changed is passed over for the original.
+ */
+export function manifestIsCurrent(manifest: unknown, url: string) {
+  const version = new URL(url).searchParams.get("v");
+  return !version || JSON.stringify(manifest ?? null).includes(version);
+}
+
+/** The addresses to try for a reconstruction file, the asset host's copy first and the original after it. */
+export function reconstructionSources(url: string, assetBase?: string) {
+  const mirror = reconstructionMirror(url, assetBase);
+  return mirror ? [mirror, url] : [url];
+}
+
+/**
  * The model's address, relative to the manifest (or to the page for a manifest
  * written into the space). Only https, or http on this computer for testing.
  */

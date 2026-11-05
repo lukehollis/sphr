@@ -80,6 +80,10 @@ const EARTH_GLIDE_MS = 3000;
 const RECONSTRUCTION_FADE_MS = 700;
 // It loads this long after the space opens, so the dollhouse already has it.
 const RECONSTRUCTION_DELAY_MS = 1500;
+/** How long a stop that shows the site reconstruction waits for it before going on with the capture in its place. */
+const RECONSTRUCTION_WAIT_MS = 20000;
+/** Shown at a stop whose reconstruction hasn't come, until it does. */
+const RECONSTRUCTION_MISSING = "The 3D model for this view didn't load on this network, so the tour goes on without it.";
 // With a model in view, the near plane moves out a little for depth precision kilometers away.
 const RECONSTRUCTION_NEAR = 0.1;
 const KEY_TURN_SPEED = THREE.MathUtils.degToRad(100); // per second while an arrow key is held
@@ -192,6 +196,9 @@ export class SphrRuntime {
   private earth: EarthLayer | null = null;
   private lastEarthCredits = 0;
   private reconstruction: ReconstructionLayer | null = null;
+  /** A stop gave up waiting for the reconstruction once, so later stops don't wait again while it is still on its way. */
+  private reconWaitedOut = false;
+  private reconMissingReported = false;
   /** The reconstruction shows in the dollhouse unless turned off, and in first person when turned on. */
   private reconOrbit = true;
   private reconFpv = false;
@@ -550,11 +557,13 @@ export class SphrRuntime {
       try {
         await Promise.all([
           nodeChanged ? this.panorama?.prepareQuick(node!, 600, 25000) : undefined,
-          prepareReconstruction ? this.loadReconstruction() : undefined,
+          prepareReconstruction ? this.reconstructionWithin(this.reconWaitedOut ? 0 : RECONSTRUCTION_WAIT_MS) : undefined,
           point.viewMode === "ORBIT" ? this.captureLoaded() : undefined,
           prepareModels ? this.sceneGraph?.whenLoaded(stopModels) : undefined
         ]);
-        if (prepareReconstruction && !this.reconstruction?.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
+        // A tour that opens at such a stop has nothing to show without it, so it fails as it did (a framing page then
+        // offers its other tour). Mid-tour the stop shows the capture instead, with a word about why.
+        if (prepareReconstruction && !this.reconstruction?.ready && !this.state.loading.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
       }
       catch (error) {
         if (busy) this.state.loading = { ...this.state.loading, busy: false };
@@ -566,6 +575,10 @@ export class SphrRuntime {
       }
       if (this.disposed) return;
       if (busy) this.state.loading = { ...this.state.loading, busy: false };
+      if (prepareReconstruction && !this.reconstruction?.ready) {
+        this.reconstructionMissing();
+        this.state.navigationError = RECONSTRUCTION_MISSING;
+      }
     }
     const nextViewMode = !forceFirstPerson && point.viewMode === "ORBIT" ? "ORBIT" : "FPV";
     // In a guided tour the reconstruction shows only at stops that ask for it, so the
@@ -2795,8 +2808,31 @@ export class SphrRuntime {
     this.emitState();
     await loading;
     if (this.disposed || this.reconstruction !== reconstruction) return;
+    if (reconstruction.ready && this.state.navigationError === RECONSTRUCTION_MISSING) this.state.navigationError = undefined;
     if (!this.isNavigating) this.settleReconstruction();
     this.emitState();
+  }
+
+  /** Loads the reconstruction, waiting at most `ms` for it. The download goes on after that, and a later stop shows it. */
+  private async reconstructionWithin(ms: number) {
+    const loading = this.loadReconstruction();
+    loading.catch(() => undefined); // still on its way when the wait ends, it settles on its own
+    if (ms > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { await Promise.race([loading, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]); }
+      finally { clearTimeout(timer); }
+    }
+    if (this.reconstruction && !this.reconstruction.ready && !this.reconstruction.failed) this.reconWaitedOut = true;
+  }
+
+  /** Tells the page, once, that a stop went on without its reconstruction and why, so it is counted. */
+  private reconstructionMissing() {
+    const reconstruction = this.reconstruction;
+    if (!reconstruction || this.reconMissingReported) return;
+    this.reconMissingReported = true;
+    this.callbacks.onPartMissing?.("reconstruction", reconstruction.failed
+      ? `failed: ${reconstruction.problem ?? "unknown"}`.slice(0, 120)
+      : `still loading after ${RECONSTRUCTION_WAIT_MS / 1000} s`);
   }
 
   /** The reconstruction at rest in a view mode, `amount` of the way in. */
