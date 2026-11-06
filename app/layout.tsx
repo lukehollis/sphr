@@ -3,6 +3,7 @@ import Analytics from "@/components/Analytics";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
 import { siteBrand } from "@/lib/server/brand";
 import { missingPartScript } from "@/lib/missing-part";
+import { translatedDomScript } from "@/lib/translated-dom";
 import "./globals.css";
 
 // The site's own name (a deployment's brand) in the browser tab, after each page's own title, read when the page is served.
@@ -30,6 +31,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: arrivedScript }} />
         <script dangerouslySetInnerHTML={{ __html: missingPartScript(process.env.NEXT_PUBLIC_SPHR_ANALYTICS === "1") }} />
+        <script dangerouslySetInnerHTML={{ __html: translatedDomScript(process.env.NEXT_PUBLIC_SPHR_ANALYTICS === "1") }} />
       </head>
       <body>{children}<GoogleAnalytics /><Analytics /></body>
     </html>
