@@ -698,6 +698,29 @@ and leaves `SPHR_AGENT_HOME` unset so the agent's home is inside the job folder.
 lists every connection the sandbox attempted. The runner never follows symlinks in what the agent writes,
 and gVisor (`--runtime runsc`) adds a user-space kernel when it is installed.
 
+### Updating a worker
+
+A worker runs the scripts of its own checkout, so a change to `scripts/worker/`, the trusted scripts it copies at
+start (`catalog.py`, `publish.py`, `validate-package.mjs`) or `.agents/` reaches jobs only once that checkout has it
+and the runner restarts. Releasing the application (`vm-release.sh`) never touches a worker. The production worker
+(`siracusa-gpu`) is a checkout with no remote at `/home/lrh/spacery-worker` on `main`, run by the user service
+`spacery-worker` (`systemctl --user`, log `local/worker.log`), reached as `lrh-siracusa` over Tailscale:
+
+```sh
+git push lrh-siracusa:/home/lrh/spacery-worker main:refs/heads/incoming      # from a machine with the commits on main
+ssh lrh-siracusa
+cd /home/lrh/spacery-worker
+git status --short && git log --oneline incoming..main                       # anything listed is the worker's own (learned skills)
+git merge --ff-only incoming      # if it refuses: fetch the worker's commits back first, or `git rebase incoming`
+/usr/bin/node --test scripts/test-agent-runner.mjs scripts/test-matterport-link.mjs   # the Node (18) the service runs
+tail -5 local/worker.log          # restart between jobs: a job cut off waits out its lease (12 hours) before it runs again
+systemctl --user restart spacery-worker && sleep 5 && tail -3 local/worker.log   # "runner siracusa-gpu waiting for jobs"
+```
+
+Within five minutes the runner posts its health check, and the team channel hears *Processing paused* if it cannot
+start agents. Only the runner's scripts and skills change this way; the agent images (`sphr-agent`,
+`sphr-agent-gpu`) are rebuilt only when their Dockerfiles change.
+
 ### Skills the agent learns
 
 When a job needs a method no skill describes, the agent builds the tool in the job folder and
