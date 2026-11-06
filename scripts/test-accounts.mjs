@@ -131,6 +131,15 @@ test('spaces, uploads and the processing queue', async () => {
   store.setUploadStatus(upload.id, 'complete');
   assert.throws(() => store.submitCustomerSpace(space.id, null), /Wait for every upload/);
   store.setUploadStatus(second.id, 'deleted');
+  // Documents alone are refused before any job is queued (a drawing that comes with a capture is fine, below).
+  const drawer = await store.createPasswordUser('drawings@example.com', 'password one', null);
+  const drawings = store.createCustomerSpace(drawer.id, 'Drawings', 'draft');
+  for (const name of ['22961_C03_2D.pdf', 'Notes.DOCX']) store.setUploadStatus(store.createUploadRecord(drawings.id, name, 10, 'application/pdf', id => id, limit).id, 'complete');
+  assert.throws(() => store.submitCustomerSpace(drawings.id, null), /Drawings and documents, such as PDFs, can't become a space on their own\. A 360 tour needs/);
+  assert.deepEqual([store.readCustomerSpace(drawings.id).status, store.latestJob(drawings.id)], ['draft', undefined]);
+  const { onlyDocuments } = await import('../lib/capture-files.ts');
+  assert.deepEqual([onlyDocuments(['a.pdf']), onlyDocuments(['a.pdf', 'b.jpg']), onlyDocuments([]), onlyDocuments(['scan.e57']), onlyDocuments(['cameras.xml', 'a.pdf'])],
+    [true, false, false, false, false]);
   // An upload no page has sent for a day has stopped.
   const { uploadStalled } = await import('../lib/server/uploads.ts');
   const now = Date.parse('2026-11-06T00:00:00Z');

@@ -8,6 +8,7 @@ import PlanPicker, { EnterpriseNote, OpenSourceNote } from "./PlanPicker";
 import { formatBytes } from "@/lib/bytes";
 import { formatMoney, formatPeriod } from "@/lib/price";
 import { fromList, getJson, keepCaptures, readDrop, titleFromFiles, uploadFile, type PickedFile, type Transfer } from "./uploads";
+import { captureKinds, documentsRefusal, onlyDocuments } from "@/lib/capture-files";
 import type { Plan } from "@/lib/server/billing";
 import type { SpaceView } from "@/lib/server/customer-spaces";
 
@@ -522,20 +523,24 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
 }) {
   const [dragging, setDragging] = useState(false);
   const [reading, setReading] = useState(false);
+  // Files that cannot become a space, said before one is made (and before a free preview is spent on them).
+  const [refused, setRefused] = useState("");
   const dialog = useRef<HTMLDivElement>(null);
   const batch = uploads.batches.find(item => item.key === batchKey);
   const close = useCallback(() => {
     track("upload_closed", { phase: batch?.phase ?? "empty", files: batch?.transfers.length ?? 0, paymentOpened: Boolean(batch?.checkoutOpened) });
     onClose();
   }, [batch, onClose]);
-  useEffect(() => { if (open) track("upload_opened", { existing: Boolean(existing) }); }, [open, existing]);
+  useEffect(() => { if (open) { track("upload_opened", { existing: Boolean(existing) }); setRefused(""); } }, [open, existing]);
 
   const receive = useCallback(async (files: PickedFile[]) => {
     const usable = keepCaptures(files);
     const kinds = [...new Set(files.map(item => item.file.name.split(".").pop()?.toLowerCase() ?? ""))].filter(Boolean).slice(0, 10).join(",");
-    track(usable.length ? "files_chosen" : "files_rejected", { count: usable.length, skipped: files.length - usable.length, kinds,
-      bytes: usable.reduce((total, item) => total + item.file.size, 0) });
-    if (!usable.length) return;
+    const documents = !batch && !existing && onlyDocuments(usable.map(item => item.file.name));
+    track(usable.length && !documents ? "files_chosen" : "files_rejected", { count: usable.length, skipped: files.length - usable.length, kinds,
+      bytes: usable.reduce((total, item) => total + item.file.size, 0), ...(documents ? { reason: "documents" } : {}) });
+    setRefused(documents ? documentsRefusal : "");
+    if (!usable.length || documents) return;
     if (batch && openPhases.includes(batch.phase)) uploads.addFiles(batch.key, usable);
     else onBatch(existing ? uploads.startExisting(existing, usable) : await uploads.startNew(usable));
   }, [batch, existing, onBatch, uploads]);
@@ -599,8 +604,10 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
       <ConstructionDrawing className="upload-drop-drawing" />
       <p className="upload-drop-title">{reading ? "Reading your files…" : dragging ? "Drop to add them" : "Drop capture files or a folder here"}</p>
       <Pickers onFiles={files => void receive(files)} />
-      <p className="upload-drop-hint">E57 and Matterport exports, Gaussian splats, 360 photos and video, point clouds and meshes, up to {formatBytes(maxBytes)} per space.
+      {refused && <p className="site-alert" role="alert">{refused}</p>}
+      <p className="upload-drop-hint">E57 and Matterport exports, Gaussian splats, 360 photos and video, phone video and photos, point clouds and meshes, up to {formatBytes(maxBytes)} per space.
         {existing ? "" : " The title comes from your file names."}</p>
+      <p className="upload-drop-hint">{captureKinds}</p>
       {priceHint && <p className="upload-drop-hint">{priceHint}</p>}
       {!existing && <LinkForm onLink={async link => onBatch(await uploads.startLink(link))} />}
     </div>
