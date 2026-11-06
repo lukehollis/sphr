@@ -283,8 +283,11 @@ operator's space list has the same link. `GET /api/admin/scenes/<id>/download` (
 The zip is written as it is sent: files are stored uncompressed with data descriptors, read one at a
 time from storage (`SPHR_CUSTOMER_ASSET_BUCKET`, listed with the application's credentials, which
 gives the exact length up front) or from the scene file's own folder, so a download of any size
-holds only a few chunks in memory, and a slow browser reads storage slowly. Files over 4 GB and
-archives with more than 65,535 files get zip64 records. `HEAD` answers with the length (or the
+holds only a few chunks in memory, and a slow browser reads storage slowly. A file that storage
+fails to send, or whose connection drops partway, is read again from the byte the zip reached (a
+Range request, which must answer with the rest of a file of the same length), up to four times
+over about 23 seconds, and each retry is logged; a file that is missing or has changed fails the
+download at once. Files over 4 GB and archives with more than 65,535 files get zip64 records. `HEAD` answers with the length (or the
 refusal) without starting it, and the page asks that first. A free preview downloads once it is
 hosted; a space whose billing lapsed after it was paid for still downloads. Four downloads run at
 a time on the site and two per account; responses carry `X-Accel-Buffering: no` so a proxy passes

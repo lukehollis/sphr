@@ -60,13 +60,10 @@ export async function listPublishedRevision(bootstrapUrl: string) {
   const folder = `${prefix()}/scenes/${match[1]}/${match[2]}/`;
   const files = (await listObjects(folder)).filter(item => !item.name.endsWith("/")).map(item => ({
     path: item.name.slice(folder.length), size: Number(item.size), updated: item.updated,
-    /** Read with the application's own access, so private objects and the exact stored bytes come back. */
-    open: async (signal: AbortSignal) => {
-      const response = await fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket()!)}/o/${encodeURIComponent(item.name)}?alt=media`,
-        { headers: { Authorization: `Bearer ${await accessToken()}`, "Accept-Encoding": "identity" }, signal });
-      if (!response.ok || !response.body) throw new Error(`Reading ${item.name} failed: HTTP ${response.status}`);
-      return response;
-    }
+    /** Read with the application's own access, so private objects and the exact stored bytes come back (`headers` may ask for a range of them). */
+    open: async (signal: AbortSignal, headers: Record<string, string> = {}) =>
+      fetch(`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket()!)}/o/${encodeURIComponent(item.name)}?alt=media`,
+        { headers: { ...headers, Authorization: `Bearer ${await accessToken()}` }, signal })
   }));
   // A bucket whose folders do not match the published addresses is not listed from.
   return files.some(file => file.path === "bootstrap.json") ? files : null;

@@ -73,6 +73,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   };
   const body = zipStream(download.files, {
     onClose: finished,
+    onRetry: (name, error) => console.warn(`The download of ${id} reads ${name} again:`, error instanceof Error ? error.message : error),
     onError: error => console.error(`The download of ${id} stopped:`, error instanceof Error ? error.message : error)
   });
   return new Response(body, { headers: headers(download.name, zipLength(download.files)) });

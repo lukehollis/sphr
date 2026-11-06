@@ -5,13 +5,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { bufferFile, safeZipName, zipChunks, zipLength, zipStream } from '../lib/server/zip.ts';
+import { bufferFile, httpSource, safeZipName, zipChunks, zipLength, zipStream } from '../lib/server/zip.ts';
 
-async function collect(files) {
+async function collect(files, options) {
   const parts = [];
-  for await (const chunk of zipChunks(files)) parts.push(chunk);
+  for await (const chunk of zipChunks(files, options)) parts.push(chunk);
   return Buffer.concat(parts);
 }
 
@@ -46,6 +47,33 @@ function streamed(name, bytes, { size = bytes.length, reported = bytes.length } 
   })() }) };
 }
 
+/**
+ * Stand-in storage over HTTP: serves `files` by path and answers Range requests as storage does.
+ * `fault` hears each request (its path and how many times that path was asked for) and may make
+ * storage answer with an error `status`, send only `cut` bytes and drop the connection, or
+ * `ignoreRange` and send the whole file again.
+ */
+async function storage(files, fault = () => undefined) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push([request.url, request.headers.range ?? null]);
+    const { status, cut, ignoreRange } = fault(request.url, requests.filter(([url]) => url === request.url).length) ?? {};
+    const bytes = files[request.url];
+    if (status || !bytes) { response.writeHead(status ?? 404).end(); return; }
+    const start = ignoreRange ? 0 : Number(request.headers.range?.match(/^bytes=(\d+)-$/)?.[1] ?? 0);
+    response.writeHead(start ? 206 : 200, { 'Content-Type': 'application/octet-stream', 'Content-Length': bytes.length - start,
+      ...(start ? { 'Content-Range': `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}) });
+    // A dropped connection: part of the body, then the socket closes once the reader has had time to take that part.
+    if (cut !== undefined) response.write(bytes.subarray(start, start + cut), () => setTimeout(() => response.destroy(), 150));
+    else response.end(bytes.subarray(start));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return { requests, files, asked: (url) => requests.filter(([path]) => path === url).map(([, range]) => range),
+    file: (name, url, size) => ({ name, size, open: httpSource(url, (signal, headers) => fetch(base + url, { headers, signal })) }),
+    close: () => { server.closeAllConnections(); server.close(); } };
+}
+
 test('the archive is exactly as long as worked out ahead, and every file reads back intact', async () => {
   const photo = Buffer.alloc(150_000).map((_, index) => (index * 31) % 251);
   const files = [bufferFile('space/README.txt', Buffer.from('What each file is\n')), bufferFile('space/tags.json', Buffer.from('[]\n')),
@@ -76,6 +104,51 @@ test('a file whose bytes differ from its listed size fails the archive instead o
   const bytes = Buffer.from('abcdef');
   await assert.rejects(collect([streamed('a/stale.bin', bytes, { size: 10, reported: null })]), /ended at 6 of 10 bytes/);
   await assert.rejects(collect([streamed('a/changed.bin', bytes, { size: 10 })]), /6 bytes, not the 10 listed/);
+});
+
+test('a file storage fails to send, or whose connection drops partway, is read again from the byte it reached', async () => {
+  const mesh = Buffer.alloc(400_000).map((_, index) => (index * 7) % 253);
+  const face = Buffer.alloc(50_000).map((_, index) => (index * 3) % 241);
+  const pano = Buffer.alloc(30_000).map((_, index) => (index * 5) % 239);
+  // The mesh's connection drops twice partway, the face is refused once by a busy server, and the
+  // panorama, of a size no listing gave, drops once before its first byte.
+  const store = await storage({ '/mesh.glb': mesh, '/face0.jpg': face, '/pano.jpg': pano }, (url, count) =>
+    url === '/mesh.glb' && count <= 2 ? { cut: 150_000 } : url === '/face0.jpg' && count === 1 ? { status: 503 } : url === '/pano.jpg' && count === 1 ? { cut: 0 } : undefined);
+  const retried = [];
+  try {
+    const listed = [bufferFile('space/README.txt', Buffer.from('What each file is\n')), store.file('space/mesh/scan.glb', '/mesh.glb', mesh.length),
+      store.file('space/faces/ab12/face0.jpg', '/face0.jpg', face.length)];
+    const bytes = await collect(listed, { retries: [20, 20, 20, 20], onRetry: (name) => retried.push(name) });
+    assert.equal(bytes.length, zipLength(listed), 'the archive is exactly as long as announced');
+    assert.deepEqual(readBack(bytes), [['space/README.txt', 18, await hash(Buffer.from('What each file is\n'))],
+      ['space/mesh/scan.glb', mesh.length, await hash(mesh)], ['space/faces/ab12/face0.jpg', face.length, await hash(face)]], 'and every file in it is whole');
+    const unlisted = await collect([store.file('space/pano/001.jpg', '/pano.jpg', null)], { retries: [20] });
+    assert.deepEqual(readBack(unlisted), [['space/pano/001.jpg', pano.length, await hash(pano)]]);
+  } finally { store.close(); }
+  assert.deepEqual([store.asked('/mesh.glb'), store.asked('/face0.jpg'), store.asked('/pano.jpg')],
+    [[null, 'bytes=150000-', 'bytes=300000-'], [null, null], [null, null]], 'each read again asks only for the rest');
+  assert.ok(store.requests.findLastIndex(([url]) => url === '/face0.jpg') > store.requests.findLastIndex(([url]) => url === '/mesh.glb'),
+    'a file whose early open failed is asked for again in its turn');
+  assert.deepEqual(retried, ['space/mesh/scan.glb', 'space/mesh/scan.glb', 'space/faces/ab12/face0.jpg']);
+});
+
+test('a file read again must be the same file, and one that keeps failing still fails the archive', async () => {
+  const mesh = Buffer.alloc(100_000, 7);
+  // Storage that holds a longer file by the time the rest is asked for, one that sends the whole file again, and one that keeps dropping.
+  const store = await storage({ '/grown.glb': mesh, '/whole.glb': mesh, '/drops.glb': mesh }, (url, count) => {
+    if (url === '/grown.glb' && count === 2) store.files['/grown.glb'] = Buffer.concat([mesh, mesh]);
+    return url === '/drops.glb' ? { cut: 10_000 } : count === 1 ? { cut: 40_000 } : url === '/whole.glb' ? { ignoreRange: true } : undefined;
+  });
+  const options = { retries: [20, 20, 20, 20] };
+  try {
+    await assert.rejects(collect([store.file('a/grown.glb', '/grown.glb', mesh.length)], options), /a\/grown\.glb is 200000 bytes now, not the 100000 it was/);
+    await assert.rejects(collect([store.file('a/whole.glb', '/whole.glb', mesh.length)], options), /Reading \/whole\.glb again from byte 40000 failed: HTTP 200 without a range/);
+    await assert.rejects(collect([store.file('a/missing.glb', '/missing.glb', mesh.length)], options), /Reading \/missing\.glb failed: HTTP 404/);
+    await assert.rejects(collect([store.file('a/drops.glb', '/drops.glb', mesh.length)], options), /terminated/);
+  } finally { store.close(); }
+  assert.deepEqual([store.asked('/grown.glb'), store.asked('/whole.glb'), store.asked('/missing.glb')], [[null, 'bytes=40000-'], [null, 'bytes=40000-'], [null]],
+    'a file that is gone or no longer the same is not asked for again');
+  assert.deepEqual(store.asked('/drops.glb'), [null, 'bytes=10000-', 'bytes=20000-', 'bytes=30000-', 'bytes=40000-'], 'one that keeps breaking off is read on four more times');
 });
 
 test('names stay inside the archive folder', async () => {

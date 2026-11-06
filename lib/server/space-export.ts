@@ -15,7 +15,7 @@ import { readSpaceInfo } from "./space-info";
 import { readSpaceTags } from "./space-tags";
 import { readSceneTour } from "./tours";
 import { listUserTours, tourModelFile, tourPath } from "./user-tours";
-import { bufferFile, safeZipName, type ZipFile } from "./zip";
+import { bufferFile, httpSource, safeZipName, type ZipFile } from "./zip";
 
 /**
  * Everything that makes up a space, as plain files an owner can keep anywhere: its
@@ -25,7 +25,7 @@ import { bufferFile, safeZipName, type ZipFile } from "./zip";
  * the small JSON files; the capture's files stream from storage when the zip reaches them.
  */
 
-type Source = { path: string; size: number | null; modified?: Date; open: (signal: AbortSignal) => Promise<{ size: number | null; chunks: AsyncIterable<Uint8Array> }> };
+type Source = { path: string; size: number | null; modified?: Date; open: ZipFile["open"] };
 
 const json = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 // File extensions of things a tag or tour shows or plays, to tell files on other websites from links to pages.
@@ -57,19 +57,9 @@ function eachString(value: unknown, take: (text: string) => void) {
   else if (value && typeof value === "object") Object.values(value).forEach((item) => eachString(item, take));
 }
 
-async function response(url: string, signal: AbortSignal) {
-  const result = await fetch(url, { headers: { "Accept-Encoding": "identity" }, redirect: "error", signal });
-  if (!result.ok || !result.body) throw new Error(`Reading ${url} failed: HTTP ${result.status}`);
-  return result;
-}
-
-const fromResponse = (result: Response) => ({
-  size: result.headers.get("content-encoding") && result.headers.get("content-encoding") !== "identity" ? null
-    : result.headers.has("content-length") ? Number(result.headers.get("content-length")) : null,
-  // Node's fetch cancels a body once its response is garbage collected, so the response stays
-  // reachable until its bytes are read (a file opened ahead can wait a while for its turn).
-  chunks: (async function* () { for await (const chunk of result.body as unknown as AsyncIterable<Uint8Array>) yield chunk; })()
-});
+/** A file on this site's own disk, read from `start` when an earlier read broke off. */
+const fromDisk = (file: string, size: number): ZipFile["open"] => async (signal, start = 0) =>
+  ({ size, chunks: createReadStream(file, { signal, start }) as unknown as AsyncIterable<Uint8Array> });
 
 /** The files of a package on this site's own disk (public/datasets/...), walked from its folder. */
 async function diskFiles(folder: string): Promise<Source[]> {
@@ -80,8 +70,7 @@ async function diskFiles(folder: string): Promise<Source[]> {
     const relative = relativePath(path.relative(folder, file).split(path.sep).join("/"));
     if (!relative) continue;
     const info = await stat(file);
-    files.push({ path: relative, size: info.size, modified: info.mtime,
-      open: async (signal) => ({ size: info.size, chunks: createReadStream(file, { signal }) as unknown as AsyncIterable<Uint8Array> }) });
+    files.push({ path: relative, size: info.size, modified: info.mtime, open: fromDisk(file, info.size) });
   }
   return files;
 }
@@ -97,7 +86,7 @@ async function capturedFiles(scene: SceneListing, bootstrap: SphrBootstrap) {
   if (local) for (const file of await diskFiles(path.join(process.cwd(), "public", folder))) files.set(file.path, file);
   else for (const file of await listPublishedRevision(scene.bootstrapUrl).catch(listingFailed) ?? []) {
     const relative = relativePath(file.path);
-    if (relative) files.set(relative, { path: relative, size: file.size, modified: new Date(file.updated), open: async (signal) => fromResponse(await file.open(signal)) });
+    if (relative) files.set(relative, { path: relative, size: file.size, modified: new Date(file.updated), open: httpSource(file.path, file.open) });
   }
   // Addresses in the scene file become paths in the download; files it names that no listing showed are fetched by address.
   const paths = new Map<string, string>();
@@ -106,7 +95,8 @@ async function capturedFiles(scene: SceneListing, bootstrap: SphrBootstrap) {
     const relative = relativePath(text.slice(folder.length).split(/[?#]/)[0]);
     if (!relative) return;
     paths.set(text, relative);
-    if (!files.has(relative) && !local) files.set(relative, { path: relative, size: null, open: async (signal) => fromResponse(await response(text, signal)) });
+    if (!files.has(relative) && !local) files.set(relative, { path: relative, size: null,
+      open: httpSource(text, (signal, headers) => fetch(text, { headers, redirect: "error", signal })) });
   });
   // The scene file is written anew, with those paths.
   files.delete("bootstrap.json");
@@ -198,8 +188,7 @@ export async function spaceExport(scene: SceneListing, origin: string, now = new
   // Uploaded files are listed with their sizes so the download's length is known before it starts.
   const uploaded = await Promise.all([...uploads].map(async ([target, file]): Promise<Source> => {
     const info = await stat(file);
-    return { path: target, size: info.size, modified: info.mtime,
-      open: async (signal) => ({ size: info.size, chunks: createReadStream(file, { signal }) as unknown as AsyncIterable<Uint8Array> }) };
+    return { path: target, size: info.size, modified: info.mtime, open: fromDisk(file, info.size) };
   }));
 
   // What visitors see: the owner's title, start view and tags over the published capture.
