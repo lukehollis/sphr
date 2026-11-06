@@ -18,6 +18,9 @@ EnvironmentFile=-/etc/sphr/environment
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+# Node exits 143 when systemd stops it (SIGTERM), so a restart for a release isn't logged as a failure;
+# a crash still is, and still restarts.
+SuccessExitStatus=143
 # Drafting tours loads photos and capture meshes; above MemoryHigh the kernel throttles the
 # whole app, so leave room over its resting size (about 500 MB).
 MemoryHigh=1G
