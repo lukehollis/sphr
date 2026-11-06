@@ -8,7 +8,9 @@ description: Build a tour from a Matterport space the runner downloaded from its
 The customer gave the link to a Matterport space instead of files (`source` in `job.json`). Before you started,
 the runner downloaded it into `input/matterport-<model id>/`:
 
-- `link.json`: the model ID, its name on Matterport, how many 360 photos and tags it has
+- `link.json`: the model ID, its name on Matterport, how many 360 photos and tags it has, and `skipped`: photos
+  Matterport had no image for (no pano, or only locked skyboxes). The runner left those out of `index.html` with
+  the links to them, and it adds a sentence saying how many to your message, so don't mention them yourself
 - `index.html`: the showcase's model data (positions, rotations, the navigation graph, floors, asset addresses)
 - the skybox faces of every 360 photo, at the best resolution Matterport offers the public
 - the 50k DAM mesh and its textures, and the space's cover picture

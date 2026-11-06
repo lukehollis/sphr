@@ -16,15 +16,21 @@ const runner = fileURLToPath(new URL('./worker/agent-runner.mjs', import.meta.ur
 const field = (number, bytes) => Buffer.concat([Buffer.from([number * 8 + 2, bytes.length]), bytes]);
 const dam = field(1, Buffer.concat([field(1, Buffer.alloc(0)), field(4, Buffer.from('m_50k_000.jpg'))]));
 
-/** Matterport's model graph and CDN, served from the stand-in application's own address. `model` is 'ok', 'missing' or 'down'. */
+/**
+ * Matterport's model graph and CDN, served from the stand-in application's own address. `model` is 'ok', 'missing',
+ * 'down', 'skipped' (a second photo Matterport has no image for) or 'none' (only that photo).
+ */
 function fakeMatterport(origin, model, request, text, response) {
   if (model === 'down') { response.writeHead(503); return response.end('busy'); }
   const body = JSON.parse(text);
   const cdn = `${origin}/cdn`;
+  const photo = { id: 'l1', index: 0, neighbors: model === 'skipped' ? ['l2'] : [],
+    pano: { sweepUuid: 's1', skyboxes: [{ resolution: '2k', status: 'available', urlTemplate: `${cdn}/pan/2k/~/s1_skybox<face>.jpg?t=signed` }] } };
+  const imageless = { id: 'l2', index: 1, neighbors: ['l1'], pano: null };
   const answer = body.operationName === 'GetMattertags' ? { data: { model: { id: 'MD4iVby1G8k', mattertags: [] } } }
     : model === 'missing' ? { data: { root: null, model: null }, errors: [{ message: 'Not Found' }] }
-    : { data: { root: { id: 'MD4iVby1G8k', name: 'Pyramid' }, model: { id: 'MD4iVby1G8k', locations: [{ id: 'l1', index: 0, neighbors: [],
-      pano: { sweepUuid: 's1', skyboxes: [{ resolution: '2k', status: 'available', urlTemplate: `${cdn}/pan/2k/~/s1_skybox<face>.jpg?t=signed` }] } }],
+    : { data: { root: { id: 'MD4iVby1G8k', name: 'Pyramid' }, model: { id: 'MD4iVby1G8k',
+      locations: model === 'none' ? [imageless] : model === 'skipped' ? [photo, imageless] : [photo],
       assets: { meshes: [{ id: 'm', status: 'available', format: 'dam', resolution: '50k', url: `${cdn}/m_50k.dam?t=signed` }],
         textures: [{ status: 'available', quality: 'high', resolution: '50k', urlTemplate: `${cdn}/~/tex/m_50k_<texture>.jpg?t=signed` }] } } } };
   response.writeHead(200, { 'Content-Type': 'application/json' });
@@ -152,6 +158,27 @@ test('a Matterport link is downloaded by the runner, and the agent finds the spa
   // Six faces, the mesh and its texture, the tags, index.html and link.json.
   assert.equal(run.actions[1].message, 'found 11 files', run.output);
   assert.equal(run.downloads, 0, 'no uploads to fetch');
+});
+
+test('a Matterport photo without an image is left out, and the finished space says how many', { skip: packages === true ? false : packages }, async () => {
+  const run = await runOnce([process.execPath, fakeAgent, '{job}'], { matterport: 'skipped' });
+  assert.deepEqual(actions(run), ['claim', 'complete'], run.output);
+  assert.equal(run.actions[1].message, 'Built a panorama tour from your 360 photo. 1 of the 2 360 photos on Matterport had no image there, so it was left out, with the links to it.');
+  assert.match(run.output, /leaving out 1 of 2 360 photos that have no available image on Matterport/);
+});
+
+test('the agent learns from job.json how many Matterport photos were left out', async () => {
+  const look = 'grep -q \'"skippedSweeps": 1\' job.json && grep -q \'"skipped": 1\' input/matterport-MD4iVby1G8k/link.json'
+    + ' && printf \'{"status":"failed","message":"counted"}\' > output/result.json';
+  const run = await runOnce(['sh', '-c', look], { matterport: 'skipped' });
+  assert.deepEqual(actions(run), ['claim', 'fail'], run.output);
+  assert.equal(run.actions[1].message, 'counted', run.output);
+});
+
+test('a Matterport space with no photo it has an image for is reported to the customer without starting the agent', async () => {
+  const run = await runOnce(['sh', '-c', 'echo started > output/progress.log'], { matterport: 'none' });
+  assert.deepEqual(actions(run), ['claim', 'fail'], run.output);
+  assert.match(run.actions[1].message, /^None of the 1 360 photos of this Matterport space has an image Matterport will share/);
 });
 
 test('a Matterport space that does not open is reported to the customer without starting the agent', async () => {

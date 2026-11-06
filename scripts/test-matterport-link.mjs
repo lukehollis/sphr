@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { downloadMatterport, damTextures, MatterportError, modelIdOf } from './worker/matterport-link.mjs';
+import { bestSkybox, downloadMatterport, damTextures, MatterportError, modelIdOf, skippedNote } from './worker/matterport-link.mjs';
 
 const id = 'MD4iVby1G8k';
 const cdn = 'https://cdn-2.matterport.com/models/abc/assets';
@@ -13,8 +13,12 @@ const cdn = 'https://cdn-2.matterport.com/models/abc/assets';
 const field = (number, bytes) => Buffer.concat([Buffer.from([number * 8 + 2, bytes.length]), bytes]);
 const dam = field(1, Buffer.concat([field(1, Buffer.alloc(0)), field(4, Buffer.from('abc_50k_000.jpg'))]));
 
-/** Matterport as the downloader sees it: the model graph, signed CDN addresses, and what each request was. */
-function matterport({ signature = () => 'fresh', skybox = `${cdn}/pan/2k/~/<sweep>_skybox<face>.jpg`, model = true, mediaHost = 'cdn-2.matterport.com', expireOnce = false } = {}) {
+/**
+ * Matterport as the downloader sees it: the model graph, signed CDN addresses, and what each request was. `extra` adds
+ * locations as Matterport lists them; `only` replaces the two ordinary ones.
+ */
+function matterport({ signature = () => 'fresh', skybox = `${cdn}/pan/2k/~/<sweep>_skybox<face>.jpg`, model = true, mediaHost = 'cdn-2.matterport.com', expireOnce = false,
+  extra = [], only } = {}) {
   const requests = [];
   let reads = 0, expired = !expireOnce;
   const signed = url => `${url}?t=${signature(reads)}`;
@@ -27,7 +31,7 @@ function matterport({ signature = () => 'fresh', skybox = `${cdn}/pan/2k/~/<swee
     const pano = sweep => ({ sweepUuid: sweep, skyboxes: [{ resolution: 'high', status: 'available', urlTemplate: signed(`${cdn}/pan/high/~/${sweep}_skybox<face>.jpg`) },
       { resolution: '2k', status: 'available', urlTemplate: signed(skybox.replace('<sweep>', sweep)) }, { resolution: '4k', status: 'locked' }] });
     return { data: { root: { id, name: 'Great Pyramid', image: { url: signed(`https://cdn-2.matterport.com/apifs/models/${id}/images/cover.jpg`) } },
-      model: { id, rootModelId: id, locations: [{ id: 'a', index: 0, pano: pano('s1') }, { id: 'b', index: 1, pano: pano('s2') }],
+      model: { id, rootModelId: id, locations: [...(only ?? [{ id: 'a', index: 0, neighbors: ['b', 'c', 'hidden'], pano: pano('s1') }, { id: 'b', index: 1, neighbors: ['a', 'd'], pano: pano('s2') }]), ...extra],
         assets: { meshes: [{ id: 'm', status: 'available', format: 'dam', resolution: '50k', url: signed(`${cdn}/abc_50k.dam`) }],
           textures: [{ status: 'available', quality: 'high', resolution: '50k', urlTemplate: signed(`${cdn}/~/abc_50k_texture_jpg_high/abc_50k_<texture>.jpg`) }] } } } };
   };
@@ -110,4 +114,41 @@ test('a space larger than the limit stops with a reason the customer can read', 
   await assert.rejects(downloadMatterport(id, target, { fetch: matterport().fetch, maxBytes: 100 }),
     error => error instanceof MatterportError && error.kind === 'unsupported' && /larger than one space can hold/.test(error.message));
   rmSync(path.dirname(target), { recursive: true, force: true });
+});
+
+// Account 8da572ef's import (model SfJXYgGGZrs) failed three times on 2026-11-03 at the first photo without an image.
+const noPano = { id: 'c', index: 2, neighbors: ['a'], pano: null };
+const lockedOnly = { id: 'd', index: 3, neighbors: ['b'], pano: { sweepUuid: 's4', skyboxes: [{ resolution: '4k', status: 'locked' }, { resolution: '2k', status: 'failed', urlTemplate: `${cdn}/pan/2k/~/s4_skybox<face>.jpg` }] } };
+
+test('photos Matterport has no image for are left out with their links, and counted', async () => {
+  const fake = matterport({ extra: [noPano, lockedOnly] });
+  const target = folder();
+  const summary = await downloadMatterport(id, target, { fetch: fake.fetch });
+  assert.deepEqual([summary.sweeps, summary.skipped], [2, 2]);
+  assert.equal(summary.files, 16, 'only the faces of photos that have them');
+  assert.ok(!fake.requests.some(request => request.url.includes('s4_skybox')), 'a failed or locked skybox is never asked for');
+  const page = readFileSync(path.join(target, 'index.html'), 'utf8');
+  const model = JSON.parse(JSON.parse(page.match(/parseJSON\(("(?:[^"\\]|\\.)*")\)/)[1])).queries.GetModelPrefetch.data.model;
+  assert.deepEqual(model.locations.map(location => location.id), ['a', 'b']);
+  // Links to the photos left out go with them; a link to a photo the owner hid stays for the converter to record.
+  assert.deepEqual(model.locations.map(location => location.neighbors), [['b', 'hidden'], ['a']]);
+  assert.equal(JSON.parse(readFileSync(path.join(target, 'link.json'), 'utf8')).skipped, 2);
+  assert.equal(skippedNote(summary.skipped, summary.sweeps), '2 of the 4 360 photos on Matterport had no image there, so they were left out, with the links to them.');
+  assert.equal(skippedNote(1, 176), '1 of the 177 360 photos on Matterport had no image there, so it was left out, with the links to it.');
+  assert.equal(skippedNote(0, 2), '');
+  rmSync(path.dirname(target), { recursive: true, force: true });
+});
+
+test('a space with no photo Matterport has an image for fails for the customer, leaving nothing behind', async () => {
+  const target = folder();
+  await assert.rejects(downloadMatterport(id, target, { fetch: matterport({ only: [], extra: [noPano, lockedOnly] }).fetch }),
+    error => error instanceof MatterportError && error.kind === 'unsupported' && /^None of the 2 360 photos of this Matterport space has an image/.test(error.message));
+  assert.deepEqual(readdirSync(path.dirname(target)), []);
+  rmSync(path.dirname(target), { recursive: true, force: true });
+});
+
+test('the best skybox is the largest available one with an address', () => {
+  assert.equal(bestSkybox({ pano: { skyboxes: [{ resolution: 'high', status: 'available', urlTemplate: 'h' }, { resolution: '2k', status: 'available', urlTemplate: 'k' },
+    { resolution: '4k', status: 'locked', urlTemplate: 'x' }, { resolution: '8k', status: 'available', urlTemplate: 'y' }] } }).urlTemplate, 'k');
+  for (const location of [noPano, lockedOnly, {}, null]) assert.equal(bestSkybox(location), undefined);
 });
