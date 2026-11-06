@@ -5,7 +5,7 @@ import { billingEnabled } from "./billing";
 import { spaceHosted } from "./accounts";
 import { previewOffer, spacePreview } from "./previews";
 import { salesEmail, sourceUrl } from "./brand";
-import { maxSpaceBytes } from "./uploads";
+import { maxSpaceBytes, uploadStalled } from "./uploads";
 import { readSourceScenes } from "../scene-catalog";
 import { editedListing, tourNamedListing } from "../scene-edits";
 
@@ -27,7 +27,9 @@ export async function describeSpace(space: CustomerSpace) {
       builders: sceneBuildersChoice(listing.sceneId) ?? false } : null,
     job: job ? { status: job.status, created: job.created, started: job.started, finished: job.finished,
       progress: job.status === "running" || job.status === "held" ? job.progress : null } : null,
-    uploads: listUploads(space.id).map(upload => ({ id: upload.id, name: upload.name, size: upload.size, status: upload.status }))
+    /** `stalled`: unfinished for a day, so no page is sending it any more. */
+    uploads: listUploads(space.id).map(upload => ({ id: upload.id, name: upload.name, size: upload.size, status: upload.status, created: upload.created,
+      stalled: uploadStalled(upload) }))
   };
 }
 export type SpaceView = Awaited<ReturnType<typeof describeSpace>>;

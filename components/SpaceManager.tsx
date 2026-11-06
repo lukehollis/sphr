@@ -87,6 +87,8 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
   const usable = space.hosted || previewing;
   const editable = ["draft", "failed", "ready"].includes(space.status) && usable;
   const complete = space.uploads.filter(upload => upload.status === "complete");
+  // Uploads no page is sending any more: they are offered again or removed, not listed as uploading for good.
+  const stalled = space.uploads.filter(upload => upload.stalled);
 
   const refresh = useCallback(async () => {
     const result = await getJson(`/api/account/spaces/${space.id}`).catch(() => undefined);
@@ -133,6 +135,16 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
     setError("");
     try { await accountRequest(`/api/account/uploads/${id}`, undefined, "DELETE"); await refresh(); }
     catch (failure) { setError((failure as Error).message); }
+  }
+  /** Removes every upload that stopped, so the space can start over or be processed with the files that arrived. */
+  async function removeStalled() {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      for (const upload of stalled) await accountRequest(`/api/account/uploads/${upload.id}`, undefined, "DELETE");
+      await refresh();
+      setMessage(complete.length ? "The unfinished files are removed. You can process the rest or add files." : "The unfinished files are removed. Add your files to start over.");
+    } catch (failure) { setError((failure as Error).message); await refresh(); }
+    finally { setBusy(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -250,9 +262,17 @@ export default function SpaceManager({ space: initial, account, brand, plans = [
               <p className="site-hint">Or drop files or a folder anywhere on this page. {previewing
                 ? `A free preview holds up to ${preview!.files} files and ${formatBytes(preview!.bytes)}.` : `Up to ${formatBytes(account.maxSpaceBytes)} per space.`}</p>
             </div>}
+            {stalled.length > 0 && !uploading && <div className="site-note" role="status">
+              <p>{`${stalled.length === 1 ? "1 file" : `${stalled.length} files`} started uploading on ${previewDate(stalled[0].created)} and never finished. `
+                + `Choose the same ${stalled.length === 1 ? "file" : "files"} again and ${stalled.length === 1 ? "it carries" : "they carry"} on, or remove ${stalled.length === 1 ? "it" : "them"} to start over.`}</p>
+              <div className="site-actions">
+                {editable && <button type="button" className="site-button" onClick={openUploads}>{stalled.length === 1 ? "Choose the file again" : "Choose the files again"}</button>}
+                <button type="button" className="site-link" disabled={busy} onClick={() => void removeStalled()}>{`Remove ${stalled.length === 1 ? "it" : "them"} and start over`}</button>
+              </div>
+            </div>}
             {space.uploads.length > 0 ? <ul className="site-files" aria-label="Uploaded files">{space.uploads.map(upload => <li key={upload.id}>
               <span className="site-file-name">{upload.name}</span>
-              <span className="site-file-meta">{formatBytes(upload.size)}{upload.status === "uploading" ? ", incomplete" : ""}</span>
+              <span className="site-file-meta">{`${formatBytes(upload.size)}${upload.stalled ? ", stopped" : upload.status === "uploading" ? ", incomplete" : ""}`}</span>
               {(editable || upload.status === "uploading") && <button type="button" className="site-link" onClick={() => remove(upload.id, upload.name)}>Remove</button>}
             </li>)}</ul> : !editable && <p className="site-hint">No files.</p>}
             {editable && complete.length > 0 && !uploading && <form className="site-form site-submit" onSubmit={submit}>

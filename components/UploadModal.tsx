@@ -110,9 +110,9 @@ export function useUploadBatches(onChange: () => void) {
       running.current.set(key, (running.current.get(key) ?? 0) + 1);
       void uploadFile(spaceId, next.file, update => patchTransfer(key, transferKey, update))
         .catch(failure => {
-          const { message, data } = failure as Error & { data?: { gate?: string; plan?: string } };
-          track("upload_error", { step: "upload", message });
-          patchTransfer(key, transferKey, { state: "failed", error: message, gate: data?.gate ? data.plan : undefined });
+          const { message, data, lost } = failure as Error & { data?: { gate?: string; plan?: string }; lost?: boolean };
+          track("upload_error", { step: "upload", message, ...(lost ? { lost: true } : {}) });
+          patchTransfer(key, transferKey, { state: "failed", error: message, lost, gate: data?.gate ? data.plan : undefined });
         })
         .finally(() => {
           running.current.set(key, (running.current.get(key) ?? 1) - 1);
@@ -131,12 +131,21 @@ export function useUploadBatches(onChange: () => void) {
   }, [patchTransfer]);
 
   const enqueue = useCallback((key: string, files: PickedFile[]) => {
-    const stamped = files.map((item, index) => ({ ...item, key: `${Date.now()}-${index}-${item.path}` }));
+    // A file chosen again after it failed (a lost file, a dropped connection) takes the failed one's place, and the
+    // server carries on from what storage kept.
+    const failed = (latest.current.find(item => item.key === key)?.transfers ?? []).filter(entry => entry.state === "failed");
+    const again = new Map<string, Transfer>();
+    const stamped = files.map((item, index) => {
+      const earlier = failed.find(entry => !again.has(entry.key) && entry.name === item.file.name && entry.size === item.file.size);
+      if (earlier) again.set(earlier.key, earlier);
+      return { ...item, key: earlier?.key ?? `${Date.now()}-${index}-${item.path}` };
+    });
     for (const item of stamped) picked.current.set(item.key, item);
     queues.current.set(key, [...(queues.current.get(key) ?? []), ...stamped]);
-    const transfers: Transfer[] = stamped.map(item => ({ key: item.key, name: item.file.name, size: item.file.size, sent: 0, state: "waiting" }));
+    const transfers: Transfer[] = stamped.filter(item => !again.has(item.key))
+      .map(item => ({ key: item.key, name: item.file.name, size: item.file.size, sent: 0, state: "waiting" }));
     setBatches(items => items.map(item => item.key !== key ? item : {
-      ...item, transfers: [...item.transfers, ...transfers],
+      ...item, transfers: [...item.transfers.map(entry => again.has(entry.key) ? { ...entry, state: "waiting" as const, sent: 0, error: undefined, lost: undefined } : entry), ...transfers],
       // New files during the countdown mean the customer is still adding: wait for them.
       phase: item.phase === "countdown" || item.phase === "held" ? "uploading" : item.phase, countdown: undefined
     }));
@@ -269,14 +278,14 @@ export function useUploadBatches(onChange: () => void) {
   const hold = useCallback((key: string) => patch(key, { phase: "held", countdown: undefined }), [patch]);
   const chooseOutput = useCallback((key: string, output: Output) => patch(key, { output }), [patch]);
 
-  /** Sends the failed files again. */
+  /** Sends the failed files again, except files the browser lost, which only choosing them again can bring back. */
   const retry = useCallback((key: string) => {
     const batch = latest.current.find(item => item.key === key);
     if (!batch) return;
-    const failed = batch.transfers.filter(entry => entry.state === "failed");
+    const failed = batch.transfers.filter(entry => entry.state === "failed" && !entry.lost);
     queues.current.set(key, [...(queues.current.get(key) ?? []), ...failed.map(entry => picked.current.get(entry.key)!).filter(Boolean)]);
     patch(key, item => ({ phase: "uploading", error: undefined,
-      transfers: item.transfers.map(entry => entry.state === "failed" ? { ...entry, state: "waiting" as const, sent: 0, error: undefined } : entry) }));
+      transfers: item.transfers.map(entry => entry.state === "failed" && !entry.lost ? { ...entry, state: "waiting" as const, sent: 0, error: undefined } : entry) }));
     setTimeout(() => pump(key), 0);
   }, [patch, pump]);
 
@@ -434,6 +443,15 @@ function Pickers({ onFiles, compact = false }: { onFiles: (files: PickedFile[]) 
     <input ref={files} type="file" multiple hidden onChange={event => { take(event.target.files); event.target.value = ""; }} />
     <input ref={folder} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={event => { take(event.target.files); event.target.value = ""; }} />
   </div>;
+}
+
+/** One button that opens the file picker, for files the browser lost and the person chooses again. */
+function ChooseAgain({ onFiles, count }: { onFiles: (files: PickedFile[]) => void; count: number }) {
+  const input = useRef<HTMLInputElement>(null);
+  return <>
+    <button type="button" className="site-button" onClick={() => input.current?.click()}>{count === 1 ? "Choose the file again" : "Choose the files again"}</button>
+    <input ref={input} type="file" multiple hidden onChange={event => { if (event.target.files?.length) onFiles(keepCaptures(fromList(event.target.files))); event.target.value = ""; }} />
+  </>;
 }
 
 /**
@@ -596,7 +614,7 @@ export default function UploadModal({ open, onClose, uploads, batchKey, onBatch,
         </div>}
 
         <Status batch={batch} uploads={uploads} total={total} sent={sent} done={done} failed={failed.length} left={left} onClose={close} existing={Boolean(existing)}
-          billing={billing} />
+          billing={billing} onFiles={files => void receive(files)} />
 
         {batch.link && <ul className="upload-files" aria-label="Matterport space">
           <li className="upload-file upload-file-done">
@@ -677,9 +695,9 @@ function OutputChoice({ batch, uploads }: { batch: Batch; uploads: Uploads }) {
   </fieldset>;
 }
 
-function Status({ batch, uploads, total, sent, done, failed, left, onClose, existing, billing }: {
+function Status({ batch, uploads, total, sent, done, failed, left, onClose, existing, billing, onFiles }: {
   batch: Batch; uploads: Uploads; total: number; sent: number; done: number; failed: number; left: number | null; onClose: () => void; existing: boolean;
-  billing?: PlanChoice;
+  billing?: PlanChoice; onFiles: (files: PickedFile[]) => void;
 }) {
   const count = batch.transfers.length;
   const files = `${count} ${count === 1 ? "file" : "files"}`;
@@ -720,17 +738,26 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
 
   if (batch.phase === "uploading" && !count) return <div className="upload-status"><h3>Add your files</h3><p>Drop them on this sheet or choose them below.</p></div>;
 
-  if (batch.phase === "uploading") return <div className="upload-status">
-    <h3>{failed ? `${failed} ${failed === 1 ? "file" : "files"} did not upload` : `Uploading ${files}`}</h3>
-    <p>{formatBytes(sent)} of {formatBytes(total)}{left !== null && !failed ? `. ${timeLeft(left)}` : ""}</p>
-    <Meter value={total ? sent / total * 100 : 0} label="Upload progress" />
-    <OutputChoice batch={batch} uploads={uploads} />
-    {failed ? <div className="site-actions">
-      {gate ? <a className="site-button site-button-accent" href={gate}>Start hosting<span aria-hidden="true">→</span></a>
-        : <button type="button" className="site-button" onClick={() => uploads.retry(batch.key)}>Try again</button>}
-      {done > 0 && <button type="button" className="site-link" onClick={() => uploads.skipFailed(batch.key)}>Leave {failed === 1 ? "it" : "them"} out</button>}
-    </div> : <p className="site-hint">You can close this sheet. Uploads keep going while this page stays open.</p>}
-  </div>;
+  if (batch.phase === "uploading") {
+    // Files the browser lost: trying again sends nothing, choosing them again carries on where they stopped.
+    const lost = batch.transfers.filter(entry => entry.state === "failed" && entry.lost).length;
+    return <div className="upload-status">
+      <h3>{failed ? `${failed} ${failed === 1 ? "file" : "files"} did not upload` : `Uploading ${files}`}</h3>
+      <p>{`${formatBytes(sent)} of ${formatBytes(total)}${left !== null && !failed ? `. ${timeLeft(left)}` : ""}`}</p>
+      <Meter value={total ? sent / total * 100 : 0} label="Upload progress" />
+      {lost > 0 && <p className="site-note" role="status">{lost === 1
+        ? "Your browser can no longer read one file, so trying again can't send it. Choose the same file again and it carries on where it stopped."
+        : `Your browser can no longer read ${lost} files, so trying again can't send them. Choose the same files again and they carry on where they stopped.`}</p>}
+      <OutputChoice batch={batch} uploads={uploads} />
+      {failed ? <div className="site-actions">
+        {gate ? <a className="site-button site-button-accent" href={gate}>Start hosting<span aria-hidden="true">→</span></a>
+          : lost ? <ChooseAgain onFiles={onFiles} count={lost} />
+          : <button type="button" className="site-button" onClick={() => uploads.retry(batch.key)}>Try again</button>}
+        {lost > 0 && lost < failed && <button type="button" className="site-button site-button-secondary" onClick={() => uploads.retry(batch.key)}>Try the others again</button>}
+        {done > 0 && <button type="button" className="site-link" onClick={() => uploads.skipFailed(batch.key)}>Leave {failed === 1 ? "it" : "them"} out</button>}
+      </div> : <p className="site-hint">You can close this sheet. Uploads keep going while this page stays open.</p>}
+    </div>;
+  }
 
   if (batch.phase === "countdown" || batch.phase === "held") return <div className="upload-status upload-status-action">
     <h3>Upload complete</h3>

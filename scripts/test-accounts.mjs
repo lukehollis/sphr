@@ -131,6 +131,11 @@ test('spaces, uploads and the processing queue', async () => {
   store.setUploadStatus(upload.id, 'complete');
   assert.throws(() => store.submitCustomerSpace(space.id, null), /Wait for every upload/);
   store.setUploadStatus(second.id, 'deleted');
+  // An upload no page has sent for a day has stopped.
+  const { uploadStalled } = await import('../lib/server/uploads.ts');
+  const now = Date.parse('2026-11-06T00:00:00Z');
+  assert.deepEqual([uploadStalled({ status: 'uploading', created: '2026-10-28T01:26:46Z' }, now), uploadStalled({ status: 'uploading', created: '2026-11-05T12:00:00Z' }, now),
+    uploadStalled({ status: 'complete', created: '2026-10-28T01:26:46Z' }, now)], [true, false, false]);
 
   const job = store.submitCustomerSpace(space.id, 'A two-floor studio.');
   assert.equal(store.readCustomerSpace(space.id).status, 'queued');
