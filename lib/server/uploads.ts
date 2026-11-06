@@ -15,6 +15,14 @@ export const chunkSize = 8 * 1024 * 1024;
 const env = (name: string) => process.env[name]?.trim() || undefined;
 export const uploadBucket = () => env("SPHR_UPLOAD_BUCKET");
 export const maxSpaceBytes = () => Number(env("SPHR_UPLOAD_MAX_GB") ?? 50) * 1e9;
+/**
+ * An upload unfinished this long has stopped: uploads run only while the page that started them stays open, and a
+ * day covers 50 GB on a slow line. Its page then says so and offers to choose the files again or remove them, instead
+ * of listing it as uploading for good (four files on account 9db148d3 from 2026-10-28). Storage keeps a session a week.
+ */
+export const stalledUploadMs = 24 * 60 * 60 * 1000;
+export const uploadStalled = (upload: { status: string; created: string }, now = Date.now()) =>
+  upload.status === "uploading" && now - Date.parse(upload.created) > stalledUploadMs;
 
 export function safeFileName(value: unknown) {
   if (typeof value !== "string") return undefined;

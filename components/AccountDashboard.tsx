@@ -168,6 +168,8 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   const status = spaceStatus(space);
   const files = space.uploads.filter(upload => upload.status === "complete");
   const bytes = files.reduce((sum, upload) => sum + upload.size, 0);
+  const unfinished = space.uploads.filter(upload => upload.status === "uploading");
+  const stalled = unfinished.filter(upload => upload.stalled).length;
 
   if (batch && batchActive(batch)) {
     const { tag, line, percent } = batchLine(batch);
@@ -189,14 +191,18 @@ function SpaceCard({ space, batch, onOpenBatch }: { space: SpaceView; batch?: Ba
   const ready = space.status === "ready" && space.scene && (space.hosted || previewing);
   let line = `Added ${shortDate(space.created)}`;
   if (space.status === "unpaid") line = "Complete payment to start uploading";
-  else if (space.status === "draft") line = space.source ? "Matterport space, ready to process" : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}, ${formatBytes(bytes)}` : "No files yet";
+  else if (space.status === "draft") line = space.source ? "Matterport space, ready to process"
+    : stalled ? `${stalled} ${stalled === 1 ? "file" : "files"} did not finish uploading. Open the space to choose ${stalled === 1 ? "it" : "them"} again`
+    : files.length ? `${files.length} ${files.length === 1 ? "file" : "files"}, ${formatBytes(bytes)}` : "No files yet";
   else if (space.status === "queued") line = "Waiting for an agent";
   else if (space.status === "processing") line = space.job?.progress ?? "An agent is working on it";
   else if (space.status === "failed") line = space.message?.split("\n")[0] ?? "Processing could not finish";
   else if (previewing && space.status === "ready") line = `Free preview, private to you${space.preview?.daysLeft ? `. ${space.preview.daysLeft} ${space.preview.daysLeft === 1 ? "day" : "days"} left` : ""}`;
   else if (!space.hosted && space.preview?.expired) line = "Preview ended. Start hosting to bring it back";
   else if (!space.hosted) line = "Offline until billing restarts";
-  const tag = status === "draft" ? space.source ? "Ready to process" : "Add files" : status === "queued" ? "In the queue"
+  // A draft whose files all arrived is waiting for its owner to start processing (a page that broke after the upload never counted down).
+  const tag = status === "draft" ? space.source ? "Ready to process" : stalled ? "Upload stopped" : files.length && !unfinished.length ? "Ready to process" : "Add files"
+    : status === "queued" ? "In the queue"
     : previewing && space.status === "ready" ? "Private preview" : !space.hosted && space.preview?.expired ? "Preview ended" : undefined;
 
   const media = <>

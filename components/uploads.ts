@@ -10,7 +10,22 @@ export type Transfer = {
   gate?: string;
   /** The server's record, once the upload has started. */
   uploadId?: string;
+  /** The browser can no longer read the file it was given, so only choosing the file again can carry on. */
+  lost?: boolean;
 };
+
+/** Said when the browser lost a chosen file: retrying the same handle cannot work, choosing the file again resumes it. */
+export const lostFileMessage = "Your browser can no longer read this file. Choose it again and the upload carries on where it stopped.";
+
+/**
+ * Whether the browser can still read the file at `at`. A file moved, renamed or deleted after it was chosen, or one
+ * whose handle Safari dropped, fails every chunk the same way, as a network error, so the retries only waited.
+ */
+export async function readable(file: Blob, at = 0) {
+  const start = Math.max(0, Math.min(at, file.size - 1));
+  try { await file.slice(start, start + 1).arrayBuffer(); return true; }
+  catch { return false; }
+}
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** Resolves when the browser is back online, or after a minute in case it never says so. */
@@ -81,6 +96,7 @@ async function sendFile(uploadId: string, url: string, chunkSize: number, file: 
       update({ sent: offset, state: "uploading" });
     } catch (failure) {
       if ((failure as { final?: boolean }).final) throw failure;
+      if (!(await readable(file, offset))) throw Object.assign(new Error(lostFileMessage), { final: true, lost: true });
       update({ state: "retrying" });
       // Time offline (a train tunnel, a laptop asleep) does not count against the file.
       if (navigator.onLine === false) await online();
