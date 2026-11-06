@@ -1122,7 +1122,7 @@ try {
   assert.equal(response.status, 200);
   assert.deepEqual([body.space.status, body.previewDeclined, body.plan], ['unpaid', 'large', 'price_space']);
   assert.match(body.checkout, /^https:\/\/checkout\.example\//);
-  assert.match(body.previewNote, /larger than a free preview holds/);
+  assert.match(body.previewNote, /^A free preview holds up to 3 files and 20 MB, and this capture is 37 GB, so this space starts with payment\.$/, 'it says the limits and what the capture has');
   const hugeSpace = body.space;
   assert.equal(database().prepare('SELECT count(*) AS n FROM preview_grants WHERE user_id=?').get(huge.id).n, 0, 'declining spends nothing');
   response = await huge.person.post(`/api/account/spaces/${hugeSpace.id}/uploads`, { name: 'x.e57', size: 10 });
@@ -1137,9 +1137,11 @@ try {
   assert.equal(response.status, 402);
   assert.equal((await response.json()).gate, 'limit', 'a page or an agent cannot get past the limits');
   assert.equal((await huge.person.post(`/api/account/spaces/${hugeSpace.id}/preview`)).status, 409, 'it already is the preview');
-  // A second space while the preview is spent: back to payment, with nothing more to say about it.
+  // A second space while the preview is spent: back to payment. The preview has not been processed yet, so the sheet points to it.
   body = await (await huge.create('Second')).json();
   assert.deepEqual([body.space.status, body.previewDeclined], ['unpaid', 'used']);
+  assert.deepEqual(body.previewSpace, { id: hugeSpace.id, title: 'Huge E57' });
+  assert.match(body.previewNote, /^Your free preview is “Huge E57”, which has not been processed yet\. Open it to process it for free/);
   response = await huge.person.post(`/api/account/spaces/${body.space.id}/preview`);
   assert.equal(response.status, 409);
   assert.equal((await response.json()).reason, 'used');

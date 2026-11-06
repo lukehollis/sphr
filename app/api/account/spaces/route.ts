@@ -4,7 +4,7 @@ import { AccountError, cleanText, createCustomerSpace, hostingStatuses, listCust
 import { accountRequest, accountResponse, accountsEnabled, attemptKey, clientAddress, publicOrigin, requestUser } from "@/lib/server/accounts";
 import { billingEnabled, startCheckout, syncQuantity } from "@/lib/server/billing";
 import { describeAccount, describeSpace } from "@/lib/server/customer-spaces";
-import { previewAddressLimit, previewRefusal, previewWindow, refusalText, type PreviewRefusal } from "@/lib/server/previews";
+import { previewAddressLimit, previewRefusal, previewWindow, refusalNote, unprocessedPreview, type PreviewRefusal } from "@/lib/server/previews";
 import { notifyTeam } from "@/lib/server/team-notify";
 import { readMatterportRequest } from "@/lib/server/matterport";
 import { recordEvent } from "@/lib/server/analytics";
@@ -91,7 +91,9 @@ export async function POST(request: Request) {
     if (declined !== "used") await recordEvent("preview_declined", { userId: user.id, props: { reason: declined, from: agent ? "agent" : "web" } });
     const space = createCustomerSpace(user.id, title, "unpaid", null, false, source);
     announceSpace(user, title, "unpaid", agent, source);
-    const why = { previewDeclined: declined, previewNote: refusalText[declined] };
+    // A preview started and never processed is pointed to, since it may be what the person meant to fill.
+    const waiting = declined === "used" ? unprocessedPreview(user.id) : undefined;
+    const why = { previewDeclined: declined, previewNote: refusalNote(declined, user.id, declaredFiles(body?.files)), ...(waiting ? { previewSpace: waiting } : {}) };
     try {
       const next = await startCheckout(user, publicOrigin(request), undefined, agent);
       if ("url" in next) await recordEvent("checkout_started", { userId: user.id, props: { plan: next.plan, from: agent ? "agent" : "web" } });

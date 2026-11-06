@@ -49,6 +49,8 @@ export type Batch = {
   preview?: boolean;
   /** Why the free preview was not given, when payment comes first for this capture. */
   note?: string;
+  /** The account's free preview, when it was started and never processed: the space the person may have meant. */
+  previewSpace?: { id: string; title: string };
   /** A Matterport space brought over from its link, with the number of 360 photos when Matterport said. */
   link?: MatterportLink;
 };
@@ -191,8 +193,8 @@ export function useUploadBatches(onChange: () => void) {
       const checkout = result.checkout ?? result.portal;
       if (result.space.status === "unpaid") {
         // An open payment keeps the plan chosen for it. A capture the free preview did not take says why.
-        patch(key, { phase: "payment", checkoutUrl: checkout, plan: result.plan ?? null, error: result.error,
-          note: result.previewDeclined === "large" || result.previewDeclined === "busy" ? result.previewNote : undefined });
+        patch(key, { phase: "payment", checkoutUrl: checkout, plan: result.plan ?? null, error: result.error, previewSpace: result.previewSpace,
+          note: result.previewDeclined === "large" || result.previewDeclined === "busy" || result.previewSpace ? result.previewNote : undefined });
         remember(result.space.id);
       } else {
         patch(key, { preview: Boolean(result.preview) });
@@ -717,6 +719,9 @@ function Status({ batch, uploads, total, sent, done, failed, left, onClose, exis
       {plan && <p>{plan.spaces === null ? `You're on pay as you go, so each space you upload adds ${price}.${plans.length > 1 ? " A plan covers a set number of spaces for one price." : ""}`
         : `${plan.name} covers up to ${plan.spaces} spaces for ${price}.`}</p>}
       {batch.note && <p className="site-note" role="status">{batch.note}</p>}
+      {batch.previewSpace && <p><a className="site-link" href={`/account/spaces/${batch.previewSpace.id}`}
+        onClick={event => { event.preventDefault(); const href = event.currentTarget.href; void uploads.cancel(batch.key).then(() => window.location.assign(href)); }}>
+        Open {batch.previewSpace.title}<span aria-hidden="true">→</span></a></p>}
       {plans.length > 1 && <PlanPicker plans={plans} selected={plan?.id ?? null} needed={billing?.spaces || 1} name={`plan-${batch.key}`}
         label="How you pay" disabled={batch.preparing} onSelect={id => void uploads.choosePlan(batch.key, id)} />}
       {billing && <EnterpriseNote email={billing.salesEmail} />}
