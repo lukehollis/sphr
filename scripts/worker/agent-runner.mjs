@@ -24,7 +24,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { readJobFile } from './job-files.mjs';
-import { downloadMatterport, MatterportError } from './matterport-link.mjs';
+import { downloadMatterport, MatterportError, skippedNote } from './matterport-link.mjs';
 import { canAutoPromote, promote, storeProposal, writeMeta } from './skill-proposals.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -116,7 +116,7 @@ async function downloadLink(job, link) {
   const summary = await downloadMatterport(link.url, folder, { base: env('SPHR_MATTERPORT_TEST_BASE'), log: line => log(job, line),
     maxBytes: Number(env('SPHR_MATTERPORT_MAX_GB') ?? 20) * 1e9 });
   return { path: folder, name: `Matterport space "${summary.name}" (${summary.modelId})`, size: summary.bytes, type: 'matterport',
-    sweeps: summary.sweeps, tags: summary.tags };
+    sweeps: summary.sweeps, skipped: summary.skipped ?? 0, tags: summary.tags };
 }
 
 function prompt(job) {
@@ -511,7 +511,8 @@ async function hold(job, reason) {
   return 'held';
 }
 
-async function finish(job) {
+/** `note` is the runner's own word for the customer (photos a Matterport download left out), added to a finished space's message. */
+async function finish(job, note = '') {
   const result = readResult(job);
   if (!result) return hold(job, 'The agent did not write a valid output/result.json.');
   if (result.status === 'needs_operator') return hold(job, result.message || 'The agent asked for an operator.');
@@ -525,7 +526,7 @@ async function finish(job) {
   catch (error) { return hold(job, error.message); }
   // A published space whose result is refused (a proxy may turn away the message) waits for an operator, who can
   // report it again without processing it again; the customer sees it as held, and the next space of a list starts.
-  try { await report(job, { action: 'complete', message: result.message || null, scene }); }
+  try { await report(job, { action: 'complete', message: [result.message, note].filter(Boolean).join(' ') || null, scene }); }
   catch (error) {
     if (!error.status) throw error;
     return hold(job, `The space was published, but reporting it was refused (${error.message}). Report it again with: agent-runner.mjs publish ${job.id}`);
@@ -552,16 +553,24 @@ async function processJob(queued) {
     coolDown(job);
     return defer(job, `${worker} is short of disk space: ${short}.`);
   }
+  let note = '';
   try {
     const files = await download(job);
     if (link) {
-      files.push(await downloadLink(job, link));
+      const space = await downloadLink(job, link);
+      files.push(space);
       matterport.times = 0;
+      note = skippedNote(space.skipped, space.sweeps);
+      if (note) {
+        log(job, note);
+        api(`/api/worker/jobs/${job.id}`, { action: 'progress', message: `Left out ${space.skipped} 360 ${space.skipped === 1 ? 'photo' : 'photos'} Matterport has no image for` }).catch(() => undefined);
+      }
     }
     writeFileSync(path.join(jobDir(job), 'job.json'), JSON.stringify({ sceneId: job.sceneId, slug: job.slug, title: job.space.title,
       notes: job.space.notes, output: ['splat', 'tour'].includes(job.space.output) ? job.space.output : 'auto',
       reprocessing: job.space.reprocessing, inputs: files,
-      ...(link ? { source: { kind: 'matterport', url: link.url, modelId: link.modelId, folder: `input/matterport-${link.modelId}` } } : {}) }, null, 2) + '\n');
+      ...(link ? { source: { kind: 'matterport', url: link.url, modelId: link.modelId, folder: `input/matterport-${link.modelId}`,
+        skippedSweeps: files.at(-1)?.skipped ?? 0 } } : {}) }, null, 2) + '\n');
     rmSync(path.join(jobDir(job), 'output/result.json'), { force: true });
   } catch (error) {
     // A space Matterport will not open, or one larger than a space can hold, is the customer's to fix.
@@ -584,7 +593,7 @@ async function processJob(queued) {
     coolDown(job);
     return defer(job, `The agent exited with ${exit} before writing anything: ${logTail(job) || 'agent.log is empty'}`);
   }
-  const result = await finish(job);
+  const result = await finish(job, note);
   await learn(job, result).catch(error => log(job, `skill proposal not kept: ${error.message}`));
   if (result !== 'held' && env('SPHR_KEEP_JOB_FILES') !== '1') {
     for (const folder of ['input', 'work', 'tmp']) rmSync(path.join(jobDir(job), folder), { recursive: true, force: true });

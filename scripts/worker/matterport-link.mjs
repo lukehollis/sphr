@@ -8,7 +8,8 @@
 //
 // The model data comes from Matterport's model graph, asked the way the showcase asks for its prefetch (the
 // default view, sweeps tagged "showcase"), and is written into index.html as the showcase page carries it. The
-// page itself sits behind a bot check that turns away scripts at random; the graph does not.
+// page itself sits behind a bot check that turns away scripts at random; the graph does not. A 360 photo that
+// Matterport has no image for is left out with its links, and counted in link.json as `skipped`.
 //   node scripts/worker/matterport-link.mjs <link or model ID> <folder>
 import { createWriteStream, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -44,6 +45,29 @@ export function modelIdOf(link) {
   if (!allowedHost(url.hostname)) return undefined;
   const id = url.searchParams.get('m') ?? url.pathname.match(/\/(?:models|space)\/([A-Za-z0-9]{11})(?:\/|$)/)?.[1];
   return /^[A-Za-z0-9]{11}$/.test(id ?? '') ? id : undefined;
+}
+
+/** A location's best skybox Matterport will hand out, or undefined when it has none (no pano, or only locked ones). */
+export function bestSkybox(location) {
+  const boxes = (location?.pano?.skyboxes ?? []).filter(box => box?.status === 'available' && box.urlTemplate && ranks[box.resolution]);
+  return boxes.length ? boxes.reduce((top, box) => ranks[box.resolution] > ranks[top.resolution] ? box : top) : undefined;
+}
+
+/**
+ * The model without the locations in `left` and without the links other locations have to them, so the converter
+ * builds a tour of the photos that came over. Links to photos the owner hid stay: the converter records those.
+ */
+export function withoutLocations(model, left) {
+  if (!left.size) return model;
+  return { ...model, locations: (model.locations ?? []).filter(location => !left.has(location.id))
+    .map(location => ({ ...location, neighbors: (location.neighbors ?? []).filter(id => !left.has(id)) })) };
+}
+
+/** What the customer is told about the 360 photos a download left out because Matterport had no image for them. */
+export function skippedNote(skipped, kept) {
+  if (!skipped) return '';
+  const one = skipped === 1;
+  return `${skipped} of the ${skipped + kept} 360 photos on Matterport had no image there, so ${one ? 'it was' : 'they were'} left out, with the links to ${one ? 'it' : 'them'}.`;
 }
 
 /** index.html as a showcase page carries its model data, which is all web_archive.py reads of it. */
@@ -162,17 +186,25 @@ export async function downloadMatterport(link, folder, { fetch = globalThis.fetc
       return { model, root };
     };
     let { model, root } = await read();
-    const locations = model.locations ?? [];
-    if (!locations.length) throw new MatterportError('unsupported', 'This Matterport space has no 360 photos.');
+    const all = model.locations ?? [];
+    if (!all.length) throw new MatterportError('unsupported', 'This Matterport space has no 360 photos.');
+    // A photo Matterport offers no image for (no pano, or only locked or failed skyboxes) is left out with the
+    // links to it, so the rest of the space still comes over. Only a space with none left fails.
+    const skipped = new Set(all.filter(location => !bestSkybox(location)).map(location => location.id));
+    const locations = all.filter(location => !skipped.has(location.id));
+    if (!locations.length) {
+      throw new MatterportError('unsupported', `None of the ${all.length} 360 photos of this Matterport space has an image Matterport will share, so there is nothing to bring over. `
+        + 'Check that the space opens and shows its 360 photos on Matterport, then process it again.');
+    }
+    if (skipped.size) log(`leaving out ${skipped.size} of ${all.length} 360 photos that have no available image on Matterport`);
 
     /** Every asset to fetch, keyed by its archive path, from the current page's signed addresses. */
     const assets = () => {
       const wanted = new Map();
       for (const location of locations) {
         const fresh = model.locations.find(item => item.id === location.id) ?? location;
-        const boxes = (fresh.pano?.skyboxes ?? []).filter(box => box.status === 'available' && box.urlTemplate && ranks[box.resolution]);
-        if (!boxes.length) throw new MatterportError('unsupported', 'A 360 photo of this Matterport space has no available image.');
-        const best = boxes.reduce((top, box) => ranks[box.resolution] > ranks[top.resolution] ? box : top);
+        const best = bestSkybox(fresh);
+        if (!best) throw new MatterportError('network', 'A 360 photo of this Matterport space lost its image while it was downloading.');
         for (let face = 0; face < 6; face++) {
           const url = best.urlTemplate.replaceAll('<face>', String(face));
           wanted.set(archivePath(staging, url), url);
@@ -279,10 +311,10 @@ export async function downloadMatterport(link, folder, { fetch = globalThis.fetc
       log(`Mattertags skipped: ${error.message}`);
     }
 
-    // The model data as last read, so its signed addresses match the files.
-    writeFileSync(path.join(staging, 'index.html'), showcasePage(model, root));
+    // The model data as last read, so its signed addresses match the files, without the photos left out.
+    writeFileSync(path.join(staging, 'index.html'), showcasePage(withoutLocations(model, skipped), root));
     const summary = { modelId, url: `https://my.matterport.com/show/?m=${modelId}`, name: root.name ?? '', sweeps: locations.length,
-      tags: tags.length, files, bytes, downloaded: new Date().toISOString() };
+      skipped: skipped.size, tags: tags.length, files, bytes, downloaded: new Date().toISOString() };
     writeFileSync(path.join(staging, 'link.json'), JSON.stringify(summary, null, 2) + '\n');
     rmSync(folder, { recursive: true, force: true });
     renameSync(staging, folder);
