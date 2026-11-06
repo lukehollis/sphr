@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Edit the tour by hand with save_tour, or in the browser.");
       const origin = new URL(request.url).origin;
       const started = startDraft(tour.id, async () => {
-        const result = await draftFromRequest(scene!, request_, origin, false, { place: true });
+        const result = await draftFromRequest(scene!, request_, origin, false, { place: true, tourId: tour.id });
         saveAndEmail(result.experience, result.reply, true);
         void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: "agent" } });
         return result.reply;
@@ -82,6 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             const result = await draftFromRequest(scene!, request_, origin, false, {
               place: save,
               alsoPlace: true,
+              tourId: tour.id,
               onLog: (text) => sendLine({ type: "log", text })
             });
             void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: save ? "agent" : "builder" } });
@@ -110,7 +111,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" }
       });
     }
-    const result = await draftFromRequest(scene!, request_, new URL(request.url).origin, false, { place: save, alsoPlace: true });
+    const result = await draftFromRequest(scene!, request_, new URL(request.url).origin, false, { place: save, alsoPlace: true, tourId: tour.id });
     void recordEvent("tour_agent", { userId: user.id, props: { stops: result.experience.stops.length, from: save ? "agent" : "builder" } });
     const savedTour = saveAndEmail(result.placed ?? result.experience, result.reply, save);
     if (!save) return accountResponse({ ok: true, ...result, tour: savedTour });

@@ -46,7 +46,8 @@ export type AgentAnchors = {
 };
 export type AgentTurn = { prompt: string; reply: string };
 export type ClientView = { id: string; image: string; nodeId?: string; rotation?: { azimuth: number; polar: number }; fov?: number };
-export type AgentResult = { experience: Experience; anchors: AgentAnchors; reply: string };
+/** `scrubbed` counts pieces of text that named a location visitors never see and lost the name. */
+export type AgentResult = { experience: Experience; anchors: AgentAnchors; reply: string; scrubbed?: number };
 
 export class TourAgentError extends Error {}
 
@@ -187,7 +188,8 @@ export async function buildAgentContext(bootstrap: SphrBootstrap, draft: Experie
   const lines = [
     `Space title: ${space.title}`,
     `Kind of capture: ${nodes.length ? `${nodes.length} panorama locations${(bootstrap.tour?.tour_data?.sceneGraph ?? data.sceneGraph ?? []).some((node) => node.raycast) ? " with a 3D mesh" : ""}` : data.splats?.length ? "Gaussian splat" : "3D model"}`,
-    nodes.length ? `Locations (id, label, x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${JSON.stringify(node.label ?? "")} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
+    // Only IDs: visitors never see a location's label ("Location 14"), so the agent must not learn to write it.
+    nodes.length ? `Locations (id, then x y z in meters, y is up${listed.length < nodes.length ? `, a spread of ${listed.length} of ${nodes.length}` : ""}):\n${listed.map((node) => `${node.uuid} ${round(node.position.x)} ${round(node.position.y)} ${round(node.position.z)}`).join("\n")}` : "",
     images.length ? `Images attached, in order: ${images.map((image) => image.label).join("; ")}` : "No images of the space are attached.",
     spaceViews.length ? `This space has no panoramas, so it is shown in views drawn from its 3D ${bootstrap.space.space_data.splats?.length ? "Gaussian splat as dots of color (the real space is sharp and continuous)" : "model as a plain clay render (the real model has its own colors)"}: ${spaceViews.map((view) => `${view.id} from ${view.camera.position.map((value) => round(value)).join(" ")} heading ${round(view.camera.azimuth, 1)} tilt ${round(view.camera.polar, 1)}`).join("; ")}. Place objects, point effects and stops with {"view": view id, "x", "y"} on these images. A stop stands where its view's camera is and looks at the pixel you give, so give every stop a look in one of these views, and point at surfaces (the ground, a table, a wall), not empty background.` : "",
     views.length ? `Client views: ${views.map((view) => `${view.id} seen from ${view.nodeId ? `location ${view.nodeId}` : "a free camera"}${view.rotation ? ` heading ${round(view.rotation.azimuth, 1)} tilt ${round(view.rotation.polar, 1)}` : ""}${view.fov ? ` fov ${Math.round(view.fov)}` : ""}`).join("; ")}` : "",
@@ -215,9 +217,9 @@ A tour is a sequence of stops. Each stop stands at a panorama location (or a fre
 
 You always answer by calling the write_tour tool exactly once with the complete new draft. Keep everything from the current draft that the request does not change, including IDs, text the person wrote and object positions they set.
 
-Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a view (one the person sent, or one drawn of a space without panoramas). Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Place objects a few meters out in the scene where a visitor will see them, never on the floor right below the camera, which is where the visitor stands. Keep each object within about 3 to 15 meters of the location of the stop that shows it and inside that stop's view: much farther away a life-size thing is too small to notice, so in a large space point at a spot near the stop rather than across it. In a guided tour, place a stop's objects by pointing into the same image you aimed that stop with, near what it looks at, so they are in its view. In a scavenger hunt, make the visitor look around and walk a little: aim each clue's stop at the area or landmark the clue talks about, not at the object, and hide the object where it is not in that opening view, off to the side or behind the visitor, up on a ledge or down in a niche, or behind a column, wall or corner where it shows from a location one to three steps away (point at it in the photograph from that location). Only the first clue may sit near the edge of the opening view. Keep an existing object's position by leaving its position as it is and place null.
+Placing things. You see photographs of the space. To aim a stop's camera or to place an object or effect, give a pixel in one of those images as fractions from its top left: {"nodeId": location, "face": face number from the image label (omit for an equirectangular panorama), "x": 0..1, "y": 0..1}, or {"view": view id, "x", "y"} for a view (one the person sent, or one drawn of a space without panoramas). Point at the exact spot where the thing should sit, for example the top of a table or the base of a statue. Only point at things you can actually see. Place objects a few meters out in the scene where a visitor will see them, never on the floor right below the camera, which is where the visitor stands. Keep each object within about 3 to 15 meters of the location of the stop that shows it and inside that stop's view: much farther away a life-size thing is too small to notice, so in a large space point at a spot near the stop rather than across it. In a guided tour, place a stop's objects by pointing into the same image you aimed that stop with, near what it looks at, so they are in its view. In a scavenger hunt, make the visitor look around and walk a little: aim each clue's stop at the area or landmark the clue talks about, not at the object, and hide the object where it is not in that opening view, off to the side or behind the visitor, up on a ledge or down in a niche, or behind a column, wall or corner where it shows from a location one to three steps away (point at it in the photograph from that location). Only the first clue may sit near the edge of the opening view. Keep every clue's object within about 8 meters of that clue's own location: the hunt only goes on once it is found, so never hide it back at an earlier clue or across the space. Give every stop the nodeId of the location it stands at, exactly as listed, and point at a clue's object in a photograph from that location or one a few meters from it. Keep an existing object's position by leaving its position as it is and place null.
 
-Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues name the area and a landmark to head for without naming the exact spot; hints say plainly where to turn or walk and where to look; found messages reward the visitor with one real detail about the place.
+Writing. Text is plain, warm and specific to what is visible. Two to four sentences per stop. No markdown, no lists, no emoji. Titles are two to five words. Hunt clues name the area and a landmark to head for without naming the exact spot; hints say plainly where to turn or walk and where to look; found messages reward the visitor with one real detail about the place. Visitors never see location IDs, labels or image names, so never write them (scan-013, Location 14, face 2) in titles, text, clues, hints, found messages or the finale. Say where to go by what is there and which way to turn: up the ramp, through the low doorway on the left, back toward the metal gate.
 
 Sound. A little sound goes a long way: background music or an ambient bed fitting the place (a music effect, always or on chosen stops), and a few sound effects tied to moments. Hunt finds and hints already chime.
 
@@ -353,14 +355,107 @@ function asPlace(value: unknown): PixelPlace | null {
   };
 }
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Names visitors never see: a location's ID or label (scan-013, pano-4, "Location 14"), the
+ * space's own location IDs, or an image's face. Text that names one sends players nowhere.
+ */
+export function internalNamePattern(nodeIds: Iterable<string> = []) {
+  // Matterport and other captures use IDs that are not "scan-013"; the long ones are safe to match as words.
+  const ids = [...nodeIds].filter((id) => id.length >= 6 && /\d/.test(id) && /^[\w-]+$/.test(id)).sort((a, b) => b.length - a.length).map(escapeRegExp);
+  const generic = String.raw`(?:locations?|loc\.|scans?|panos?|panoramas?|nodes?)[\s#_-]*\d+(?:\s*(?:,|and|or|&|to)\s*\d+)*`;
+  return new RegExp(String.raw`(?:\bthe\s+)?\b(?:${generic}${ids.length ? `|${ids.join("|")}` : ""})\b`, "gi");
+}
+
+/**
+ * Takes those names out of a piece of player-facing text, keeping the rest of what it says:
+ * "the Grand Gallery at Location 83, then check" reads "the Grand Gallery, then check", and
+ * "walk to scan-042 and look up" reads "walk a few steps and look up".
+ */
+export function scrubInternalNames(text: string, pattern: RegExp) {
+  const name = pattern.source;
+  const named = new RegExp(name, "i");
+  if (!named.test(text)) return text;
+  // Sentences and the spaces between them, so text without a name keeps its line breaks.
+  const parts = text.split(/(?<=[.!?])(\s+)/);
+  for (let index = 0; index < parts.length; index += 2) {
+    if (!named.test(parts[index])) continue;
+    const scrubbed = parts[index]
+      .replace(new RegExp(String.raw`\s*\(\s*${name}\s*\)`, "gi"), "")
+      .replace(new RegExp(String.raw`^(?:(?:once|when|after)\s+(?:you(?:'re| are)\s+(?:at|by|near)|you\s+reach|reaching)|(?:back\s+)?(?:from|at|near|by|beside|standing at|over at))\s+${name}\s*,\s*`, "i"), "")
+      .replace(new RegExp(String.raw`\b(walk|head|go|move|step|climb|continue|return|come|cross|make your way)((?:\s+(?:back|up|down|over|forward|on|ahead|across|along|through))*)\s+(?:to|toward|towards|into)\s+${name}`, "gi"), "$1$2 a few steps")
+      .replace(new RegExp(String.raw`\s*,?\s+(?:at|by|near|beside|around|from|in|on|of|past|to|toward|towards|into)\s+${name}`, "gi"), "")
+      .replace(new RegExp(name, "gi"), "a spot nearby")
+      .replace(/ {2,}/g, " ").replace(/\s+([,.!?;:])/g, "$1").replace(/,([.!?])/g, "$1").trim();
+    parts[index] = scrubbed.charAt(0).toUpperCase() + scrubbed.slice(1);
+    // A sentence left with nothing to say goes, with the space after it.
+    if (!/\w/.test(parts[index])) { parts[index] = ""; if (index + 1 < parts.length) parts[index + 1] = ""; }
+  }
+  return parts.join("").trim();
+}
+
+/** Every piece of player-facing text in a raw draft that the agent wrote or changed, to read or rewrite. */
+function playerTexts(raw: RawDraft, previous: Experience) {
+  const texts: Array<{ where: string; value: string; set: (value: string) => void }> = [];
+  const add = (where: string, holder: Record<string, unknown> | undefined, key: string, before: unknown) => {
+    const value = holder?.[key];
+    if (typeof value === "string" && value !== before) texts.push({ where, value, set: (next) => { holder![key] = next; } });
+  };
+  if (typeof raw.finale === "string" && raw.finale !== previous.finale) texts.push({ where: "the finale", value: raw.finale, set: (next) => { raw.finale = next; } });
+  const stopsBefore = new Map(previous.stops.map((stop) => [stop.id, stop]));
+  (raw.stops ?? []).forEach((stop, index) => {
+    const before = stopsBefore.get(String(stop.id ?? ""));
+    const name = `stop ${index + 1}`;
+    for (const key of ["title", "text", "detail"] as const) add(`${name} ${key}`, stop, key, before?.[key]);
+    const find = stop.find as Record<string, unknown> | undefined;
+    if (find && typeof find === "object") for (const key of ["hint", "found"] as const) add(`${name} ${key}`, find, key, before?.find?.[key]);
+  });
+  const objectsBefore = new Map(previous.objects.map((object) => [object.id, object]));
+  for (const object of raw.objects ?? []) {
+    const before = objectsBefore.get(String(object.id ?? ""));
+    add(`the label of ${String(object.id ?? "an object")}`, object, "label", before?.label);
+    const source = object.source as Record<string, unknown> | undefined;
+    if (source && typeof source === "object") add(`the text on ${String(object.id ?? "an object")}`, source, "text", before?.source.kind === "shape" ? before.source.text : undefined);
+  }
+  return texts;
+}
+
+/** Where a raw draft names locations in text visitors read, as "stop 6 hint: Location 14". */
+export function internalNames(raw: RawDraft, previous: Experience, pattern: RegExp) {
+  return playerTexts(raw, previous).flatMap(({ where, value }) => {
+    const found = value.match(new RegExp(pattern.source, "gi"));
+    return found ? [`${where}: ${[...new Set(found.map((match) => match.trim()))].join(", ")}`] : [];
+  });
+}
+
 /** Split the agent's pixel placements from the draft and validate the rest. */
-export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds: Set<string>): AgentResult {
+export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds: Set<string>, aliases: Map<string, string> = new Map()): AgentResult {
   const anchors: AgentAnchors = { objects: {}, stops: {}, effects: {} };
   const previousObjects = new Map(previous.objects.map((object) => [object.id, object]));
   const previousStops = new Map(previous.stops.map((stop) => [stop.id, stop]));
+  // Agents sometimes give a location as its label or image name ("Location 145", "location scan-144").
+  const nodeRef = (value: unknown) => {
+    if (typeof value !== "string") return undefined;
+    const id = value.trim();
+    const bare = id.replace(/^location\s+/i, "");
+    return nodeIds.has(id) ? id : nodeIds.has(bare) ? bare : aliases.get(id.toLowerCase());
+  };
+  const located = (place: PixelPlace | null) => {
+    if (!place?.nodeId) return place;
+    const nodeId = nodeRef(place.nodeId);
+    return nodeId ? { ...place, nodeId } : place;
+  };
+  // Player-facing text that still names a location loses the name (see scrubInternalNames).
+  const names = internalNamePattern(nodeIds);
+  let scrubbed = 0;
+  for (const text of playerTexts(raw, previous)) {
+    const clean = scrubInternalNames(text.value, names);
+    if (clean !== text.value) { text.set(clean); scrubbed += 1; }
+  }
   const objects = (raw.objects ?? []).map((object) => {
     const id = String(object.id ?? "");
-    const place = asPlace(object.place);
+    const place = located(asPlace(object.place));
     if (place) anchors.objects[id] = place;
     const position = Array.isArray(object.position) ? object.position : previousObjects.get(id)?.position ?? [0, 0, 0];
     const { place: _place, ...rest } = object;
@@ -368,7 +463,7 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
   });
   const effects = (raw.effects ?? []).map((effect) => {
     const target = (effect.target ?? { kind: "scene" }) as Record<string, unknown>;
-    const place = target.kind === "point" ? asPlace(target.place) : null;
+    const place = target.kind === "point" ? located(asPlace(target.place)) : null;
     if (place) anchors.effects[String(effect.id ?? "")] = place;
     const position = Array.isArray(target.position) ? target.position : [0, 0, 0];
     return { ...effect, target: target.kind === "point" ? { kind: "point", position } : target };
@@ -377,8 +472,12 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
   const stops = (raw.stops ?? []).map((stop) => {
     const id = String(stop.id ?? "");
     const before = previousStops.get(id);
-    const look = asPlace(stop.look);
-    const nodeId = typeof stop.nodeId === "string" && nodeIds.has(stop.nodeId) ? stop.nodeId : look?.nodeId && nodeIds.has(look.nodeId) ? look.nodeId : before?.view.nodeId ?? firstNode;
+    const look = located(asPlace(stop.look));
+    // A stop the agent gave no location stands where its find (or first object) was picked,
+    // which is what its text describes, rather than at the space's first location.
+    const picked = [(stop.find as { objectId?: unknown } | undefined)?.objectId, ...(Array.isArray(stop.objects) ? stop.objects : [])]
+      .map((objectId) => anchors.objects[String(objectId)]?.nodeId).find((nodeId) => nodeId && nodeIds.has(nodeId));
+    const nodeId = nodeRef(stop.nodeId) ?? (look?.nodeId && nodeIds.has(look.nodeId) ? look.nodeId : undefined) ?? before?.view.nodeId ?? picked ?? firstNode;
     if (look) anchors.stops[id] = { ...look, nodeId: look.nodeId ?? nodeId };
     const rotation = stop.rotation && typeof stop.rotation === "object" ? stop.rotation : before?.view.rotation ?? { azimuth: 0, polar: 0 };
     return {
@@ -404,7 +503,7 @@ export function normalizeAgentDraft(raw: RawDraft, previous: Experience, nodeIds
   const dropped = objects.length - experience.objects.length;
   const said = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 600) : "Here is a new draft.";
   const reply = dropped > 0 ? `${said} (${dropped === 1 ? "One object" : `${dropped} objects`} could not be placed because the model was not found in the library.)` : said;
-  return { experience, anchors, reply };
+  return { experience, anchors, reply, scrubbed };
 }
 
 function userContent(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string): Anthropic.ContentBlockParam[] {
@@ -516,7 +615,7 @@ async function viaCommand(context: { text: string; images: AgentImage[] }, histo
 }
 
 /** The agent service: images travel as content blocks, the CLI has no tools. */
-async function viaService(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, onLog?: (line: string) => void): Promise<RawDraft> {
+async function viaService(context: { text: string; images: AgentImage[] }, history: AgentTurn[], prompt: string, onLog?: (line: string) => void, meta?: { scene?: string; tour?: string }): Promise<RawDraft> {
   const url = process.env.SPHR_TOUR_AGENT_URL!.trim().replace(/\/$/, "");
   const schema = JSON.stringify(WRITE_TOUR.input_schema);
   const text = `Instead of calling a tool, answer with only one JSON object matching this schema, and nothing else:\n${schema}\n\n`
@@ -530,7 +629,7 @@ async function viaService(context: { text: string; images: AgentImage[] }, histo
         ...(onLog ? { Accept: "application/x-ndjson" } : {}),
         Authorization: `Bearer ${process.env.SPHR_TOUR_AGENT_TOKEN ?? ""}`
       },
-      body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images, ...(onLog ? { stream: true } : {}) }),
+      body: JSON.stringify({ system: SYSTEM, prompt: text, images: context.images, ...(meta ? { meta } : {}), ...(onLog ? { stream: true } : {}) }),
       // Long enough to wait behind other drafts in the service's queue, then draft.
       signal: AbortSignal.timeout(900_000)
     });
@@ -603,20 +702,35 @@ export async function composeTour(options: {
   reconstruction?: ReconstructionSummary | null;
   /** Called with human-readable progress lines while the agent drafts. */
   onLog?: (line: string) => void;
+  /** IDs the agent service puts in its log (never the request itself). */
+  meta?: { scene?: string; tour?: string };
 }): Promise<AgentResult & { library: LibraryModel[] }> {
   if (!tourAgentConfigured()) throw new TourAgentError("No agent is set up on this server. Set ANTHROPIC_API_KEY, SPHR_TOUR_AGENT_URL or SPHR_TOUR_AGENT_COMMAND.");
   const data = options.bootstrap.space.space_data;
-  const nodeIds = new Set(data.noPanos ? [] : (data.nodes ?? data.navPoints ?? []).map((node) => node.uuid));
+  const locations = data.noPanos ? [] : data.nodes ?? data.navPoints ?? [];
+  const nodeIds = new Set(locations.map((node) => node.uuid));
+  const aliases = new Map(locations.flatMap((node) => node.label?.trim() ? [[node.label.trim().toLowerCase(), node.uuid] as const] : []));
+  const names = internalNamePattern(nodeIds);
   options.onLog?.(`Reading space map and ${nodeIds.size ? `${nodeIds.size} panorama locations` : "3D views"}…`);
   const context = await buildAgentContext(options.bootstrap, options.draft, options.views, options.origin, options.team, options.prompt, options.drawn, options.spaceViews, options.reconstruction);
   options.onLog?.(`Prepared ${context.images.length} space photo${context.images.length === 1 ? "" : "s"} and ${context.library.length} pre-matched 3D models…`);
   const prompt = `${options.prompt}\n\n(Make this a ${options.kind === "hunt" ? "scavenger hunt with at least 7 clues" : "guided tour with at least 7 stops"} unless the request explicitly asks for fewer or says otherwise.)`;
-  const check = (raw: RawDraft) => { normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds); };
+  // Where the agent can try again (the Messages API), text that names a location goes back to it
+  // once; whatever is left, and every other backend's draft, loses the names in normalizeAgentDraft.
+  let askedToRename = false;
+  const check = (raw: RawDraft) => {
+    const named = askedToRename ? [] : internalNames(raw, options.draft, names);
+    if (named.length) {
+      askedToRename = true;
+      throw new TourAgentError(`Visitors never see location IDs or labels, but the draft names them (${named.slice(0, 6).join("; ")}). Say where to go by what is there and which way to turn instead, and keep everything else as it is.`);
+    }
+    normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds, aliases);
+  };
   const raw = process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()
     ? await viaApi(context, options.history, prompt, check, options.onLog)
     : process.env.SPHR_TOUR_AGENT_URL?.trim()
-      ? await viaService(context, options.history, prompt, options.onLog)
+      ? await viaService(context, options.history, prompt, options.onLog, options.meta)
       : await viaCommand(context, options.history, prompt, options.onLog);
   options.onLog?.("Validating draft and aiming 3D views…");
-  return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds), library: context.library };
+  return { ...normalizeAgentDraft(resolveLibraryCodes(raw, context.codes, context.library), options.draft, nodeIds, aliases), library: context.library };
 }

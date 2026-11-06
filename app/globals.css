@@ -434,6 +434,8 @@ a.tour-next-final { white-space: normal; text-align: center; line-height: 1.2; }
 .builder-card header { display: flex; align-items: stretch; }
 .builder-card-title { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; background: transparent; color: #f5f3ee; text-align: left; }
 .builder-card-meta { margin-left: auto; color: #8a867e; font-size: 13px; }
+.builder-card-meta[data-warn] { color: #e0a526; }
+.builder-warning { margin: 0; padding: 8px 12px; border-left: 3px solid #e0a526; background: #2a2416; color: #f5f3ee; font-size: 14px; line-height: 1.45; }
 .builder-index { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; background: #2c2c2c; font-size: 12px; }
 .builder-card-actions { display: flex; }
 .builder-card-actions button { width: 40px; background: transparent; color: #9a968e; }

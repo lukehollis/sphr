@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { parseExperience } from "@/lib/experience/validate";
 import type { Experience, Vec3 } from "@/lib/experience/types";
-import { aimFrom, placeObjectAt, type AnchorSpot } from "@/lib/experience/placement";
+import { aimFrom, farFinds, FIND_REACH, placeObjectAt, type AnchorSpot, type FarFind } from "@/lib/experience/placement";
 import { openingSpace } from "@/lib/scene-edits";
 import { cameraDirection, sceneGroupSettings, worldFromGroupedPoint } from "@/lib/three/math";
 import { panoramaPixelDirection } from "@/lib/three/renderers/PanoramaLayer";
@@ -24,7 +24,7 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
   const raycaster = new THREE.Raycaster();
   raycaster.far = 500;
 
-  const resolve = (anchor: { nodeId?: string; face?: number; view?: string; x: number; y: number }): AnchorSpot | null => {
+  const resolve = (anchor: { nodeId?: string; face?: number; view?: string; x: number; y: number }): (AnchorSpot & { ray?: Ray }) | null => {
     // A view drawn on the server: its depth gives the point under the pixel.
     const view = anchor.view ? views.find((item) => item.id === anchor.view) : undefined;
     if (view) {
@@ -42,7 +42,7 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     const origin = worldFromGroupedPoint(node.position, settings);
     const direction = panoramaPixelDirection(node, anchor.x, anchor.y, anchor.face);
     const floor = node.floorPosition ? worldFromGroupedPoint(node.floorPosition, settings).y : null;
-    const base = { origin: toArray(origin), floor, rotation: {
+    const base = { origin: toArray(origin), floor, ray: { origin, direction }, rotation: {
       azimuth: THREE.MathUtils.radToDeg(Math.atan2(-direction.x, -direction.z)),
       polar: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)))
     } };
@@ -66,9 +66,12 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     return { ...base, position: toArray(origin.clone().addScaledVector(direction, 2.5)), normal: null, hit: false, distance: null };
   };
 
+  // The ray each object was placed along, and its size before placing, in case its find has to come back nearer.
+  const rays = new Map<string, Ray & { scale: Vec3 }>();
   const placed = experience.objects.map((object) => {
     const anchor = anchors.objects[object.id];
     const spot = anchor ? resolve(anchor) : null;
+    if (spot?.ray) rays.set(object.id, { ...spot.ray, scale: object.scale });
     return spot ? placeObjectAt(object, spot) : object;
   });
   const effects = experience.effects.map((effect) => {
@@ -95,9 +98,68 @@ export function placeOnServer(bootstrap: SphrBootstrap, experience: Experience, 
     return { ...stop, view: { ...stop.view, rotation: aimed ?? { azimuth: Number(spot.rotation.azimuth.toFixed(2)), polar: Number(spot.rotation.polar.toFixed(2)) } } };
   });
   const placedNow = new Set(Object.keys(anchors.objects));
-  const objects = meshes.length ? keepNoticeable(bootstrap, { ...experience, objects: placed, stops }, meshes, placedNow) : placed;
+  const objects = meshes.length ? keepNoticeable(bootstrap, { ...experience, objects: placed, stops }, meshes, placedNow, rays) : placed;
   const framed = experience.kind === "tour" ? frameStops(bootstrap, { ...experience, objects, stops }, placedNow) : stops;
   return parseExperience({ ...experience, objects, effects, stops: framed }, { lenient: true });
+}
+
+type Ray = { origin: THREE.Vector3; direction: THREE.Vector3 };
+
+/** Questions about the capture mesh: the ground under a point, and whether one point sees another. */
+function captureProbe(meshes: THREE.Object3D[], raycaster = new THREE.Raycaster()) {
+  raycaster.far = 500;
+  const down = new THREE.Vector3(0, -1, 0);
+  const normalOf = (hit: THREE.Intersection) => hit.face
+    ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
+    : null;
+  /** The ground below a point: the first surface under it, if it is not a wall. */
+  const groundBelow = (from: THREE.Vector3, within: number) => {
+    raycaster.set(from, down);
+    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < within);
+    const normal = hit ? normalOf(hit) : null;
+    return hit && (!normal || Math.abs(normal.y) > 0.5) ? hit.point : null;
+  };
+  /** Whether nothing in the capture stands between the eye and a point (rough meshes get some slack). */
+  const visibleFrom = (eye: THREE.Vector3, point: THREE.Vector3) => {
+    const toward = point.clone().sub(eye);
+    raycaster.set(eye, toward.clone().normalize());
+    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
+    return !hit || hit.distance >= toward.length() - 0.4;
+  };
+  return { normalOf, groundBelow, visibleFrom };
+}
+
+/**
+ * Whether a player at a clue's location finds a point: within FIND_REACH of it, and in sight
+ * from there or from a location a few steps away (`eyes` are every location in the space).
+ */
+function withinReach(probe: ReturnType<typeof captureProbe>, eyes: THREE.Vector3[], eye: THREE.Vector3, point: THREE.Vector3) {
+  if (point.distanceTo(eye) > FIND_REACH) return false;
+  return probe.visibleFrom(eye, point) || eyes.some((other) => other.distanceTo(eye) > 0.3 && other.distanceTo(eye) <= FIND_REACH && probe.visibleFrom(other, point));
+}
+
+/**
+ * Clues a player may never get past: the find stands more than FIND_REACH from the clue's
+ * location, or (with the capture mesh) nothing near the clue sees it.
+ */
+export function findProblems(bootstrap: SphrBootstrap, experience: Experience, meshes: THREE.Object3D[] = []): Array<FarFind & { hidden?: boolean }> {
+  const data = openingSpace(bootstrap).space_data;
+  const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
+  const settings = sceneGroupSettings("nodes", data);
+  const at = (nodeId: string) => { const node = nodes.get(nodeId); return node ? worldFromGroupedPoint(node.position, settings) : null; };
+  const far = farFinds(experience, (nodeId) => at(nodeId)?.toArray() as Vec3 | undefined);
+  if (!meshes.length || experience.kind !== "hunt") return far;
+  const probe = captureProbe(meshes);
+  const eyes = [...nodes.keys()].map((nodeId) => at(nodeId)!);
+  const objects = new Map(experience.objects.map((object) => [object.id, object]));
+  const hidden = experience.stops.flatMap((stop, index) => {
+    const object = stop.find ? objects.get(stop.find.objectId) : undefined;
+    const eye = stop.view.nodeId && !stop.view.earth ? at(stop.view.nodeId) : null;
+    if (!object || !eye || far.some((item) => item.stopId === stop.id)) return [];
+    const point = new THREE.Vector3(...object.position).add(new THREE.Vector3(0, 0.1, 0));
+    return withinReach(probe, eyes, eye, point) ? [] : [{ index, stopId: stop.id, objectId: object.id, distance: Math.round(point.distanceTo(eye)), hidden: true }];
+  });
+  return [...far, ...hidden].sort((a, b) => a.index - b.index);
 }
 
 /**
@@ -151,19 +213,20 @@ export function frameStops(bootstrap: SphrBootstrap, experience: Experience, onl
  * that stop's view or out of it comes onto the ground a few meters ahead, a little right of
  * center (the tour's text covers the left on wide screens); one more than 18 meters away
  * comes to the first ground along the same line of sight; and one the capture hides comes
- * forward onto the surface in the way, or the floor just in front of that. A hunt's find
- * may hide from its stop where a location a few steps away sees it, since visitors walk
- * around while they look. Ground can be sloped (seating, a hillside) but not a wall. `only`
- * limits it to objects just placed.
+ * forward onto the surface in the way, or the floor just in front of that. A hunt's find,
+ * seen from the clue that asks for it, stays within FIND_REACH of that clue's location and
+ * may hide from it where a location a few steps away sees it, since visitors walk around
+ * while they look. Ground can be sloped (seating, a hillside) but not a wall. `only` limits
+ * it to objects just placed, and `rays` are the rays they were placed along.
  */
-export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience, meshes: THREE.Object3D[], only?: Set<string>) {
+export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience, meshes: THREE.Object3D[], only?: Set<string>, rays?: Map<string, Ray & { scale: Vec3 }>) {
   const data = openingSpace(bootstrap).space_data;
   const nodes = new Map((data.noPanos ? [] : data.nodes ?? data.navPoints ?? []).map((node) => [node.uuid, node]));
   const settings = sceneGroupSettings("nodes", data);
   const toArray = (vector: THREE.Vector3) => [vector.x, vector.y, vector.z] as Vec3;
   const raycaster = new THREE.Raycaster();
-  raycaster.far = 500;
-  const down = new THREE.Vector3(0, -1, 0);
+  const probe = captureProbe(meshes, raycaster);
+  const { normalOf, groundBelow, visibleFrom } = probe;
   const lift = (point: THREE.Vector3, height: number) => point.clone().add(new THREE.Vector3(0, height, 0));
   const nearby = 18;
 
@@ -172,23 +235,9 @@ export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience,
     if (!stop.view.nodeId) continue;
     for (const id of [...stop.objects, ...(stop.find ? [stop.find.objectId] : [])]) if (!firstStop.has(id)) firstStop.set(id, stop);
   }
-  const normalOf = (hit: THREE.Intersection) => hit.face
-    ? hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
-    : null;
-  /** The ground below a point: the first surface under it, if it is not a wall. */
-  const groundBelow = (from: THREE.Vector3, within: number) => {
-    raycaster.set(from, down);
-    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.05 && item.distance < within);
-    const normal = hit ? normalOf(hit) : null;
-    return hit && (!normal || Math.abs(normal.y) > 0.5) ? hit.point : null;
-  };
-  /** Whether nothing in the capture stands between the eye and a point (rough meshes get some slack). */
-  const visibleFrom = (eye: THREE.Vector3, point: THREE.Vector3) => {
-    const toward = point.clone().sub(eye);
-    raycaster.set(eye, toward.clone().normalize());
-    const hit = raycaster.intersectObjects(meshes, false).find((item) => item.distance > 0.15);
-    return !hit || hit.distance >= toward.length() - 0.4;
-  };
+  // A hunt's find belongs to the clue that asks for it, wherever else it shows.
+  const findOf = new Map<string, Experience["stops"][number]>();
+  if (experience.kind === "hunt") for (const stop of experience.stops) if (stop.find && stop.view.nodeId && !findOf.has(stop.find.objectId)) findOf.set(stop.find.objectId, stop);
   const moved = new Map<string, number>();
   const eyes = [...nodes.values()].map((node) => worldFromGroupedPoint(node.position, settings));
   /** Whether a location within a few steps of a stop sees a point up close (hunts only). */
@@ -197,7 +246,8 @@ export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience,
 
   return experience.objects.map((original) => {
     let object = original;
-    const stop = firstStop.get(object.id);
+    const clue = findOf.get(object.id);
+    const stop = clue ?? firstStop.get(object.id);
     const node = nodes.get(stop?.view.nodeId ?? "");
     if (!stop || !node || (only && !only.has(object.id))) return object;
     const eye = worldFromGroupedPoint(node.position, settings);
@@ -222,6 +272,32 @@ export function keepNoticeable(bootstrap: SphrBootstrap, experience: Experience,
       put(ground);
       return true;
     };
+
+    // A hunt's find has to be found before the hunt goes on, so it stays within a few steps of
+    // its clue, where the clue's location or one beside it sees it. A ray that met nothing near
+    // the clue (a gap in the capture) or a spot picked in a photo from across the space lands it
+    // far off: it comes back onto the ground along the agent's own ray where that passes near the
+    // clue, farthest along first, or else part of the way from the clue toward where it landed.
+    if (clue) {
+      if (withinReach(probe, eyes, eye, target)) return object;
+      const ray = rays?.get(object.id);
+      const along: THREE.Vector3[] = [];
+      for (let reach = 30; ray && reach >= 1; reach -= 0.5) {
+        const point = ray.origin.clone().addScaledVector(ray.direction, reach);
+        if (point.distanceTo(eye) <= FIND_REACH - 1) along.push(point);
+      }
+      const toward = target.clone().sub(eye).normalize();
+      for (const reach of [7, 6, 5, 4, 3]) along.push(eye.clone().addScaledVector(toward, reach));
+      for (const point of along) {
+        const ground = groundBelow(lift(point, 0.5), 30);
+        if (!ground || !withinReach(probe, eyes, eye, lift(ground, 0.1))) continue;
+        put(ground);
+        // It grew to read from far off (placeObjectAt); near the clue it is life size again.
+        if (ray) object = { ...object, scale: ray.scale };
+        break;
+      }
+      return object;
+    }
 
     // A guided tour shows a stop's objects in its view, clear of the text on the left: on the
     // ground a few meters ahead, a little right of center, or where the stop's gaze lands.
