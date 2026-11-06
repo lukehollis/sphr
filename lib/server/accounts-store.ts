@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { db, hashPassword, verifyPassword } from "./admin-store";
 import { contactEmail } from "./brand";
 import { formatBytes } from "../bytes";
+import { documentsRefusal, onlyDocuments } from "../capture-files";
 
 // Customer accounts share the admin state database so one backup covers visibility,
 // edits, accounts, billing state and the processing queue.
@@ -1096,6 +1097,8 @@ export function submitCustomerSpace(spaceId: string, notes: string | null, outpu
     if (!space || !["draft", "failed", "ready"].includes(space.status)) throw new AccountError("This space cannot be submitted right now.");
     const uploads = listUploads(spaceId);
     if (!space.source && !uploads.some(upload => upload.status === "complete")) throw new AccountError("Upload at least one file first.");
+    // A PDF drawing or other document alone would only run an agent to say so (and spend a free preview's run).
+    if (!space.source && onlyDocuments(uploads.filter(upload => upload.status === "complete").map(upload => upload.name))) throw new AccountError(documentsRefusal);
     if (uploads.some(upload => upload.status === "uploading")) throw new AccountError("Wait for every upload to finish, or remove unfinished files.");
     const id = randomId(8);
     // A new submission replaces earlier attempts that wait for an operator; releasing one later would
