@@ -11,7 +11,7 @@ import { libraryModels } from '@/lib/server/library';
 import { readSceneBootstrap } from '@/lib/server/scene-editor';
 import { tourAgentConfigured } from '@/lib/server/tour-agent';
 import { existingVariantsUrl } from "@/lib/server/variants";
-import { existingLightCopies } from "@/lib/server/light";
+import { sceneLightCopies } from "@/lib/server/light";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 
 export const dynamic = 'force-dynamic';
@@ -22,10 +22,11 @@ export default async function TourBuilderPage({ params }: { params: Promise<{ id
   const { id } = await params;
   if (!/^[a-f0-9]{12}$/.test(id)) notFound();
   if (!(await isAdmin())) redirect(`/admin/login?next=${encodeURIComponent(`/admin/scenes/${id}`)}`);
-  const scene = (await readAllScenes()).find(item => item.sceneId === id);
+  const scenes = await readAllScenes();
+  const scene = scenes.find(item => item.sceneId === id);
   if (!scene) notFound();
   const sceneEdits = readSceneEdits().get(id);
-  const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId)]);
+  const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), sceneLightCopies(scene, scenes)]);
   const edits = { title: scene.title, startView: sceneEdits?.startView ?? null, variants, reconstruction, light };
   const saved = readSceneTour(id);
   let initial = saved.experience;

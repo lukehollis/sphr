@@ -4,7 +4,9 @@
 The viewer shows a space's smallest faces first and sharpens them, and phones keep to the
 mid-size faces, the lighter capture model and a lighter reconstruction (lib/three/light.ts). The published package stays as it
 is; the copies sit beside it under <prefix>/<sceneId>/<version>/, listed by
-<prefix>/<sceneId>/index.json, which the app finds by scene ID (lib/server/light.ts).
+<prefix>/<sceneId>/index.json, which the app finds by scene ID (lib/server/light.ts). A translated guided
+tour (catalog slug guided-<tour>-<language>) with no copies of its own uses its English tour's, so copy the
+English tour and leave its translations alone.
 
     python3 scripts/matterport/light_copies.py 619ad80511a1 5b073eb82f3f --stage /tmp/light
     python3 scripts/matterport/light_copies.py 619ad80511a1 --stage /tmp/light --upload \

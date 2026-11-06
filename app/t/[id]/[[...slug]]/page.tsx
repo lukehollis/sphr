@@ -4,6 +4,7 @@ import { preload } from "react-dom";
 import SphrApp from "@/components/SphrApp";
 import { emptyExperience } from "@/lib/experience/types";
 import { sceneTitleSlug } from "@/lib/scene-edits";
+import { readAllScenes } from "@/lib/scene-catalog";
 import { readSceneEdits } from "@/lib/server/admin-store";
 import { sameTeam } from "@/lib/server/accounts-store";
 import { currentUser, loginPath } from "@/lib/server/accounts";
@@ -14,7 +15,7 @@ import { siteOrigin, viewerHost } from "@/lib/server/brand";
 import { buildOnPath, readUserTour, tourAccess, tourPath, tourScene } from "@/lib/server/user-tours";
 import { askingNames } from "@/lib/server/tour-plays";
 import { existingVariantsUrl } from "@/lib/server/variants";
-import { existingLightCopies } from "@/lib/server/light";
+import { sceneLightCopies } from "@/lib/server/light";
 import { loadingPlaceholder } from "@/lib/server/placeholder";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 import { searchMetadata, tourSearchPage } from "@/lib/server/search-pages";
@@ -43,7 +44,7 @@ export default async function TourPage({ params }: Props) {
   if (slug?.length !== 1 || slug[0] !== sceneTitleSlug(tour.title)) redirect(tourPath(tour));
   // The scene file starts with the page rather than after the viewer's code (it is what the viewer asks for first).
   preload(scene.bootstrapUrl, { as: "fetch", crossOrigin: "anonymous" });
-  const [variants, reconstruction, light, placeholder, page] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId), loadingPlaceholder(scene.thumbnail), tourSearchPage(tour.id)]);
+  const [variants, reconstruction, light, placeholder, page] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), sceneLightCopies(scene, await readAllScenes()), loadingPlaceholder(scene.thumbnail), tourSearchPage(tour.id)]);
   const user = await currentUser();
   // Players (not the owner trying it out) give their name for the owner's class results, unless the owner turned that off.
   const play = !(user && sameTeam(user.id, tour.userId)) && askingNames(tour.id) ? { tourId: tour.id, kind: tour.kind } : undefined;

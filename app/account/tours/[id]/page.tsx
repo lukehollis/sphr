@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import TourBuilder from "@/components/TourBuilder";
+import { readAllScenes } from "@/lib/scene-catalog";
 import { emptyExperience } from "@/lib/experience/types";
 import { readSceneEdits } from "@/lib/server/admin-store";
 import { sameTeam } from "@/lib/server/accounts-store";
@@ -8,7 +9,7 @@ import { libraryModels } from "@/lib/server/library";
 import { tourAgentConfigured } from "@/lib/server/tour-agent";
 import { agentUnlimited, canBuildOn, FREE_AGENT_DRAFTS, readUserTour, tourPath, tourScene } from "@/lib/server/user-tours";
 import { existingVariantsUrl } from "@/lib/server/variants";
-import { existingLightCopies } from "@/lib/server/light";
+import { sceneLightCopies } from "@/lib/server/light";
 import { existingReconstructionUrl } from "@/lib/server/reconstructions";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export default async function CustomerTourPage({ params }: { params: Promise<{ i
   if (!tour || !sameTeam(tour.userId, user.id)) notFound();
   const scene = await tourScene(tour);
   if (!scene || !canBuildOn(user.id, scene)) notFound();
-  const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), existingLightCopies(scene.sceneId)]);
+  const [variants, reconstruction, light] = await Promise.all([existingVariantsUrl(scene.sceneId), existingReconstructionUrl(scene.sceneId), sceneLightCopies(scene, await readAllScenes())]);
   const edits = { title: scene.title, startView: readSceneEdits().get(scene.sceneId)?.startView ?? null, variants, reconstruction, light };
   return <TourBuilder scene={scene} edits={edits} initial={tour.experience ?? emptyExperience(tour.kind)} saved={{ experience: tour.experience, revision: tour.revision }}
     library={await libraryModels(false)} agentReady={tourAgentConfigured()}

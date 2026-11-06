@@ -8,7 +8,7 @@ import { isScenePublic, readSceneEdits } from "@/lib/server/admin-store";
 import { loginPath, sceneAccess } from "@/lib/server/accounts";
 import { siteOrigin, viewerHost } from "@/lib/server/brand";
 import { existingVariantsUrl } from "@/lib/server/variants";
-import { existingLightCopies } from "@/lib/server/light";
+import { sceneLightCopies } from "@/lib/server/light";
 import { loadingPlaceholder } from "@/lib/server/placeholder";
 import { buildOnPath } from "@/lib/server/user-tours";
 import { readSpaceInfo } from "@/lib/server/space-info";
@@ -37,7 +37,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function ScenePage({ params, searchParams }: Props) {
   const { id, slug } = await params;
-  const scene = /^[a-f0-9]{12}$/.test(id) ? (await readAllScenes()).find(item => item.sceneId === id) : undefined;
+  const scenes = /^[a-f0-9]{12}$/.test(id) ? await readAllScenes() : [];
+  const scene = scenes.find(item => item.sceneId === id);
   if (!scene) notFound();
   const access = await sceneAccess(id);
   if (access === "unavailable") notFound();
@@ -47,7 +48,7 @@ export default async function ScenePage({ params, searchParams }: Props) {
   if (slug?.length !== 1 || slug[0] !== scene.titleSlug) redirect(withQuery(scene.scenePath, await searchParams));
   // The scene file starts with the page rather than after the viewer's code (it is what the viewer asks for first).
   preload(scene.bootstrapUrl, { as: "fetch", crossOrigin: "anonymous" });
-  const [variants, reconstruction, light, placeholder, page] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id), existingLightCopies(id), loadingPlaceholder(scene.thumbnail), spaceSearchPage(id)]);
+  const [variants, reconstruction, light, placeholder, page] = await Promise.all([existingVariantsUrl(id), existingReconstructionUrl(id), sceneLightCopies(scene, scenes), loadingPlaceholder(scene.thumbnail), spaceSearchPage(id)]);
   return <><SphrApp key={scene.sceneId} configUrl={scene.bootstrapUrl} edits={{ title: scene.title, startView: readSceneEdits().get(id)?.startView ?? null, experience: readSceneTour(id).experience, variants, reconstruction, light, tags: readSpaceTags(id).tags }} preview={{ title: scene.title, image: placeholder, added: scene.createdAt }} host={viewerHost()} info={readSpaceInfo(id).info} build={await buildOnPath(id)}
     share={{ url: `${siteOrigin()}${scene.scenePath}`, public: isScenePublic(id) }} />
     {page && <PageText page={page} />}</>;

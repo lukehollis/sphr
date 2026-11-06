@@ -1,3 +1,4 @@
+import type { SceneListing } from "@/lib/scene-types";
 import type { LightCopies } from "@/lib/types";
 
 /**
@@ -51,4 +52,30 @@ export async function existingLightCopies(sceneId: string) {
   known.set(url, { at: Date.now(), copies });
   if (known.size > 2000) known.delete(known.keys().next().value!);
   return copies;
+}
+
+type Listed = Pick<SceneListing, "sceneId" | "slug" | "nodeCount" | "hasGuidedTour">;
+
+/** A translated guided tour's slug is its English tour's slug and a language tag: guided-khufu-es, guided-khufu-zh-hans. */
+const translatedSlug = /^(guided-.+)-[a-z]{2}(?:-[a-z]{4})?$/;
+
+/**
+ * The English guided tour a translation was made from. A translation is a copy of the English tour's scene file with
+ * its own words, published under its own ID, so it has the same locations, faces and models, and the English tour's
+ * light copies fit it. Both must be guided tours with the same number of locations.
+ */
+export function translatedFrom<T extends Listed>(scene: Listed, scenes: readonly T[]): T | null {
+  const base = scene.hasGuidedTour ? scene.slug?.match(translatedSlug)?.[1] : undefined;
+  const source = base ? scenes.find((item) => item.slug === base) : undefined;
+  return source?.hasGuidedTour && source.sceneId !== scene.sceneId && source.nodeCount === scene.nodeCount ? source : null;
+}
+
+/**
+ * A listed space's light copies: its own, or else those of the English tour it was translated from. A translation
+ * needs no copies of its own, and copies made for it later take precedence.
+ */
+export async function sceneLightCopies(scene: Listed, scenes: readonly Listed[]) {
+  const source = translatedFrom(scene, scenes);
+  const [own, borrowed] = await Promise.all([existingLightCopies(scene.sceneId), source ? existingLightCopies(source.sceneId) : null]);
+  return own ?? borrowed;
 }
