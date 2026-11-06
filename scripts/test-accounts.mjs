@@ -776,6 +776,10 @@ test('the free preview: one for each account, its limits, a window that starts w
   assert.equal(previews.previewRefusal(user.id, { count: 100, bytes: 5e9 }), undefined, 'a capture right at the limits fits');
   assert.equal(previews.previewRefusal(user.id, { count: 101, bytes: 10 }), 'large');
   assert.equal(previews.previewRefusal(user.id, { count: 1, bytes: 36.7e9 }), 'large', 'a very large E57 needs payment or approval');
+  // The note says the limits and what the capture has, so the person knows what fits (113 phone photos on 2026-11-06).
+  assert.equal(previews.refusalNote('large', user.id, { count: 113, bytes: 50654018 }), 'A free preview holds up to 100 files and 5.0 GB, and this capture has 113 files, so this space starts with payment.');
+  assert.equal(previews.refusalNote('large', user.id, { count: 1, bytes: 36.7e9 }), 'A free preview holds up to 100 files and 5.0 GB, and this capture is 37 GB, so this space starts with payment.');
+  assert.equal(previews.refusalNote('used', user.id), previews.refusalText.used, 'with nothing to point to, the plain reason');
 
   // Spending it makes an ordinary draft space that is private to its owner for as long as nothing is paid.
   const space = store.createCustomerSpace(user.id, 'Porch', 'draft', null, true);
@@ -784,6 +788,9 @@ test('the free preview: one for each account, its limits, a window that starts w
     { open: true, expired: false, ready: null, until: null, runsLeft: 3, files: 100, bytes: 5e9 }, 'the window has not started before a result');
   assert.equal(previews.previewOpen(space), true);
   assert.deepEqual([previews.previewOffer(user.id).available, previews.previewOffer(user.id).used, previews.previewRefusal(user.id)], [false, true, 'used']);
+  // While it waits unprocessed, a second space points back to it.
+  assert.deepEqual(previews.unprocessedPreview(user.id), { id: space.id, title: 'Porch' });
+  assert.equal(previews.refusalNote('used', user.id), 'Your free preview is “Porch”, which has not been processed yet. Open it to process it for free, or pay to add this space.');
   assert.throws(() => store.createCustomerSpace(user.id, 'Again', 'draft', null, true), store.PreviewUsedError);
   assert.equal(store.payableSpaceCount(user.id), 1, 'the refused space leaves nothing behind');
   const plain = store.createCustomerSpace(user.id, 'Plain', 'unpaid');
@@ -802,6 +809,8 @@ test('the free preview: one for each account, its limits, a window that starts w
   // The first result starts the window; a later result does not move it.
   const { job, done } = build(space);
   assert.equal(job.preview, true, 'its job is marked as a preview');
+  assert.equal(previews.unprocessedPreview(user.id), undefined, 'once processed, it is an ordinary used preview');
+  assert.equal(previews.refusalNote('used', user.id), previews.refusalText.used);
   assert.equal(done.previewStarted, true);
   const open = previews.spacePreview(done.space);
   assert.equal(open.open, true);

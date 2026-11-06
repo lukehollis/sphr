@@ -1,5 +1,6 @@
-import { countPreviewsSince, hostingActive, markPreviewsHosted, previewRuns, readPreviewGrant, readSpacePreview, type CustomerSpace, type PreviewGrant } from "./accounts-store";
+import { countPreviewsSince, hostingActive, markPreviewsHosted, previewRuns, readCustomerSpace, readPreviewGrant, readSpacePreview, type CustomerSpace, type PreviewGrant } from "./accounts-store";
 import { billingEnabled } from "./billing";
+import { formatBytes } from "../bytes";
 
 // The free preview: an account's first capture is processed and opened privately before any payment, and
 // payment publishes it or keeps it hosted. Each run costs agent time, so the preview is capped: one per
@@ -104,6 +105,32 @@ export function previewGateBody(space: CustomerSpace, gate: PreviewGate, detail 
     : gate === "ended" ? `Your free preview ended${until ? ` on ${until}` : ""}, so this space is offline. Start hosting to bring it back.`
     : `${detail} Start hosting to go past it.`;
   return { error, gate, plan: `/account/plan?space=${space.id}` };
+}
+
+/**
+ * The account's free preview when it was started and never processed: a draft that no job has run on. A person whose
+ * page broke after the upload (2026-11-06) added a second space and met payment while their preview sat unprocessed.
+ */
+export function unprocessedPreview(userId: string) {
+  const grant = readPreviewGrant(userId);
+  const space = grant?.spaceId && !grant.ready ? readCustomerSpace(grant.spaceId) : undefined;
+  return space && space.status === "draft" && !previewRuns(space.id) && previewOpen(space) ? { id: space.id, title: space.title } : undefined;
+}
+
+/**
+ * Why a new space starts with payment, for an agent to pass on and the sheet to show when it helps. A capture over the
+ * limits says what they are and what it has, so the person knows what would fit; a used preview that was never
+ * processed is named, since it may be what the person meant to fill.
+ */
+export function refusalNote(refusal: PreviewRefusal, userId: string, declared?: { count: number; bytes: number }) {
+  if (refusal === "large") {
+    const limits = previewLimits(readPreviewGrant(userId));
+    const over = !declared ? "" : declared.count > limits.files ? `, and this capture has ${declared.count} files` : `, and this capture is ${formatBytes(declared.bytes)}`;
+    return `A free preview holds up to ${limits.files} files and ${formatBytes(limits.bytes)}${over}, so this space starts with payment.`;
+  }
+  const waiting = refusal === "used" ? unprocessedPreview(userId) : undefined;
+  return waiting ? `Your free preview is “${waiting.title}”, which has not been processed yet. Open it to process it for free, or pay to add this space.`
+    : refusalText[refusal];
 }
 
 /** Why the offer was not made, in words for the person who asked. */
