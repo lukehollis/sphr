@@ -124,8 +124,8 @@ function webhook(event, secret = webhookSecret) {
 const location = response => response.headers.get('location');
 const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 // What a page sends with navigator.sendBeacon: plain text, from the page's own origin.
-const beacon = (browser, events, extra = {}, { origin = base, agent = safari } = {}) => browser.request('/api/steps', { method: 'POST',
-  headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8', 'User-Agent': agent }, body: JSON.stringify({ events, ...extra }) });
+const beacon = (browser, events, extra = {}, { origin = base, agent = safari, address } = {}) => browser.request('/api/steps', { method: 'POST',
+  headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8', 'User-Agent': agent, ...(address ? { 'X-Real-IP': address } : {}) }, body: JSON.stringify({ events, ...extra }) });
 const database = () => new DatabaseSync(path.join(state, 'admin.sqlite'));
 /** The files in a zip, by name, after Python's zipfile has checked every checksum. */
 function unzip(bytes) {
@@ -207,6 +207,20 @@ try {
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'promise', message: "TypeError: undefined is not an object (evaluating 'top.webkit.messageHandlers.foregroundToBackground.postMessage')" } }]);
   // Every play() of the viewer's handles its refusal; one left unhandled comes from an extension wrapping play().
   await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/account', props: { kind: 'promise', message: 'NotAllowedError: The play method is not allowed by the user agent or the platform in the current context, possibly because the user denied permission.' } }]);
+  // Microsoft's link scanner opens a link shared in Outlook or Teams, and every link on its page, from Azure with an ordinary
+  // Chrome. Its page views are kept, but the errors its cut-off page loads raise are not counted or reported.
+  const scanned = { kind: 'promise', message: 'Object Not Found Matching Id:4, MethodName:update, ParamCount:4' };
+  const cutOff = { kind: 'page', message: 'ChunkLoadError: Failed to load chunk /_next/static/chunks/scanned.js from module 64893', source: 'still failing after a reload' };
+  assert.equal((await beacon(dana, [{ name: 'page_view', path: '127.0.0.1/s/scanned' }, { name: 'client_error', path: '127.0.0.1/s/scanned', props: scanned },
+    { name: 'client_error', path: '127.0.0.1/s/scanned', props: cutOff }], {}, { address: '4.199.143.156' })).status, 204);
+  await beacon(dana, [{ name: 'client_error', path: '127.0.0.1/s/school', props: { ...cutOff, message: 'ChunkLoadError: Failed to load chunk /_next/static/chunks/school.js from module 64893' } }],
+    {}, { address: '208.103.121.106' });
+  {
+    const db = database();
+    const rows = db.prepare("SELECT name, path, props FROM analytics_events WHERE path IN ('127.0.0.1/s/scanned', '127.0.0.1/s/school') ORDER BY id").all();
+    db.close();
+    assert.deepEqual(rows.map(row => [row.name, row.path]), [['page_view', '127.0.0.1/s/scanned'], ['client_error', '127.0.0.1/s/school']]);
+  }
   // Paying in another browser: signing in there still lands on the payment's result.
   assert.equal(location(await new Browser().get('/account?checkout=cs_test_elsewhere')), `/account/login?next=${encodeURIComponent('/account?checkout=cs_test_elsewhere')}`);
   // Someone who opens the agent address in a browser gets directions instead of an error.
@@ -1480,6 +1494,8 @@ try {
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('window.ethereum')), 'injected scripts are not reported');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('messageHandlers')), 'Safari extension channels are not reported');
   assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('play method')), 'autoplay refusals are not reported');
+  assert.ok(!about("Error in a visitor's browser").some(item => item.description.includes('scanned.js')), 'link scanners\' errors are not reported');
+  assert.ok(about("Error in a visitor's browser").some(item => item.description.includes('school.js')), 'a school network\'s are');
   assert.equal(about('New account', 'Email', 'dana@example.com')[0].fields['Came from'], 'newsletter, news.ycombinator.com/item, launch', 'the sign-up notice says where they came from');
   assert.equal(about('Space created', 'Title', 'Riverside studio').length, 1);
   assert.equal(about('Scavenger hunt started', 'Account', 'alice@example.com').length, 1, 'the operator hears about new tours');

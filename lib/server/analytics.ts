@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isAdmin } from "./auth";
 import { reportClientError } from "./error-report";
+import { scannerNetwork } from "./scanner-networks";
 import { analyticsEnabled, clean, cleanProps, cookieDomain, describeDevice, externalReferrer, keepDays, otherOrigins, ownOrigin, saveEvent, seeVisitor,
   serverEvents, setInternal, visitorCookie, type Props } from "./analytics-store";
 
@@ -84,7 +85,8 @@ export async function collect(request: Request) {
   if (!sameSite && (!origin || (origin !== ownOrigin() && !otherOrigins().includes(origin)))) return new Response(null, { status: 403 });
   const agent = request.headers.get("user-agent") ?? "";
   const done = () => new Response(null, { status: 204, headers });
-  if (!agent || bots.test(agent) || !allowed(request.headers.get("x-real-ip") || "local")) return done();
+  const address = request.headers.get("x-real-ip");
+  if (!agent || bots.test(agent) || !allowed(address || "local")) return done();
   let body;
   try { body = JSON.parse(await readText(request, 16384) ?? ""); } catch { return new Response(null, { status: 400, headers }); }
   const events = (Array.isArray(body?.events) ? body.events : []).slice(0, 20)
@@ -95,7 +97,11 @@ export async function collect(request: Request) {
   seeVisitor(visitor, { referrer: body.referrer, url: body.url, agent, country: /^[A-Z]{2}$/.test(country) && country !== "XX" ? country : null });
   // The people who run the site are left out of the numbers.
   if (await isAdmin()) setInternal(visitor);
+  // A link scanner's or crawler's page loads fail in ways a person's don't (scripts cut off mid-load, the scanner's
+  // own rejections), so the errors from those networks are neither kept nor reported. Their other steps are.
+  const scanner = events.some((event: { name: string }) => event.name === "client_error") && scannerNetwork(address);
   for (const event of events) {
+    if (event.name === "client_error" && scanner) continue;
     const props = cleanProps(event.props) ?? {};
     if (event.name === "page_view") {
       const linked = externalReferrer(body.referrer);
