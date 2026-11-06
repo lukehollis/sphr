@@ -532,15 +532,51 @@ test('a tour that opens at a reconstruction stop still fails without the model',
     position: { x: 200, y: 50, z: 400 }, rotation: { azimuth: 30, polar: -30 }, distance: 1000 };
   const model = fakeReconstruction();
   model.ready = false;
-  model.load = async () => { model.failed = true; return false; };
+  model.load = async () => { model.failed = true; model.problem = 'Failed to fetch'; return false; };
   runtime.reconstruction = model;
   runtime.sceneGraph = { setViewMode() {}, showOnly() {}, restoreNavigationTransition() {}, getRaycastObjects: () => [], setCaptureOpacity() {}, captureReplaced: false };
   runtime.annotations = { show() {} };
   runtime.applyExperienceForPoint = () => {};
   // With nothing on screen yet there is nothing to go on with, so the page fails and a framing page offers help.
-  await assert.rejects(runtime.goTo(0, 1), /reconstruction.*Reload/);
+  // The failure carries why, for the page's report of start-up failures.
+  await assert.rejects(runtime.goTo(0, 1), error => /reconstruction.*Reload/.test(error.message) && error.part === 'reconstruction'
+    && error.details === 'failed: Failed to fetch');
   assert.equal(runtime.state.activePointIndex, 0);
   assert.equal(runtime.state.navigating, false);
+});
+
+test('a context the browser keeps taking back before the space opens fails the opening; once open, it stops the view', async t => {
+  const priorDocument = globalThis.document;
+  globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+  t.after(() => { globalThis.document = priorDocument; });
+  const looping = () => {
+    const runtime = Object.create(SphrRuntime.prototype);
+    const lost = [];
+    runtime.renderer = { info: { memory: { textures: 0, geometries: 0 } }, setAnimationLoop() {} };
+    runtime.state = { loading: { label: 'Loading', progress: 0, ready: false } };
+    runtime.callbacks = { onContextLost: (...args) => lost.push(args) };
+    runtime.emitState = () => {};
+    // Safari on a Mac, 2026-10-28: three losses in a few hundredths of a second, before anything was drawn.
+    runtime.contextLostDetails = '0 textures, 0 geometries, open 0 min, Apple GPU';
+    runtime.contextLosses = [1000, 1010, 1020];
+    runtime.contextLostAt = 1020;
+    return { runtime, lost };
+  };
+  const opening = looping();
+  opening.runtime.open = () => new Promise(() => {}); // still loading the opening view
+  const init = opening.runtime.init();
+  opening.runtime.stopLooping();
+  await assert.rejects(init, error => error.graphics === 'loop' && error.details === '0 textures, 0 geometries, open 0 min, Apple GPU, lost 3 times in 0.0 s');
+  assert.deepEqual(opening.lost, [], 'the page reports it with its start-up failures, once');
+  assert.equal(opening.runtime.state.graphicsLost, undefined);
+
+  const shown = looping();
+  shown.runtime.open = async () => {};
+  await shown.runtime.init();
+  shown.runtime.stopLooping();
+  assert.deepEqual(shown.lost, [['0 textures, 0 geometries, open 0 min, Apple GPU, lost 3 times in 0.0 s', true]], 'reported as a loop');
+  assert.equal(shown.runtime.state.graphicsLost, true);
+  assert.equal(shown.runtime.state.graphicsLoop, true);
 });
 
 test('a stop waits 20 s for a reconstruction that never comes, and later stops do not wait again', async t => {

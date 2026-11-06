@@ -47,6 +47,8 @@ import { panoramaOverviewBounds } from "@/lib/three/overview";
 import { cameraDirection, vectorFromLike } from "@/lib/three/math";
 import { createTween, type Tween } from "@/lib/three/tween";
 import { ImmersiveRig, type ImmersiveHost, type XrHover } from "@/lib/three/xr/ImmersiveRig";
+import { GraphicsUnavailable } from "@/lib/three/glContext";
+import { PartMissing } from "@/lib/start-failure";
 import type { StartView } from '@/lib/scene-edits';
 import type { EarthPlace, EffectInstance, ExperienceKind, PlacedObject, StopLook, StopSky, StopView, Vec3 } from "@/lib/experience/types";
 
@@ -177,6 +179,8 @@ export class SphrRuntime {
   private contextLosses: number[] = [];
   /** The context kept coming and going, so the view stopped for good (Retry opens the page again). */
   private contextLooping = false;
+  /** While the space is opening: fails the opening, for a loop that starts before the space has shown anything. */
+  private failOpening: ((error: Error) => void) | null = null;
   private readonly gpu: string;
   private controls: OrbitControls;
   private audio: AudioController;
@@ -314,10 +318,19 @@ export class SphrRuntime {
   private entryPoint?: TourPoint;
 
   /**
+   * Opens the space. A context the browser keeps taking and handing back before then (Safari on Macs since 2026-10-26,
+   * three times within half a second and before anything was drawn) fails the opening with GraphicsUnavailable "loop",
+   * so the visitor is told about the browser at once instead of waiting on a view that can't draw.
    * @param initialPointIndex the tour stop to open at
    * @param startView a panorama and direction to open at instead, as a shared link asks (see ViewerEntry)
    */
   async init(initialPointIndex?: number, startView?: EntryView) {
+    const looping = new Promise<never>((_, reject) => { this.failOpening = reject; });
+    try { await Promise.race([this.open(initialPointIndex, startView), looping]); }
+    finally { this.failOpening = null; }
+  }
+
+  private async open(initialPointIndex?: number, startView?: EntryView) {
     this.setupRendererSize();
     this.setupScene();
     this.setupControls();
@@ -435,6 +448,8 @@ export class SphrRuntime {
     if (entryNode || entryFree) await this.goTo(this.state.activeSpaceIndex, this.state.activePointIndex, true);
     else await this.goTo(initialLocation.spaceIndex, initialLocation.pointIndex, true);
     this.entryPoint = undefined;
+    // A context loop failed the opening already (or the viewer closed meanwhile): nothing more to start.
+    if (this.disposed || this.contextLooping) return;
     this.setLoading({ label: "Ready", progress: 1, ready: true });
     this.emitState();
     this.startAnimationLoop();
@@ -562,8 +577,11 @@ export class SphrRuntime {
           prepareModels ? this.sceneGraph?.whenLoaded(stopModels) : undefined
         ]);
         // A tour that opens at such a stop has nothing to show without it, so it fails as it did (a framing page then
-        // offers its other tour). Mid-tour the stop shows the capture instead, with a word about why.
-        if (prepareReconstruction && !this.reconstruction?.ready && !this.state.loading.ready) throw new Error("Unable to load the reconstruction. Reload to try again.");
+        // offers its help), carrying why for the page's report. Mid-tour the stop shows the capture instead, with a
+        // word about why.
+        if (prepareReconstruction && !this.reconstruction?.ready && !this.state.loading.ready) {
+          throw new PartMissing("Unable to load the reconstruction. Reload to try again.", "reconstruction", this.reconstructionProblem());
+        }
       }
       catch (error) {
         if (busy) this.state.loading = { ...this.state.loading, busy: false };
@@ -1175,7 +1193,9 @@ export class SphrRuntime {
   /**
    * The context keeps coming back and going again. Each return used to redraw everything, which can be what loses it
    * the next time, and to clear the wait that shows "The view stopped", so the visitor sat on a still picture while
-   * the page reported every return. Now drawing stops, later returns are ignored, and the loss is reported once.
+   * the page reported every return. Now drawing stops, later returns are ignored, and the loss is reported once, as a
+   * loop. Before the space has opened (where the Safari loops reported since 2026-10-27 came, with nothing drawn yet)
+   * the opening fails instead, and the page reports that with its other start-up failures.
    */
   private stopLooping() {
     this.contextLooping = true;
@@ -1183,10 +1203,13 @@ export class SphrRuntime {
     this.contextLostTimer = null;
     document.removeEventListener("visibilitychange", this.handleShownWhileLost);
     this.renderer.setAnimationLoop(null);
-    this.state.graphicsLost = true;
-    this.emitState();
     const seconds = ((this.contextLostAt - this.contextLosses[0]) / 1000).toFixed(1);
-    this.callbacks.onContextLost?.(`${this.contextLostDetails}, lost ${this.contextLosses.length} times in ${seconds} s`);
+    const details = `${this.contextLostDetails}, lost ${this.contextLosses.length} times in ${seconds} s`;
+    if (this.failOpening) { this.failOpening(new GraphicsUnavailable("loop", details)); return; }
+    this.state.graphicsLost = true;
+    this.state.graphicsLoop = true;
+    this.emitState();
+    this.callbacks.onContextLost?.(details, true);
   }
 
   /**
@@ -2827,12 +2850,16 @@ export class SphrRuntime {
 
   /** Tells the page, once, that a stop went on without its reconstruction and why, so it is counted. */
   private reconstructionMissing() {
-    const reconstruction = this.reconstruction;
-    if (!reconstruction || this.reconMissingReported) return;
+    if (!this.reconstruction || this.reconMissingReported) return;
     this.reconMissingReported = true;
-    this.callbacks.onPartMissing?.("reconstruction", reconstruction.failed
-      ? `failed: ${reconstruction.problem ?? "unknown"}`.slice(0, 120)
-      : `still loading after ${RECONSTRUCTION_WAIT_MS / 1000} s`);
+    this.callbacks.onPartMissing?.("reconstruction", this.reconstructionProblem());
+  }
+
+  /** Why the reconstruction isn't here: what it failed on, or that it is still on its way after the wait. */
+  private reconstructionProblem() {
+    return this.reconstruction?.failed
+      ? `failed: ${this.reconstruction.problem ?? "unknown"}`.slice(0, 120)
+      : `still loading after ${RECONSTRUCTION_WAIT_MS / 1000} s`;
   }
 
   /** The reconstruction at rest in a view mode, `amount` of the way in. */

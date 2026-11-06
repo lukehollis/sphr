@@ -209,3 +209,35 @@ test('a browser without WebGL 2 is told so at once', async t => {
   await assert.rejects(session.init(), error => error.graphics === 'none' && /can't show 3D graphics/.test(error.message));
   assert.equal(renderers.length, 0);
 });
+
+const { GraphicsUnavailable } = await import('../lib/three/glContext.ts');
+const { PartMissing, startFailure } = await import('../lib/start-failure.ts');
+
+test('a context the browser keeps taking back while the space opens fails the opening in plain words', async t => {
+  const { session } = setup(t);
+  const opening = session.init();
+  await settle();
+  renderers[0].fail(new GraphicsUnavailable('loop', '0 textures, 0 geometries, open 0 min, Apple GPU, lost 3 times in 0.0 s'));
+  await assert.rejects(opening, error => error.graphics === 'loop' && /kept stopping 3D graphics/.test(error.message) && /another browser/.test(error.message)
+    && !/network/i.test(error.message));
+  assert.equal(renderers[0].disposed, true);
+});
+
+test('every way a space fails to open is reported with its reason', () => {
+  // Safari on a Mac, 2026-10-28: three losses in a few hundredths of a second, before anything was drawn.
+  assert.deepEqual(startFailure(new GraphicsUnavailable('loop', '0 textures, 0 geometries, open 0 min, Apple GPU, lost 3 times in 0.0 s')),
+    { kind: 'webgl', reason: 'WebGL context lost in a loop at start', details: '0 textures, 0 geometries, open 0 min, Apple GPU, lost 3 times in 0.0 s' });
+  assert.deepEqual(startFailure(new GraphicsUnavailable('lost', 'lost at start, a new canvas lost too, 3.0 s')),
+    { kind: 'webgl', reason: 'WebGL context lost at start', details: 'lost at start, a new canvas lost too, 3.0 s' });
+  assert.deepEqual(startFailure(new GraphicsUnavailable('none')), { kind: 'webgl', reason: 'No WebGL 2 at start', details: '' });
+  assert.deepEqual(startFailure(new PartMissing('Unable to load the reconstruction. Reload to try again.', 'reconstruction', 'failed: Failed to fetch')),
+    { kind: 'reconstruction', reason: 'The reconstruction did not load at start', details: 'failed: Failed to fetch' });
+  assert.deepEqual(startFailure(new Error('Unable to load the panorama at scan-143')), { kind: 'startup', reason: 'Unable to load the panorama at scan-143', details: '' });
+  const bug = new TypeError("undefined is not an object (evaluating 'node.position')");
+  bug.stack = "TypeError: undefined is not an object\n    at goTo (https://app.spacery.dev/_next/static/chunks/0abc.js:1:2345)";
+  assert.deepEqual(startFailure(bug), { kind: 'startup', reason: "TypeError: undefined is not an object (evaluating 'node.position')", details: '/_next/static/chunks/0abc.js:1:2345' });
+  assert.equal(startFailure(new Event('error')).reason, 'error event');
+  assert.equal(startFailure('The space is private.').reason, 'The space is private.');
+  assert.equal(startFailure(undefined).reason, 'Unknown runtime error');
+  assert.equal(startFailure(new Error('x'.repeat(500))).reason.length, 200, 'a framing page keeps 200 characters');
+});

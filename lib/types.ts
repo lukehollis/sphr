@@ -468,6 +468,8 @@ export type RuntimeState = {
   earth?: { credits: string };
   /** The browser took the WebGL context away and has not given it back: nothing draws until a reload. */
   graphicsLost?: boolean;
+  /** It took it away again and again (a loop), so the view stopped for good. */
+  graphicsLoop?: boolean;
   /**
    * The space has a reconstruction: whether it can still show (it has not failed to load),
    * whether it is shown in the current view, whether it is loading, and its title and credit.
@@ -505,9 +507,10 @@ export type RuntimeCallbacks = {
   onObjectTransform?: (id: string, transform: ObjectTransform) => void;
   /**
    * The browser took the WebGL context away and hasn't given it back while the page was in view (with what was
-   * in graphics memory and how long the page had been open, for the error notice).
+   * in graphics memory and how long the page had been open, for the error notice). `loop`: it kept taking it and
+   * handing it back, so the view stopped (a loop before the space opens fails the opening instead).
    */
-  onContextLost?: (details: string) => void;
+  onContextLost?: (details: string, loop?: boolean) => void;
   /** In a VR headset: a button on the tour panel was pressed, or a controller button asked for next/previous. */
   onXrAction?: (id: string) => void;
   /** The browser gave a lost WebGL context back, and the space drew again. */

@@ -15,12 +15,17 @@ const WAIT_MS = 3000;
 
 export type Graphics = "ready" | "lost" | "none";
 
-/** The space can't be drawn: the browser gave no WebGL 2, or only a lost context. */
+/**
+ * The space can't be drawn: the browser gave no WebGL 2, only a lost context, or (a "loop") a context it kept taking
+ * away and handing back before the space could open, as Safari on Macs does when its graphics go wrong.
+ */
 export class GraphicsUnavailable extends Error {
-  constructor(readonly graphics: Exclude<Graphics, "ready">, readonly details = "") {
+  constructor(readonly graphics: Exclude<Graphics, "ready"> | "loop", readonly details = "") {
     super(graphics === "none"
       ? "This browser can't show 3D graphics. Turn on hardware acceleration in its settings or open the space in another browser."
-      : "The browser wouldn't start 3D graphics for this page. Close other tabs with 3D spaces in them, or quit and reopen the browser, then press Retry.");
+      : graphics === "loop"
+        ? "The browser kept stopping 3D graphics on this page. Quit the browser and open it again, then press Retry. If it happens again, open the space in another browser."
+        : "The browser wouldn't start 3D graphics for this page. Close other tabs with 3D spaces in them, or quit and reopen the browser, then press Retry.");
   }
 }
 

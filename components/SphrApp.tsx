@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadBootstrapData, normalizeTour } from "@/lib/bootstrap";
 import type { RuntimeCallbacks, RuntimeState, SphrBootstrap, SphrSpace } from "@/lib/types";
 import { ViewerSession, type ViewerEntry } from "@/lib/viewer/ViewerSession";
-import { GraphicsUnavailable } from "@/lib/three/glContext";
+import { startFailure } from "@/lib/start-failure";
 import HudControls, { type SpaceDetails, type TourHeart } from "@/components/HudControls";
 import type { SpaceInfo } from "@/lib/space-info";
 import type { ProfileCard } from "@/lib/server/profiles";
@@ -180,7 +180,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
           onLoading: (loading) => {
             setRuntimeState((current) => ({ ...current, loading }));
           },
-          onContextLost: (details) => reportError("webgl", new Error("WebGL context lost"), details),
+          onContextLost: (details, loop) => reportError("webgl", new Error(loop ? "WebGL context lost in a loop" : "WebGL context lost"), details),
           // The tour went on without it, so the visitor isn't stuck, but it is counted with the errors.
           onPartMissing: (part, details) => reportError(part, new Error(`The ${part} did not load`), details),
           onXrAction: (id) => xrAction.current(id),
@@ -208,11 +208,13 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
       } catch (error) {
         if (cancelled) return;
         console.error(error);
-        // The space never opened, so no lost-context notice would come from the viewer itself.
-        if (error instanceof GraphicsUnavailable && error.graphics === "lost") reportError("webgl", new Error("WebGL context lost at start"), error.details);
+        // The space never opened, so nothing else reports it. Every way that can happen is counted with why
+        // (lib/start-failure.ts).
+        const failure = startFailure(error);
+        reportError(failure.kind, failure.kind === "startup" && error instanceof Error ? error : new Error(failure.reason), failure.details);
         editor?.onReady(null, error instanceof Error ? error.message : 'Unable to load scene.');
-        // A page framing this one (mused.com's tours) can offer another tour instead.
-        if (!editor && window.parent !== window) window.parent.postMessage({ type: "spacery:error", page: window.location.pathname }, "*");
+        // A page framing this one (mused.com's tours) shows its own help instead, and keeps the reason with it.
+        if (!editor && window.parent !== window) window.parent.postMessage({ type: "spacery:error", page: window.location.pathname, reason: failure.reason }, "*");
         setRuntimeState((current) => ({
           ...current,
           loading: {
@@ -439,7 +441,9 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     <main ref={rootRef} className={`sphr-root${tour?.hasGuidedTour ? " has-guided-tour" : ""}`}>
       <div ref={viewportRef} className="sphr-viewport" />
       <LoadingScreen
-        loading={graphicsLost ? { ...runtimeState.loading, error: "Your browser stopped drawing this space. That can happen when graphics memory runs low." } : runtimeState.loading}
+        loading={graphicsLost ? { ...runtimeState.loading, error: runtimeState.graphicsLoop
+          ? "Your browser kept stopping the 3D graphics on this page. Quit the browser and open it again, then press Retry."
+          : "Your browser stopped drawing this space. That can happen when graphics memory runs low." } : runtimeState.loading}
         visible={!started || graphicsLost}
         stopped={graphicsLost}
         onRetry={graphicsLost ? reopenHere : undefined}
