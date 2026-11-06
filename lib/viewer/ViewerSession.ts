@@ -235,6 +235,7 @@ export class ViewerSession {
   cameraView() { return this.active?.three?.cameraView() ?? null; }
   showEarth(range?: number) { return this.active?.three?.showEarth(range) ?? Promise.resolve(false); }
   aimFrom(nodeId: string, point: [number, number, number]) { return this.active?.three?.aimFrom(nodeId, point) ?? null; }
+  nodePosition(nodeId: string) { return this.active?.three?.nodePosition(nodeId) ?? null; }
   captureView() { return this.active?.three?.captureView() ?? null; }
   setNavigationHidden(hidden: boolean) { this.active?.three?.setNavigationHidden(hidden); }
   requestHint() { this.active?.three?.requestHint(); }

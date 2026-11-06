@@ -1984,6 +1984,14 @@ export class SphrRuntime {
     }
   }
 
+  /** Where a panorama location stands in the space. */
+  nodePosition(nodeId: string): Vec3 | null {
+    const node = this.resolveNode(nodeId);
+    if (!node) return null;
+    const origin = this.nav?.getWorldPosition(node) ?? vectorFromLike(node.position);
+    return [origin.x, origin.y, origin.z];
+  }
+
   /** Heading and tilt that look from a panorama location toward a point. */
   aimFrom(nodeId: string, point: Vec3) {
     const node = this.resolveNode(nodeId);

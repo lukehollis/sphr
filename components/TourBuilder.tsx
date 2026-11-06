@@ -13,7 +13,7 @@ import { effectEntries, effectEntry, lookEntries, lookEntry, shapeEntries, shape
 import { resolveParams, skyTurnToward, waitsForCue, type ParamSpec, type SkyKind, type SkyMeta } from "@/lib/experience/registry";
 import { EARTH_RANGE, LOOK_TRANSITIONS, newId, SKY_RANGES, type EarthPlace, type EffectInstance, type Experience, type ExperienceKind, type ExperienceStop, type LookTransition, type PlacedObject, type StopLook, type StopSky, type Vec3 } from "@/lib/experience/types";
 import { parseExperience } from "@/lib/experience/validate";
-import { placeObjectAt } from "@/lib/experience/placement";
+import { farFinds, placeObjectAt } from "@/lib/experience/placement";
 import { matchModel, stem } from "@/lib/experience/library-search";
 import type { LibraryModel } from "@/lib/experience/library";
 
@@ -183,6 +183,8 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
   }, [thinking]);
 
   const activeStop = state ? draft.stops[state.activePointIndex] : undefined;
+  // Clues whose find stands so far from where they start that players may never get past them.
+  const farAway = new Map(state && draft.kind === "hunt" ? farFinds(draft, (nodeId) => session.current?.nodePosition(nodeId)).map((item) => [item.stopId, item.distance]) : []);
 
   // ---- Agent ----
   async function askAgent() {
@@ -573,6 +575,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
               <header>
                 <button type="button" className="builder-card-title" aria-expanded={open} onClick={() => { setOpenStop(open ? null : stop.id); void session.current?.goToStop(index); }}>
                   <span className="builder-index">{index + 1}</span>{stop.title || (hunt ? "Untitled clue" : "Untitled stop")}
+                  {farAway.has(stop.id) && <span className="builder-card-meta" data-warn="">{farAway.get(stop.id)} m away</span>}
                 </button>
                 <span className="builder-card-actions">
                   <button type="button" aria-label="Move up" disabled={index === 0} onClick={() => moveStop(index, -1)}><ArrowUp size={16} /></button>
@@ -588,6 +591,7 @@ export default function TourBuilder({ scene, edits, initial, saved: initialSaved
                     <option value="">Choose an object</option>
                     {draft.objects.map((object) => <option key={object.id} value={object.id}>{object.name}</option>)}
                   </select></label>
+                  {farAway.has(stop.id) && <p className="builder-warning" role="note">This object is {farAway.get(stop.id)} meters from where the clue starts, so players may never find it. Move it nearer, or start the clue closer to it.</p>}
                   <label>Hint<textarea rows={2} value={stop.find?.hint ?? ""} maxLength={1000} disabled={!stop.find} onChange={(event) => stop.find && patchStop(stop.id, { find: { ...stop.find, hint: event.target.value } })} /></label>
                   <label>When it is found<textarea rows={3} value={stop.find?.found ?? ""} maxLength={4000} disabled={!stop.find} onChange={(event) => stop.find && patchStop(stop.id, { find: { ...stop.find, found: event.target.value } })} /></label>
                 </>}
