@@ -1,4 +1,4 @@
-import type { PlacedObject, Vec3 } from "@/lib/experience/types";
+import type { Experience, PlacedObject, Vec3 } from "@/lib/experience/types";
 
 /**
  * Where a pixel the tour agent pointed at lands in the space: from the viewer's
@@ -57,4 +57,26 @@ export function aimFrom(origin: Vec3, point: Vec3) {
     azimuth: Number((Math.atan2(-direction[0], -direction[2]) / DEG).toFixed(2)),
     polar: Number((Math.asin(Math.max(-1, Math.min(1, direction[1] / length))) / DEG).toFixed(2))
   };
+}
+
+/**
+ * How far, in meters, a scavenger hunt's find may stand from the location its clue starts at.
+ * The hunt only goes on once it is found, so a few steps is the most a player should have to walk.
+ */
+export const FIND_REACH = 8;
+
+export type FarFind = { index: number; stopId: string; objectId: string; distance: number };
+
+/** The clues whose find stands farther than about FIND_REACH from the clue's location. `at` gives a location's place in the space. */
+export function farFinds(experience: Experience, at: (nodeId: string) => Vec3 | null | undefined): FarFind[] {
+  if (experience.kind !== "hunt") return [];
+  const objects = new Map(experience.objects.map((object) => [object.id, object]));
+  return experience.stops.flatMap((stop, index) => {
+    const object = stop.find ? objects.get(stop.find.objectId) : undefined;
+    const eye = object && stop.view.nodeId && !stop.view.earth ? at(stop.view.nodeId) : null;
+    if (!object || !eye) return [];
+    const distance = Math.hypot(object.position[0] - eye[0], object.position[1] - eye[1], object.position[2] - eye[2]);
+    // Half a meter of slack, so a find the server just brought to the edge of reach is not flagged.
+    return distance > FIND_REACH + 0.5 ? [{ index, stopId: stop.id, objectId: object.id, distance: Math.round(distance) }] : [];
+  });
 }

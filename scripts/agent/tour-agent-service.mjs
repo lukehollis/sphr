@@ -13,6 +13,10 @@
 // SPHR_LIBRARY_SEARCH_URL (the site's /api/library/search, for the search_models tool) and
 // SPHR_LIBRARY_SEARCH_LOG (a file that records each search the agent makes).
 // The app sets SPHR_TOUR_AGENT_URL=http://127.0.0.1:3037 and the same token.
+//
+// Each draft logs one line when it starts and one when it ends (journalctl -u sphr-tour-agent),
+// with the space and tour IDs the app sends, the tier that answered and any error. Requests
+// and answers are never logged: they hold what people wrote.
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -84,6 +88,11 @@ const agyTiers = isAgy ? [
   ] : [])
 ] : [];
 const tierCooldownUntil = new Map();
+
+// An error can quote the model's answer, which can quote the request: logs keep only its length.
+const forLog = (message) => String(message ?? '').replace(/(did not return a JSON draft:)\s*([\s\S]*)$/, (_, said, rest) => `${said} (${rest.trim().length} characters of its answer left out)`).replace(/\s+/g, ' ').slice(0, 400);
+const idOf = (value) => (typeof value === 'string' && /^[\w-]{1,40}$/.test(value) ? value : '-');
+let requests = 0;
 const COOLDOWN_MS = 15 * 60 * 1000;
 
 function orderedAgyTiers() {
@@ -227,7 +236,7 @@ function runAgyTier(tier, directory, fullPrompt, labelByFile, onLog) {
   });
 }
 
-async function compose({ system, prompt, images }, onLog) {
+async function compose({ system, prompt, images }, onLog, tag = '') {
   if (isAgy) {
     const directory = mkdtempSync(path.join(tmpdir(), 'sphr-tour-agent-'));
     try {
@@ -260,11 +269,12 @@ async function compose({ system, prompt, images }, onLog) {
         try {
           const output = await runAgyTier(tier, directory, fullPrompt, labelByFile, onLog);
           tierCooldownUntil.delete(tier.id);
+          console.log(`[tour-agent] ${tag} answered by ${tier.id} (${tier.model})`);
           return output;
         } catch (error) {
           lastError = error;
           const message = error instanceof Error ? error.message : String(error);
-          console.warn(`[tour-agent] tier ${tier.id} (${tier.model}) failed: ${message}`);
+          console.warn(`[tour-agent] ${tag} tier ${tier.id} (${tier.model}) failed: ${forLog(message)}`);
           if (/(quota|credit|resource_exhausted|rate.?limit|429|exhausted|too low|unauthenticated|unauthorized|expired|sign in|login|code 3)/i.test(message)) {
             tierCooldownUntil.set(tier.id, Date.now() + COOLDOWN_MS);
           }
@@ -345,8 +355,8 @@ createServer((request, response) => {
     });
   }
   if (request.method !== 'POST' || request.url !== '/compose') return send(404, { error: 'Not found.' });
-  if (!authorized(request)) return send(401, { error: 'Unauthorized.' });
-  if (waiting.length >= 6) return send(429, { error: 'The tour agent is busy with other drafts. Try again in a few minutes.' });
+  if (!authorized(request)) { console.warn('[tour-agent] refused a request without the right token'); return send(401, { error: 'Unauthorized.' }); }
+  if (waiting.length >= 6) { console.warn(`[tour-agent] busy: ${running} drafting, ${waiting.length} waiting`); return send(429, { error: 'The tour agent is busy with other drafts. Try again in a few minutes.' }); }
   const chunks = [];
   let size = 0;
   request.on('data', (chunk) => { size += chunk.length; if (size > 48 * 1024 * 1024) request.destroy(); else chunks.push(chunk); });
@@ -355,6 +365,12 @@ createServer((request, response) => {
     try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return send(400, { error: 'Invalid request.' }); }
     if (typeof body?.prompt !== 'string' || !body.prompt) return send(400, { error: 'Missing prompt.' });
     const stream = body.stream === true || Boolean(request.headers.accept?.includes('application/x-ndjson'));
+    const tag = `#${++requests} scene=${idOf(body.meta?.scene)} tour=${idOf(body.meta?.tour)}`;
+    const started = Date.now();
+    const seconds = () => Math.round((Date.now() - started) / 1000);
+    console.log(`[tour-agent] ${tag} started: ${Array.isArray(body.images) ? body.images.length : 0} images, ${body.prompt.length} characters${running >= concurrent ? `, waiting behind ${waiting.length + 1}` : ''}`);
+    const ended = (output) => console.log(`[tour-agent] ${tag} done in ${seconds()}s, ${output.length} characters`);
+    const failed = (error) => console.warn(`[tour-agent] ${tag} failed after ${seconds()}s: ${forLog(error instanceof Error ? error.message : error)}`);
     if (stream) {
       response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
       const emit = (payload) => { if (!response.writableEnded) response.write(JSON.stringify(payload) + '\n'); };
@@ -362,9 +378,11 @@ createServer((request, response) => {
       const heartbeat = setInterval(() => emit({ type: 'ping' }), 5000);
       await slot();
       try {
-        const output = await compose(body, (text) => emit({ type: 'log', text }));
+        const output = await compose(body, (text) => emit({ type: 'log', text }), tag);
+        ended(output);
         emit({ type: 'done', output });
       } catch (error) {
+        failed(error);
         emit({ type: 'error', error: error instanceof Error ? error.message : 'The agent failed.' });
       } finally {
         clearInterval(heartbeat);
@@ -374,8 +392,8 @@ createServer((request, response) => {
       return;
     }
     await slot();
-    try { send(200, { output: await compose(body) }); }
-    catch (error) { send(502, { error: error instanceof Error ? error.message : 'The agent failed.' }); }
+    try { const output = await compose(body, undefined, tag); ended(output); send(200, { output }); }
+    catch (error) { failed(error); send(502, { error: error instanceof Error ? error.message : 'The agent failed.' }); }
     finally { release(); }
   });
 }).listen(port, '127.0.0.1', () => console.log(`tour agent service on 127.0.0.1:${port} using ${claude} (${isAgy ? agyTiers.map((t) => `${t.id}:${t.model}`).join(' -> ') : model})`));
