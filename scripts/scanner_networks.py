@@ -5,7 +5,10 @@ crawlers, not people. The analytics leave browser errors from them out (lib/serv
 Microsoft's: when a link is shared in Outlook or Teams, Microsoft's link scanner opens the page and every link on it
 from Azure addresses, with an ordinary Chrome user agent. Its pages throw "Object Not Found Matching Id" and fail
 to load script chunks. CDS Global Cloud's: a crawler with a 2025 Chrome and an iOS 13 user agent, whose page loads
-fail to load chunks nearly every time.
+fail to load chunks nearly every time. Meta's: when a link is shared on Facebook, Meta opens the page from its own
+network in a desktop Chrome with no graphics card, many times within minutes (24 times in 12 minutes for the Tomb of
+Nefertari on 2026-11-07, from 2a03:2880::), and every load fails with "No WebGL 2 at start". People using Facebook's
+in-app browser come from their own networks, not Meta's.
 
 Clouds where people's own traffic leaves from (iCloud Private Relay, VPNs, school web filters on AWS) stay out.
 
@@ -18,7 +21,7 @@ import json
 from pathlib import Path
 import urllib.request
 
-NETWORKS = {'AS8075': 'Microsoft', 'AS63199': 'CDS Global Cloud'}
+NETWORKS = {'AS8075': 'Microsoft', 'AS63199': 'CDS Global Cloud', 'AS32934': 'Meta'}
 TARGET = Path(__file__).resolve().parent.parent / 'lib/server/scanner-networks.json'
 
 

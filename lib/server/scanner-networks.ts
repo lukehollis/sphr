@@ -2,8 +2,9 @@ import { BlockList, isIP } from "node:net";
 import data from "./scanner-networks.json" with { type: "json" };
 
 // Networks whose page loads are link scanners and crawlers, not people (scripts/scanner_networks.py says which and
-// why): Microsoft's link scanner opens every link of a page shared in Outlook or Teams from Azure, with an ordinary
-// Chrome user agent, so the user-agent test in analytics.ts can't tell it from a person.
+// why): Microsoft's link scanner opens every link of a page shared in Outlook or Teams from Azure, and Meta opens a link
+// shared on Facebook from its own network, both with an ordinary Chrome user agent, so the user-agent test in
+// analytics.ts can't tell them from a person.
 
 let lists: { name: string; list: BlockList }[] | undefined;
 

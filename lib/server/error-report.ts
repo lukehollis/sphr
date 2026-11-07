@@ -37,6 +37,7 @@ export function reportProblem(title: string, message: string, fields: TeamEvent[
 // Graphics drawn without a graphics card. Chrome uses SwiftShader only when started with a flag, as automated
 // browsers are; a page they open loses its context before the first picture and often never gets it back.
 const softwareGpu = /SwiftShader|llvmpipe|softpipe|Basic Render Driver/i;
+const noWebGL = /No WebGL 2 at start/;
 
 /** A JavaScript error in someone's browser, sent with the page's analytics. */
 export function reportClientError(props: Record<string, string | number | boolean>, path: string | null, device: string) {
@@ -48,6 +49,10 @@ export function reportClientError(props: Record<string, string | number | boolea
   // neither is a software renderer losing its context.
   if (!message || source === "reloaded the page" || isBrowserNoise(message) || isBrowserNoise(source)) return;
   if (props.kind === "webgl" && softwareGpu.test(source)) return;
+  // A browser with no WebGL 2 at all (hardware acceleration turned off, or a crawler without a graphics card) can't
+  // show any space, and the page already tells the visitor what to do. Nothing on the site changes that, so it stays
+  // in the analytics without a notice.
+  if (props.kind === "webgl" && noWebGL.test(message)) return;
   noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
     fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null],
       // What the network answered for a part it keeps refusing (lib/missing-part.ts).

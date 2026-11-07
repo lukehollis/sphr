@@ -11,6 +11,14 @@ test('the addresses Microsoft\'s link scanner and the CDS crawler sent browser e
   assert.equal(scannerNetwork('164.52.120.3'), 'CDS Global Cloud');
 });
 
+test('Meta\'s network, which opens links shared on Facebook, is a scanner network', () => {
+  // Seen 2026-11-07 opening the Tomb of Nefertari tour 24 times in 12 minutes, every load without WebGL 2.
+  for (const address of ['2a03:2880:f814:e::', '2a03:2880:9ff:70::', '2a03:2880:7ff:4d::', '2a03:2880:29ff:43::',
+    '173.252.83.112', '66.220.149.11', '69.171.249.2', '31.13.115.6']) {
+    assert.equal(scannerNetwork(address), 'Meta', address);
+  }
+});
+
 test('people\'s networks are not, cloud-hosted ones included', () => {
   for (const address of [
     '208.103.121.106', // DQE Communications, which carries school networks
