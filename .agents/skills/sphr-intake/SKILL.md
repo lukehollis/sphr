@@ -22,9 +22,11 @@ This lists every file with its kind (`e57`, `splat`, `panorama`, `video360`, `vi
 `pointcloud`, `mesh`, `zip`, `unknown`), measurements and the suggested tool. ZIP archives are unpacked
 safely into `work/unpacked`. Read the customer's notes in `job.json` for context (device, what the space is).
 
-`inspect-inputs` only knows the formats it was written for. A capture app's export (folders of frames
-with per-frame JSON, depth maps, sidecar files) shows up as photos and `unknown` files: open a few of them.
-The camera poses, intrinsics and depth they record often decide the method (see 2b).
+`inspect-inputs` only knows the formats it was written for. When it already identifies a standard set
+(for example 50 or 100 equirectangular `panorama` JPEGs for a tour), go straight to that pipeline's tool
+rather than opening individual photos one by one. A capture app's export (folders of frames with per-frame
+JSON, depth maps, sidecar files) shows up as photos and `unknown` files: open a few of them. The camera
+poses, intrinsics and depth they record often decide the method (see 2b).
 
 Write progress as you go, one short customer-readable line per step:
 

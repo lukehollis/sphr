@@ -32,7 +32,7 @@ def rewrite(value, source, destination):
     if isinstance(value, list):
         return [rewrite(item, source, destination) for item in value]
     if isinstance(value, dict):
-        return {key: rewrite(item, source, destination) for key, item in value.items()}
+        return {rewrite(key, source, destination): rewrite(item, source, destination) for key, item in value.items()}
     return value
 
 

@@ -5,6 +5,7 @@ import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { SceneGraphNode } from "@/lib/types";
 import { applyTransform } from "@/lib/three/math";
 import { fitModelTextures, modelTextures } from "@/lib/three/textureLimit";
+import { DRACO_DECODER_PATH } from "@/lib/three/draco";
 
 type SceneGraphRecord = {
   node: SceneGraphNode;
@@ -68,7 +69,7 @@ export class SceneGraphLayer {
     this.root.name = "scene-graph";
     this.loader = new GLTFLoader();
     const draco = new DRACOLoader();
-    draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+    draco.setDecoderPath(DRACO_DECODER_PATH);
     this.loader.setDRACOLoader(draco);
     if (ktx2) this.loader.setKTX2Loader(ktx2);
   }

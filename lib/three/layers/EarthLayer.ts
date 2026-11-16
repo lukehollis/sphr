@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { TilesRenderer } from "3d-tiles-renderer/three";
 import type { EarthPlace } from "@/lib/experience/types";
 import { earthYaw } from "@/lib/three/earth";
+import { DRACO_DECODER_PATH } from "@/lib/three/draco";
 
 /** Where the site's key for Google's map tiles comes from. */
 const KEY_URL = "/api/earth";
@@ -195,7 +196,7 @@ export class EarthLayer {
     ]);
     if (this.disposed) return false;
     const draco = new DRACOLoader();
-    draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+    draco.setDecoderPath(DRACO_DECODER_PATH);
     const tiles = new TilesRenderer();
     tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: key, autoRefreshToken: true }));
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));

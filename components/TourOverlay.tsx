@@ -7,6 +7,7 @@ import { mediaImageUrl, mediaVideoUrl } from "@/lib/media";
 import { sanitizeTourHtml } from "@/lib/tour-html";
 import { paragraphs } from "@/lib/experience/types";
 import { nextButtonLabel } from "@/lib/xr-panel";
+import { isSameOriginUrl } from "@/lib/same-origin";
 
 type Props = {
   point: TourPoint;
@@ -31,8 +32,7 @@ type Props = {
  */
 function continueTarget(url: string) {
   if (typeof window === "undefined") return "_top";
-  try { return new URL(url, window.location.href).origin === window.location.origin ? "_self" : "_top"; }
-  catch { return "_top"; }
+  return isSameOriginUrl(url, window.location.href) ? "_self" : "_top";
 }
 
 /**

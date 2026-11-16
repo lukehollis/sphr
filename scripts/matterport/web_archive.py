@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -225,21 +227,49 @@ def image_type(data):
     raise ValueError("Unsupported mesh texture format")
 
 
-def embed_textures(glb, sources):
+MESH_TEXTURE_BUDGET = 20 * 1024 * 1024
+
+
+def shrink_mesh_jpeg(data, scale):
+    with Image.open(io.BytesIO(data)) as picture:
+        width, height = picture.size
+        longest = max(width, height)
+        limit = max(256, min(1024, round(longest * scale)))
+        if longest <= limit:
+            return data
+        ratio = limit / longest
+        resized = picture.convert("RGB").resize(
+            (max(1, round(width * ratio)), max(1, round(height * ratio))),
+            Image.Resampling.LANCZOS,
+        )
+    out = io.BytesIO()
+    resized.save(out, format="JPEG", quality=80, optimize=True)
+    encoded = out.getvalue()
+    return encoded if len(encoded) < len(data) else data
+
+
+def embed_textures(glb, sources, budget=MESH_TEXTURE_BUDGET):
     """
-    The GLB with each texture image replaced by the bytes of the file it was decoded from. trimesh encodes images
-    again when it writes a GLB, as PNG for decoded bitmaps, which made the dollhouse of a space with hundreds of
-    photos six times the size of Matterport's own JPEG textures. `sources` maps a material name to its file.
+    The GLB with each texture image replaced by the bytes of the file it was decoded from (or a downscaled JPEG when
+    hundreds of DAM chunks exceed `budget`, keeping multi-hundred-sweep spaces around 20 MB instead of 100-370 MB).
+    trimesh encodes images again when it writes a GLB, as PNG for decoded bitmaps, which made the dollhouse of a space
+    with hundreds of photos six times the size of Matterport's own JPEG textures. `sources` maps a material name to its file.
     """
     document, blob = read_glb(glb)
     names = texture_sources(document)
     if set(names) != set(range(len(document.get("images", [])))):
         raise ValueError("A mesh texture image is not used by any material")
-    replaced = {}
+    raw = {}
     for index, name in names.items():
         if name not in sources:
             raise ValueError(f"No source texture for mesh material {name}")
-        data = Path(sources[name]).read_bytes()
+        raw[index] = Path(sources[name]).read_bytes()
+    total_bytes = sum(len(data) for data in raw.values())
+    scale = math.sqrt(budget / total_bytes) if budget and total_bytes > budget else 1.0
+    replaced = {}
+    for index, data in raw.items():
+        if scale < 1.0:
+            data = shrink_mesh_jpeg(data, scale)
         image = document["images"][index]
         image["mimeType"] = image_type(data)
         replaced[image["bufferView"]] = data

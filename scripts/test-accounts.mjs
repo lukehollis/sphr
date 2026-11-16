@@ -780,21 +780,21 @@ test('the free preview: one for each account, its limits, a window that starts w
 
   // The offer is made once, with limits a capture has to fit.
   const user = await verified('previewer');
-  assert.deepEqual(previews.previewOffer(user.id), { available: true, used: false, days: 7, maxFiles: 100, maxBytes: 5e9 });
+  assert.deepEqual(previews.previewOffer(user.id), { available: true, used: false, days: 7, maxFiles: 500, maxBytes: 5e9 });
   assert.equal(previews.previewRefusal(user.id), undefined);
-  assert.equal(previews.previewRefusal(user.id, { count: 100, bytes: 5e9 }), undefined, 'a capture right at the limits fits');
-  assert.equal(previews.previewRefusal(user.id, { count: 101, bytes: 10 }), 'large');
+  assert.equal(previews.previewRefusal(user.id, { count: 500, bytes: 5e9 }), undefined, 'a capture right at the limits fits');
+  assert.equal(previews.previewRefusal(user.id, { count: 501, bytes: 10 }), 'large');
   assert.equal(previews.previewRefusal(user.id, { count: 1, bytes: 36.7e9 }), 'large', 'a very large E57 needs payment or approval');
-  // The note says the limits and what the capture has, so the person knows what fits (113 phone photos on 2026-11-06).
-  assert.equal(previews.refusalNote('large', user.id, { count: 113, bytes: 50654018 }), 'A free preview holds up to 100 files and 5.0 GB, and this capture has 113 files, so this space starts with payment.');
-  assert.equal(previews.refusalNote('large', user.id, { count: 1, bytes: 36.7e9 }), 'A free preview holds up to 100 files and 5.0 GB, and this capture is 37 GB, so this space starts with payment.');
+  // The note says the limits and what the capture has, so the person knows what fits.
+  assert.equal(previews.refusalNote('large', user.id, { count: 513, bytes: 50654018 }), 'A free preview holds up to 500 files and 5.0 GB, and this capture has 513 files, so this space starts with payment.');
+  assert.equal(previews.refusalNote('large', user.id, { count: 1, bytes: 36.7e9 }), 'A free preview holds up to 500 files and 5.0 GB, and this capture is 37 GB, so this space starts with payment.');
   assert.equal(previews.refusalNote('used', user.id), previews.refusalText.used, 'with nothing to point to, the plain reason');
 
   // Spending it makes an ordinary draft space that is private to its owner for as long as nothing is paid.
   const space = store.createCustomerSpace(user.id, 'Porch', 'draft', null, true);
   assert.equal(space.status, 'draft');
   assert.deepEqual((({ open, expired, ready, until, runsLeft, files, bytes }) => ({ open, expired, ready, until, runsLeft, files, bytes }))(previews.spacePreview(space)),
-    { open: true, expired: false, ready: null, until: null, runsLeft: 3, files: 100, bytes: 5e9 }, 'the window has not started before a result');
+    { open: true, expired: false, ready: null, until: null, runsLeft: 3, files: 500, bytes: 5e9 }, 'the window has not started before a result');
   assert.equal(previews.previewOpen(space), true);
   assert.deepEqual([previews.previewOffer(user.id).available, previews.previewOffer(user.id).used, previews.previewRefusal(user.id)], [false, true, 'used']);
   // While it waits unprocessed, a second space points back to it.

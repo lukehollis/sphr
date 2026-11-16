@@ -179,12 +179,15 @@ export function titleFromFiles(files: PickedFile[], now = new Date()) {
   if (folder && meaningful(folder)) return tidy(folder).slice(0, 200);
   const names = files.map(item => baseName(item.file.name));
   if (names.length) {
-    // The largest file is usually the capture itself; the rest are sidecars.
-    const main = baseName([...files].sort((a, b) => b.file.size - a.file.size)[0].file.name);
+    const sorted = [...files].sort((a, b) => b.file.size - a.file.size);
+    // One file, or a capture much larger than its sidecars (a mesh with its .mtl and textures), names the space;
+    // a set of similar-sized photos without a shared prefix falls back to the date instead of whichever compressed largest.
+    const dominant = sorted.length === 1 || sorted[0].file.size >= Math.max(1, sorted[1].file.size) * 4;
+    const main = baseName(sorted[0].file.name);
     let shared = names[0];
     for (const name of names) while (!name.startsWith(shared)) shared = shared.slice(0, -1);
     shared = shared.replace(/[\s._-]*\d*[\s._-]*$/, "");
-    for (const candidate of names.length === 1 ? [main] : [shared, main]) {
+    for (const candidate of names.length === 1 ? [main] : dominant ? [shared, main] : [shared]) {
       if (meaningful(candidate)) return tidy(candidate).slice(0, 200);
     }
   }

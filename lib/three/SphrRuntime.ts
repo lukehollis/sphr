@@ -292,7 +292,8 @@ export class SphrRuntime {
     this.renderer.setClearColor(0x0a0c10, 0);
     // Read now: once the context is lost the browser no longer answers.
     this.gpu = gpuName(this.renderer.getContext());
-    this.textureCache = new TextureCache(this.manager, (this.light ? 64 : 320) * 1024 * 1024, !this.light);
+    const maxPanoSize = Math.min(this.light ? 4096 : 8192, this.renderer.capabilities.maxTextureSize || 8192);
+    this.textureCache = new TextureCache(this.manager, (this.light ? 64 : 320) * 1024 * 1024, !this.light, maxPanoSize);
     this.looks = new LookPass(this.renderer, this.lookHost(), typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches));
     this.controls = new PointerSafeOrbitControls(this.camera, this.renderer.domElement);
     this.audio = new AudioController(this.tour.audio);

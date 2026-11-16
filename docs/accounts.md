@@ -110,7 +110,7 @@ in `preview_grants` in the state database):
   and the plan page (`/account/plan?space=<id>`) say the same.
 - **Limits**, because each run costs agent time. One preview for each account, for good: deleting and adding
   again does not earn another, but a preview deleted before anything was submitted costs nothing and is given back.
-  Up to `SPHR_PREVIEW_MAX_FILES` (100) files and `SPHR_PREVIEW_MAX_GB` (5) gigabytes in the space, enforced when each
+  Up to `SPHR_PREVIEW_MAX_FILES` (500) files and `SPHR_PREVIEW_MAX_GB` (5) gigabytes in the space, enforced when each
   file is registered, so a page or an agent cannot get past them; and `SPHR_PREVIEW_MAX_RUNS` (3) agent runs, held
   jobs not counted. New previews are limited to `SPHR_PREVIEW_DAILY_LIMIT` (10) across the site in any 24 hours and
   `SPHR_PREVIEW_ADDRESS_LIMIT` (5) from one network address. A capture over the limits, a used preview or a spent

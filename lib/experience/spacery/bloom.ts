@@ -4,6 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EffectFactory, PointerHit } from "@/lib/experience/registry";
 import { bool, num, str, waitsForCue } from "@/lib/experience/registry";
 import { pixelRatio } from "./common";
+import { DRACO_DECODER_PATH } from "@/lib/three/draco";
 
 /**
  * Flowers that grow where visitors hover the ground, each with a puff of
@@ -23,7 +24,7 @@ function loadGarden() {
   if (gardenModels) return gardenModels;
   const loader = new GLTFLoader();
   const draco = new DRACOLoader();
-  draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+  draco.setDecoderPath(DRACO_DECODER_PATH);
   loader.setDRACOLoader(draco);
   gardenModels = Promise.all(GARDEN.map((url) => loader.loadAsync(url).then((gltf) => gltf.scene).catch(() => null)))
     .then((models) => models.filter((model): model is THREE.Group => Boolean(model)));

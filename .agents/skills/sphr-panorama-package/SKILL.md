@@ -12,13 +12,18 @@ Insta360 originals (`.insv`, `.insp`) are unstitched fisheye; build them with `b
 instead of asking the customer to export from the Insta360 app.
 
 ```sh
-node scripts/packages/build-panoramas.mjs --input "$SPHR_JOB_DIR/input" --title "<title>" [--captions]
+node scripts/packages/build-panoramas.mjs --input "$SPHR_JOB_DIR/input" --title "<title>" [--captions] [--labels "Entrance,Living room"]
 ```
 
-Photos are ordered by file name (camera numbering is usually capture order), resized to at most 8192 px
-wide and stored flipped to suit the viewer's sphere; each opens facing the photo's center. Images that are
-not 2:1 are skipped and listed in the output; mention skipped files in your message. `--captions` shows
-each file name as the tour text; use it only when names are meaningful ("Kitchen", "Stair hall").
+Run `build-panoramas.mjs` directly once `inspect-inputs.mjs` confirms 2:1 equirectangular `panorama` files;
+do **not** manually view dozens or hundreds of input JPEGs first. Photos are ordered by file name (natural
+numeric sort preserves capture order), resized to at most 8192 px wide and stored flipped to suit the
+viewer's sphere; each stop opens facing the photo's center unless that center is a featureless wall, in
+which case `build-panoramas.mjs` turns toward a detailed horizon sector and draws `preview.jpg` from the
+same heading. Images that are not 2:1 are skipped and listed in the output; mention skipped files in your
+message. `--captions` shows each cleaned file name as the tour text (stripping leading sequence numbers such
+as `01-Entrance.JPG` → `Entrance`); use `--captions` only when file names name rooms or places rather than
+camera counters (`IMG_`, `GS__`, `R00`), or pass `--labels` to override them.
 
 ## 360 video
 

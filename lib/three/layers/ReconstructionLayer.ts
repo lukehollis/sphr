@@ -5,6 +5,7 @@ import type { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import type { ReconstructionConfig } from "@/lib/types";
 import { manifestIsCurrent, parseReconstruction, reconstructionModelUrl, reconstructionSources } from "@/lib/reconstruction";
 import { ReconstructionEnvironment } from "@/lib/three/layers/ReconstructionEnvironment";
+import { DRACO_DECODER_PATH } from "@/lib/three/draco";
 
 type LoadState = "idle" | "loading" | "ready" | "failed";
 
@@ -210,7 +211,7 @@ export class ReconstructionLayer {
     if (!url) { this.error = "The model's address is not allowed."; return false; }
     const loader = new GLTFLoader();
     const draco = new DRACOLoader();
-    draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+    draco.setDecoderPath(DRACO_DECODER_PATH);
     loader.setDRACOLoader(draco);
     if (this.ktx2) loader.setKTX2Loader(this.ktx2);
     let gltf;

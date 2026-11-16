@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import subprocess
 from unittest.mock import patch, Mock
-from publish import commit_catalog, digest, main, make_public, merge_catalog, NoAdminRedirect, stage_scene
+from publish import commit_catalog, digest, main, make_public, merge_catalog, NoAdminRedirect, rewrite, stage_scene
 
 
 class PublisherTests(unittest.TestCase):
@@ -179,6 +179,13 @@ class PublisherTests(unittest.TestCase):
             (folder/'bootstrap.json').unlink()
             with self.assertRaisesRegex(ValueError,'Missing runtime asset'):
                 stage_scene(folder,entry,'https://static.example.com/sphr',root/'incomplete')
+
+    def test_rewrite_updates_dict_keys_and_values(self):
+        light = {'models': {'/datasets/matterport/capture/mesh/a.glb': '/datasets/matterport/capture/light/a.glb'}}
+        updated = rewrite(light, '/datasets/matterport/capture', 'https://static.example.com/sphr/scenes/id/rev')
+        self.assertEqual(updated, {'models': {
+            'https://static.example.com/sphr/scenes/id/rev/mesh/a.glb': 'https://static.example.com/sphr/scenes/id/rev/light/a.glb'
+        }})
 
 
 if __name__=='__main__': unittest.main()

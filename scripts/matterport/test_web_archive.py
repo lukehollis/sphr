@@ -13,7 +13,7 @@ from scipy.spatial.transform import Rotation
 from catalog import write_matterport_index
 from geometry import C
 from publish import stage_scene
-from web_archive import TAGS, convert, fields, load_dam, local_asset, pano_quaternion, plain_text, read_glb, select_skybox, source_neighbors
+from web_archive import TAGS, convert, embed_textures, fields, load_dam, local_asset, pano_quaternion, plain_text, read_glb, select_skybox, source_neighbors
 
 
 def field(tag, value):
@@ -176,6 +176,25 @@ class WebArchiveTests(unittest.TestCase):
                 convert(archive, "customer-test02", "No floor", public)
             bootstrap = json.loads((public / "datasets/matterport/customer-test02/bootstrap.json").read_text())
             self.assertIsNone(bootstrap["space"]["space_data"]["nodes"][0]["sourceFloorId"])
+
+    def test_oversized_dollhouse_textures_shrink_when_exceeding_budget(self):
+        with tempfile.TemporaryDirectory() as folder:
+            archive, public = Path(folder).resolve() / "archive", Path(folder).resolve() / "public"
+            archive.mkdir()
+            tiny_archive(archive, [])
+            rng = np.random.default_rng(7)
+            texture = archive / "models/m/assets/~/tex/m_50k_000.jpg"
+            Image.fromarray(rng.integers(0, 255, (2048, 2048, 3), dtype=np.uint8)).save(texture, quality=92)
+            original_size = texture.stat().st_size
+            with mock.patch.dict(os.environ, {"SPHR_SCENE_ID": "0123456789ab"}):
+                convert(archive, "customer-big", "Big mesh", public)
+            glb_bytes = (public / "datasets/matterport/customer-big/mesh/customer-big-50k.glb").read_bytes()
+            shrunk = embed_textures(glb_bytes, {"m_50k_000.jpg": texture}, budget=original_size // 4)
+            document, blob = read_glb(shrunk)
+            [image] = document["images"]
+            view = document["bufferViews"][image["bufferView"]]
+            self.assertEqual(image["mimeType"], "image/jpeg")
+            self.assertLess(view["byteLength"], original_size // 2)
 
 
 if __name__ == "__main__":

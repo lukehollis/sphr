@@ -1,6 +1,33 @@
 import * as THREE from "three";
 
 type Entry = { texture: THREE.Texture; ready: Promise<THREE.Texture>; loaded: boolean; pins: number; permanent: boolean; used: number };
+type Pixels = (ImageBitmap | HTMLCanvasElement | HTMLImageElement) & { width: number; height: number };
+
+const closeBitmap = (image: unknown) => {
+  if (typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) image.close();
+};
+
+async function shrinkPanorama(image: CanvasImageSource, width: number, height: number, maxSize: number): Promise<Pixels | null> {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+  const scale = maxSize / Math.max(width, height);
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext?.("2d");
+  if (!context) return null;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+  if (typeof createImageBitmap !== "function") return canvas;
+  try {
+    const bitmap = await createImageBitmap(canvas);
+    canvas.width = canvas.height = 0;
+    return bitmap;
+  } catch {
+    return canvas;
+  }
+}
 
 /**
  * TextureLoader with the image asking for the connection first. Browsers rank a fetch (a model
@@ -33,8 +60,11 @@ export class TextureCache {
   /**
    * @param budget bytes of unpinned textures kept for reuse (phones keep fewer)
    * @param mipmaps phones skip them: a face is drawn near its own size there, and they add a third
+   * @param maxSize longest side kept in graphics memory (phones cap 8K equirectangular panoramas to 4096)
    */
-  constructor(manager?: THREE.LoadingManager, private readonly budget = 320 * 1024 * 1024, private readonly mipmaps = true) { this.loader = new FaceLoader(manager); }
+  constructor(manager?: THREE.LoadingManager, private readonly budget = 320 * 1024 * 1024, private readonly mipmaps = true, private readonly maxSize = 8192) {
+    this.loader = new FaceLoader(manager);
+  }
 
   load(url: string, onLoad?: (texture: THREE.Texture) => void) {
     if (!url) return null;
@@ -67,6 +97,7 @@ export class TextureCache {
       if (total < this.budget) break;
       if (entry.pins || entry.permanent) continue;
       total -= bytes(entry);
+      closeBitmap(entry.texture.image);
       entry.texture.dispose();
       this.entries.delete(url);
     }
@@ -76,7 +107,7 @@ export class TextureCache {
 
   dispose() {
     this.disposed = true;
-    this.entries.forEach((entry) => entry.texture.dispose());
+    this.entries.forEach((entry) => { closeBitmap(entry.texture.image); entry.texture.dispose(); });
     this.entries.clear();
   }
 
@@ -90,10 +121,28 @@ export class TextureCache {
     void ready.catch(() => {});
     const texture = this.loader.load(url, (loaded) => {
       if (this.disposed) { loaded.dispose(); reject(new Error("Viewer disposed")); return; }
-      loaded.needsUpdate = true;
-      const entry = this.entries.get(url);
-      if (entry) entry.loaded = true;
-      resolve(loaded);
+      const finish = (smaller?: Pixels | null) => {
+        if (this.disposed) {
+          closeBitmap(smaller);
+          loaded.dispose();
+          reject(new Error("Viewer disposed"));
+          return;
+        }
+        const tex: THREE.Texture = loaded;
+        if (smaller) tex.image = smaller;
+        tex.needsUpdate = true;
+        const entry = this.entries.get(url);
+        if (entry) entry.loaded = true;
+        resolve(tex);
+      };
+      const img = loaded.image as (HTMLImageElement & { naturalWidth?: number; naturalHeight?: number }) | undefined;
+      const width = img?.naturalWidth || img?.width || 0;
+      const height = img?.naturalHeight || img?.height || 0;
+      if (img && Math.max(width, height) > this.maxSize) {
+        void shrinkPanorama(img, width, height, this.maxSize).then(finish, () => finish(null));
+        return;
+      }
+      finish(null);
     }, undefined, () => {
       this.entries.delete(url);
       texture.dispose();

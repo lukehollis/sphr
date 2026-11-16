@@ -5,6 +5,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { shapeEntry } from "@/lib/experience/packs";
 import type { PlacedObject } from "@/lib/experience/types";
+import { DRACO_DECODER_PATH } from "@/lib/three/draco";
 
 type ObjectRecord = {
   data: PlacedObject;
@@ -47,7 +48,7 @@ export class ObjectLayer {
   constructor(private readonly scene: THREE.Scene, private readonly onLoaded: () => void = () => {}) {
     this.root.name = "experience-objects";
     const draco = new DRACOLoader();
-    draco.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
+    draco.setDecoderPath(DRACO_DECODER_PATH);
     this.loader.setDRACOLoader(draco);
     this.loader.setMeshoptDecoder(MeshoptDecoder);
     this.scene.add(this.root);

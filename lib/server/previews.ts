@@ -27,7 +27,7 @@ export const previewWindow = 24 * 60 * 60 * 1000;
 /** What one preview holds, unless the operator approved more for the account (max_files and max_bytes on its grant). */
 export function previewLimits(grant?: PreviewGrant) {
   const gigabytes = Number(env("SPHR_PREVIEW_MAX_GB"));
-  return { files: grant?.maxFiles ?? whole("SPHR_PREVIEW_MAX_FILES", 100), bytes: grant?.maxBytes ?? (gigabytes > 0 ? gigabytes * 1e9 : 5e9) };
+  return { files: grant?.maxFiles ?? whole("SPHR_PREVIEW_MAX_FILES", 500), bytes: grant?.maxBytes ?? (gigabytes > 0 ? gigabytes * 1e9 : 5e9) };
 }
 
 export type PreviewView = {

@@ -20,6 +20,7 @@ import { vrAvailable, xrPanelFor } from "@/lib/xr-panel";
 import { readableTags, type SpaceTag } from "@/lib/space-tags";
 import TagCard from "@/components/TagCard";
 import { readLinkEntry, type ShareView } from "@/lib/share-link";
+import { navigateContinue } from "@/lib/same-origin";
 
 const initialRuntimeState: RuntimeState = {
   loading: {
@@ -401,9 +402,7 @@ export default function SphrApp({ configUrl, preview, host, info, social, build,
     else if (id === "continue" && tour?.continueTo) {
       tellFrameContinue(tour.continueTo.url);
       // The next page opens on screen; the headset's session ends with this one.
-      const url = new URL(tour.continueTo.url, window.location.href);
-      if (url.origin === window.location.origin) window.location.assign(url.toString());
-      else (window.top ?? window).location.assign(url.toString());
+      navigateContinue(tour.continueTo.url, window);
     }
   };
 

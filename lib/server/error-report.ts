@@ -38,11 +38,18 @@ export function reportProblem(title: string, message: string, fields: TeamEvent[
 // browsers are; a page they open loses its context before the first picture and often never gets it back.
 const softwareGpu = /SwiftShader|llvmpipe|softpipe|Basic Render Driver/i;
 const noWebGL = /No WebGL 2 at start/;
+// Visitor connections that drop or abort before receiving an HTTP response (offline phones, adblockers,
+// image-blocking scrapers). Real HTTP 4xx/5xx asset or manifest failures carry their status and still page.
+const clientNetworkDrop = /^TypeError: (Failed to fetch|Load failed|network error|NetworkError\b)/i;
+const clientProbeDrop = /^(fetch failed:|no answer in |fetch unavailable)/i;
+const clientReconDrop = /^(still loading after |failed: (Failed to fetch|Load failed|network error|NetworkError\b))/i;
+const clientPanoramaDrop = /^(Error: )?Unable to load (the panorama at [^\s()]+|panorama image: [^\s()]+)$/;
 
 /** A JavaScript error in someone's browser, sent with the page's analytics. */
 export function reportClientError(props: Record<string, string | number | boolean>, path: string | null, device: string) {
   const message = String(props.message ?? "").slice(0, 300);
   const source = String(props.source ?? "");
+  const detail = String(props.detail ?? "");
   // A page that reloaded itself after part of it didn't arrive usually recovers. It stays in the analytics,
   // and the operator hears about it only if it is still failing after the reload. Scripts that apps and
   // extensions inject into the page stay in the analytics too, but they aren't this site's errors, and
@@ -53,7 +60,11 @@ export function reportClientError(props: Record<string, string | number | boolea
   // show any space, and the page already tells the visitor what to do. Nothing on the site changes that, so it stays
   // in the analytics without a notice.
   if (props.kind === "webgl" && noWebGL.test(message)) return;
-  noticeOnce(`client ${message}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
+  if (props.kind === "load" && detail && clientProbeDrop.test(detail)) return;
+  if (props.kind === "reconstruction" && clientReconDrop.test(source)) return;
+  if (props.kind === "startup" && (clientNetworkDrop.test(message) || clientPanoramaDrop.test(message))) return;
+  const noticeKey = message.replace(/ at start$/, "");
+  noticeOnce(`client ${noticeKey}`, { title: "Error in a visitor's browser", tone: "warn", description: message,
     fields: [["Page", path], ["Where", props.source ? String(props.source) : null], ["Browser", device], ["Kind", props.kind ? String(props.kind) : null],
       // What the network answered for a part it keeps refusing (lib/missing-part.ts).
       ["Network said", props.detail ? String(props.detail) : null]] });

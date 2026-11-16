@@ -337,7 +337,12 @@ export class PanoramaLayer {
     sharpReady ??= prepareSharp();
     if (!shown) await sharpReady;
     if (graceMs > 0 && !this.loaded(sharp)) await Promise.race([sharpReady, wait(graceMs)]);
-    if (!this.loaded(preview) && !this.loaded(sharp)) throw new Error(`Unable to load the panorama at ${node.uuid}`);
+    if (!this.loaded(preview) && !this.loaded(sharp)) {
+      const status = typeof fetch === "function" && typeof window !== "undefined"
+        ? await fetch(sharp[0], { method: "HEAD", signal: AbortSignal.timeout?.(2500) }).then((r) => r.status, () => 0)
+        : 0;
+      throw new Error(`Unable to load the panorama at ${node.uuid}${status >= 400 ? ` (HTTP ${status})` : ""}`);
+    }
   }
 
   /**
